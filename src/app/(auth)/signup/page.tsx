@@ -1,7 +1,6 @@
 "use client";
 import type { Metadata } from "next";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { api } from "~/trpc/react";
 import { signIn } from "next-auth/react";
 // export const metadata: Metadata = {
@@ -13,12 +12,19 @@ import { signIn } from "next-auth/react";
 //using drizzle create a post request to create a user.
 
 export default function SignUp() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const createUser = api.user.createUser.useMutation({
+    onSuccess: async () => {
+      console.log("email", email);
+      await signIn("credentials", {
+        email: email,
+        password: password,
+        callbackUrl: "/dashboard",
+      });
+    },
     onError: (err) => {
       setError(err.message);
     },
@@ -27,21 +33,12 @@ export default function SignUp() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     createUser.mutate({ email, password });
-    try {
-      await signIn("credentials", {
-        email: email,
-        password: password,
-        redirect: false,
-      });
-      // Handle successful sign-in
-    } catch (error) {
-      // Handle errors
-    }
-    router.push("/dashboard");
   }
   return (
     <div className="container m-2 mx-auto max-w-md ">
-      <h2>Sign Up to Fournex</h2>
+      <h2 className="mb-4 text-2xl font-bold text-gray-900">
+        Sign Up to Fournex
+      </h2>
       <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
         <div>
           <label

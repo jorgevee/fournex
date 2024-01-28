@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { HiOutlineX, HiMenuAlt3 } from "react-icons/hi";
 import { IoMdClose } from "react-icons/io";
 const links = [
@@ -53,12 +53,13 @@ export default function Header() {
               <div className="lg:flex lg:items-center lg:justify-end lg:space-x-4">
                 {session ? (
                   <li className="text-center">
-                    <Link
+                    <button
                       className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-                      href="/api/auth/signout"
+                      // href="/api/auth/signout"
+                      onClick={() => signOut({ callbackUrl: "/" })}
                     >
                       Sign Out
-                    </Link>
+                    </button>
                   </li>
                 ) : (
                   <>

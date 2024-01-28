@@ -4,7 +4,7 @@ import {
   type DefaultSession,
   type NextAuthOptions,
 } from "next-auth";
-import DiscordProvider from "next-auth/providers/discord";
+import GoogleProvider from "next-auth/providers/google";
 // import Credentials from "next-auth/providers/credentials";
 import { api } from "~/trpc/server";
 import { env } from "~/env";
@@ -62,9 +62,9 @@ export const authOptions: NextAuthOptions = {
         return getUser;
       },
     }),
-    DiscordProvider({
-      clientId: env.DISCORD_CLIENT_ID,
-      clientSecret: env.DISCORD_CLIENT_SECRET,
+    GoogleProvider({
+      clientId: "YOUR_GOOGLE_CLIENT_ID",
+      clientSecret: "YOUR_GOOGLE_CLIENT_SECRET",
     }),
     /**
      * ...add more providers here.
