@@ -20,14 +20,28 @@ export function CreateUser() {
     },
   });
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    createUser.mutate({ email, password });
+    try {
+      await signIn("credentials", {
+        email: email,
+        password: password,
+        redirect: false,
+      });
+      // Handle successful sign-in
+    } catch (error) {
+      // Handle errors
+    }
+    router.push("/dashboard");
+  },
+  onError: (err) => {
+    setError(err.message);
+  },
+  }
+
   return (
-    <form
-      className="mt-8 space-y-6"
-      onSubmit={(e) => {
-        e.preventDefault();
-        createUser.mutate({ email, password });
-      }}
-    >
+    <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
       <div>
         <label
           htmlFor="email"
