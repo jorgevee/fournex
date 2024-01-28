@@ -11,7 +11,7 @@ export const userRouter = createTRPCRouter({
   getUser: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const user = await ctx.db.users.findFirst({
+      const user = await ctx.db.user.findFirst({
         where: { id: input.id },
       });
       return user;
@@ -61,7 +61,7 @@ export const userRouter = createTRPCRouter({
           email: input.email,
         },
       });
-      const pswd = logUser?.password as string;
+      const pswd = logUser?.password;
       const isValidPassword = await verify(pswd, input.password);
       if (!isValidPassword) {
         throw new TRPCError({

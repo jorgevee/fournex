@@ -54,11 +54,13 @@ export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       credentials: {
-        email: { label: "Email address", type: "email" },
-        password: { label: "Password", type: "password" },
+        email: { type: "email" },
+        password: { type: "password" },
       },
-      async authorize(credentials, req) {
-        const getUser = await api.user.loginUser.mutate(credentials);
+      async authorize(
+        credentials: { email: string; password: string } | undefined,
+      ) {
+        const getUser = await api.user.loginUser.mutate(credentials!);
         return getUser;
       },
     }),
