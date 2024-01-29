@@ -25,7 +25,7 @@ export default function SignUp() {
         callbackUrl: "/dashboard",
       });
     },
-    onError: (err: any) => {
+    onError: (err) => {
       setError(err.message);
     },
   });
