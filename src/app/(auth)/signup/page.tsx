@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { type FormEvent, useState } from "react";
 import { api } from "~/trpc/react";
 import { signIn } from "next-auth/react";
+import { TRPCClientError } from "@trpc/client";
 // export const metadata: Metadata = {
 //   title: "Sign Up - Fournex",
 //   description:
@@ -18,14 +19,13 @@ export default function SignUp() {
 
   const createUser = api.user.createUser.useMutation({
     onSuccess: async () => {
-      console.log("email", email);
       await signIn("credentials", {
         email: email,
         password: password,
         callbackUrl: "/dashboard",
       });
     },
-    onError: (err) => {
+    onError: (err: any) => {
       setError(err.message);
     },
   });
