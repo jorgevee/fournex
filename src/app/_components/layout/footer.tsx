@@ -1,7 +1,7 @@
 import Link from "next/link";
 export default function Footer() {
   return (
-    <footer className="bg-gray-800 p-6 text-white">
+    <footer className="bg-slate-800 p-6 text-white">
       <div className="container mx-auto flex flex-wrap items-center">
         <div className="w-full text-center md:w-1/4 md:text-left">
           <h2 className="mb-4 text-lg font-bold">About Us</h2>
@@ -15,7 +15,7 @@ export default function Footer() {
           <h2 className="mb-4 text-lg font-bold">Links</h2>
           <ul className="list-unstyled">
             <li>
-              <Link href="#" className="text-gray-400 hover:text-white">
+              <Link href="/" className="text-gray-400 hover:text-white">
                 Home
               </Link>
             </li>
@@ -30,7 +30,7 @@ export default function Footer() {
               </Link>
             </li>
             <li>
-              <Link href="#" className="text-gray-400 hover:text-white">
+              <Link href="/contact" className="text-gray-400 hover:text-white">
                 Contact
               </Link>
             </li>

@@ -16,84 +16,77 @@ function HeroSection() {
         <div className="grid items-center gap-4 md:gap-6">
           <div className="flex flex-col justify-center space-y-4 text-center">
             <div className="space-y-2">
-              <h1 className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-2xl font-bold tracking-tighter text-transparent sm:text-5xl xl:text-6xl/none">
-                Discover Our Unique Features
+              <h1 className="bg-gradient-to-r from-white to-gray-500 bg-clip-text text-2xl font-bold tracking-tighter text-transparent sm:text-5xl xl:text-6xl">
+                Meet Our Intelligent AI Agents
               </h1>
-              <p className="mx-auto max-w-[600px] text-zinc-200 md:text-xl dark:text-zinc-100">
-                Our features are designed to enhance your productivity and
-                streamline your workflow.
+              <p className="mx-auto max-w-[600px] text-zinc-200 md:text-xl">
+                Our AI agents are powered by state-of-the-art language models to
+                provide helpful, personalized assistance.
               </p>
             </div>
             <div className="mx-auto w-full max-w-full space-y-4">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-8">
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <InboxIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <InboxIcon className="h-6 w-6 text-white opacity-75" />
                   </div>
-                  <h2 className="text-xl font-bold text-white">Smart Inbox</h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    Our Smart Inbox feature helps you manage your emails
-                    efficiently by prioritizing important emails.
+                  <h2 className="text-xl font-bold text-white">
+                    Conversational
+                  </h2>
+                  <p className="text-zinc-200">
+                    Our agents can understand natural language and carry on
+                    helpful conversations.
                   </p>
                 </div>
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <MergeIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <LockIcon className="h-6 w-6 text-white opacity-75" />
                   </div>
-                  <h2 className="text-xl font-bold text-white">
-                    Seamless Integration
-                  </h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    Seamless Integration allows you to connect with your
-                    favorite apps and services without leaving your inbox.
+                  <h2 className="text-xl font-bold text-white">Intelligent</h2>
+                  <p className="text-zinc-200">
+                    With advanced language models, our agents can reason,
+                    recommend, and explain.
                   </p>
                 </div>
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <SettingsIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <MergeIcon className="h-6 w-6 text-white opacity-75" />
                   </div>
-                  <h2 className="text-xl font-bold text-white">
-                    Advanced Customization
-                  </h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    With Advanced Customization, you can personalize your email
-                    client to suit your preferences and work style.
+                  <h2 className="text-xl font-bold text-white">Secure</h2>
+                  <p className="text-zinc-200">
+                    We use state-of-the-art techniques to keep your data safe
+                    and private.
                   </p>
                 </div>
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <SearchIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <SearchIcon className="h-6 w-6 text-white opacity-75" />{" "}
                   </div>
-                  <h2 className="text-xl font-bold text-white">
-                    Powerful Search
-                  </h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    Our Powerful Search feature allows you to find any email,
-                    contact, or file in seconds.
+                  <h2 className="text-xl font-bold text-white">Personalized</h2>{" "}
+                  <p className="text-zinc-200">
+                    Our agents get to know you over time to provide a more
+                    tailored experience.
                   </p>
                 </div>
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <LockIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <SearchIcon className="h-6 w-6 text-white opacity-75" />{" "}
                   </div>
-                  <h2 className="text-xl font-bold text-white">
-                    Reliable Security
-                  </h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    With Reliable Security, your data is always safe and
-                    protected.
+                  <h2 className="text-xl font-bold text-white">Customizable</h2>{" "}
+                  <p className="text-zinc-200">
+                    Customize your agent&apos;s abilities and knowledge based on
+                    your needs.
                   </p>
                 </div>
                 <div className="flex flex-col items-center space-y-2 rounded-lg border-gray-800 p-4">
                   <div className="rounded-full bg-black bg-opacity-50 p-2">
-                    <MergeIcon className="mb-2 h-6 w-6 text-white opacity-75" />
+                    <SettingsIcon className="h-6 w-6 text-white opacity-75" />{" "}
                   </div>
                   <h2 className="text-xl font-bold text-white">
-                    Easy Collaboration
+                    Task Automation
                   </h2>
-                  <p className="text-zinc-200 dark:text-zinc-100">
-                    Easy Collaboration allows you to share and edit documents
-                    with your team in real time.
+                  <p className="text-zinc-200">
+                    Use our agents to automate repetitive tasks and workflows.{" "}
                   </p>
                 </div>
               </div>
@@ -221,10 +214,10 @@ function HeroTop() {
           <div className="flex flex-col justify-center space-y-4">
             <div className="space-y-2">
               <h1 className="text-3xl font-bold tracking-tighter sm:text-5xl xl:text-6xl/none">
-                Welcome to our agent client
+                Welcome to our AI agent client
               </h1>
               <p className="max-w-[600px] text-zinc-500 md:text-xl dark:text-zinc-400">
-                Manage all your emails in one place. Securely and efficiently.
+                Get on our waitlist today!
               </p>
             </div>
             <div className="w-full max-w-sm space-y-2">

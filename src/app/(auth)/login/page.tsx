@@ -30,13 +30,22 @@ export default function LoginPage({ searchParams }: PageProps) {
     setInputs((values) => ({ ...values, [name]: value }));
   };
 
+  const [loading, setLoading] = useState("");
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    await signIn("credentials", {
-      email: inputs.email,
-      password: inputs.password,
-      callbackUrl: "/dashboard",
-    });
+    setLoading("Signing In");
+    try {
+      await signIn("credentials", {
+        email: inputs.email,
+        password: inputs.password,
+        callbackUrl: "/dashboard",
+      });
+    } catch (error) {
+      // Handle error, if needed
+    } finally {
+      setLoading("Welcome");
+    }
   };
   return (
     <div className="flex min-h-full flex-1 flex-col justify-center px-6 py-12 lg:px-8">
@@ -95,9 +104,13 @@ export default function LoginPage({ searchParams }: PageProps) {
               Sign in
             </button>
           </div>
-          {searchParams.error && (
+          {loading ? (
+            <p className="text-center capitalize text-indigo-600">
+              Signing in...
+            </p>
+          ) : searchParams.error ? (
             <p className="text-center capitalize text-red-600">Login failed.</p>
-          )}
+          ) : null}
         </form>
       </div>
     </div>
