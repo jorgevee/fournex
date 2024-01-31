@@ -48,7 +48,7 @@ export default async function Component() {
               <p className="text-sm text-gray-500 md:text-base lg:text-lg xl:text-xl dark:text-gray-400">
                 At Fournex, our primary objective is to pioneer the development
                 of powerful and productive AI Autonomous agents. We firmly
-                believe that the ongoing research and advancement as ewll as
+                believe that the ongoing research and advancement as well as
                 frameworks such as DSPy, LangGraph (LangChain) and LLamaIndex
                 model optimization are pivotal in creating robust and secure
                 language model applications. Our focus is on devising techniques
@@ -58,7 +58,7 @@ export default async function Component() {
             </div>
             <div className="flex flex-col gap-2 md:flex-row">
               <Link
-                className="inline-flex h-10 items-center justify-center rounded-md bg-gray-200 px-8 text-sm font-medium text-white shadow transition-colors hover:bg-gray-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-gray-50/90 dark:focus-visible:ring-gray-300"
+                className="inline-flex h-10 items-center justify-center rounded-md bg-gray-200 px-8 text-sm font-medium text-white shadow transition-colors hover:bg-gray-900 hover:text-black focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-gray-50/90 dark:focus-visible:ring-gray-300"
                 href="/"
               >
                 Back to Home

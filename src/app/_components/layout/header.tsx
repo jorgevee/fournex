@@ -11,10 +11,10 @@ const links = [
 
 export default function Header() {
   const { data: session, status } = useSession();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   const handleMobileMenuToggle = () => {
-    setMobileMenuOpen(!mobileMenuOpen);
+    setIsOpen(!isOpen);
   };
 
   return (
@@ -28,16 +28,12 @@ export default function Header() {
             className="block focus:outline-none lg:hidden"
             onClick={handleMobileMenuToggle}
           >
-            {mobileMenuOpen ? (
-              <IoMdClose size={24} />
-            ) : (
-              <HiMenuAlt3 size={24} />
-            )}
+            {isOpen ? <IoMdClose size={24} /> : <HiMenuAlt3 size={24} />}
           </button>
           <nav className="hidden w-full lg:block">
             <ul
               className={`justify-end transition-all duration-300 lg:flex lg:items-center lg:space-x-4 ${
-                mobileMenuOpen ? "block" : "hidden"
+                isOpen ? "block" : "hidden"
               }`}
             >
               {links.map((link, index) => (
@@ -85,9 +81,8 @@ export default function Header() {
             </ul>
           </nav>
         </div>
-
         <nav className="lg:hidden">
-          {mobileMenuOpen && (
+          {isOpen && (
             <div className="animate-open-menu absolute left-0 top-16 z-10 w-full origin-top">
               <div className="rounded-lg bg-slate-800 p-4">
                 <button
@@ -110,12 +105,12 @@ export default function Header() {
 
                 {session ? (
                   <div className="mt-4 text-center">
-                    <Link
+                    <button
                       className="block rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-                      href="/api/auth/signout"
+                      onClick={() => signOut({ callbackUrl: "/" })}
                     >
                       Sign Out
-                    </Link>
+                    </button>
                   </div>
                 ) : (
                   <div className="mt-4 space-y-2 text-center">
