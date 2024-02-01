@@ -48,15 +48,21 @@ export default function Header() {
               ))}
               <div className="lg:flex lg:items-center lg:justify-end lg:space-x-4">
                 {session ? (
-                  <li className="text-center">
+                  <div className="flex space-x-4">
+                    <Link
+                      href="/dashboard"
+                      className="rounded bg-slate-400 px-4 py-2 font-bold text-white hover:bg-slate-600"
+                    >
+                      Dashboard
+                    </Link>
+
                     <button
-                      className="rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-700"
-                      // href="/api/auth/signout"
+                      className="rounded bg-red-500 px-4 py-2 font-bold text-white hover:bg-red-700"
                       onClick={() => signOut({ callbackUrl: "/" })}
                     >
                       Sign Out
                     </button>
-                  </li>
+                  </div>
                 ) : (
                   <>
                     <li className="text-center">
@@ -96,6 +102,7 @@ export default function Header() {
                       <Link
                         href={link.href}
                         className="block py-2 text-white hover:text-gray-300"
+                        onClick={() => handleMobileMenuToggle}
                       >
                         {link.text}
                       </Link>
@@ -104,9 +111,16 @@ export default function Header() {
                 </ul>
 
                 {session ? (
-                  <div className="mt-4 text-center">
+                  <div className="flex space-x-4">
+                    <Link
+                      href="/dashboard"
+                      className="rounded bg-slate-400 px-4 py-2 font-bold text-white hover:bg-slate-600"
+                    >
+                      Dashboard
+                    </Link>
+
                     <button
-                      className="block rounded-lg bg-blue-500 px-4 py-2 font-semibold text-white hover:bg-blue-700"
+                      className="rounded bg-red-500 px-4 py-2 font-bold text-white hover:bg-red-700"
                       onClick={() => signOut({ callbackUrl: "/" })}
                     >
                       Sign Out
