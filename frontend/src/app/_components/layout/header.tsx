@@ -102,7 +102,7 @@ export default function Header() {
                       <Link
                         href={link.href}
                         className="block py-2 text-white hover:text-gray-300"
-                        onClick={() => handleMobileMenuToggle}
+                        onClick={handleMobileMenuToggle}
                       >
                         {link.text}
                       </Link>
@@ -131,6 +131,7 @@ export default function Header() {
                     <Link
                       className="block rounded-lg bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200"
                       href="/login"
+                      onClick={handleMobileMenuToggle}
                     >
                       Log In
                     </Link>

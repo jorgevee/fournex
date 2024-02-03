@@ -1,4 +1,10 @@
 import Image from "next/image";
+import type { Metadata } from "next/types";
+
+export const metadata: Metadata = {
+  title: "Create AI Agents - Fournex",
+  description: "Create AI autonomus agents using Fournex",
+};
 
 export default function Main() {
   return (
