@@ -5,6 +5,13 @@
  */
 import Image from "next/image";
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "About Us - Fournex",
+  description:
+    "Learn more about Fournex, an AI startup focused on developing Autonomous Agents.",
+};
 
 export default async function Component() {
   return (
@@ -58,10 +65,12 @@ export default async function Component() {
             </div>
             <div className="flex flex-col gap-2 md:flex-row">
               <Link
-                className="inline-flex h-10 items-center justify-center rounded-md bg-gray-200 px-8 text-sm font-medium text-white shadow transition-colors hover:bg-gray-900 hover:text-black focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50 dark:bg-gray-50 dark:text-gray-900 dark:hover:bg-gray-50/90 dark:focus-visible:ring-gray-300"
+                className="group relative mb-2 me-2 inline-flex items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-purple-600 to-blue-500 p-0.5 text-sm font-medium text-gray-900 hover:text-white focus:outline-none focus:ring-4 focus:ring-blue-300 group-hover:from-purple-600 group-hover:to-blue-500 dark:text-white dark:focus:ring-blue-800"
                 href="/"
               >
-                Back to Home
+                <span className="relative rounded-md bg-white px-5 py-2.5 transition-all duration-75 ease-in group-hover:bg-opacity-0 dark:bg-gray-900">
+                  Back To Home
+                </span>
               </Link>
             </div>
           </div>

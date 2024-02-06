@@ -1,5 +1,12 @@
 import ContactForm from "./contactForm";
 
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Contact Us',
+  description: 'Contact Fournex for any questions',
+};
+
 const ContactPage = async () => {
   return (
     <div className="flex h-screen items-center justify-center bg-gray-100">
