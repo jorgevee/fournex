@@ -1,10 +1,10 @@
 import ContactForm from "./contactForm";
 
-import type { Metadata } from 'next';
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: 'Contact Us',
-  description: 'Contact Fournex for any questions',
+  title: "Contact Us",
+  description: "Contact Fournex for any questions",
 };
 
 const ContactPage = async () => {
