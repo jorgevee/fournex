@@ -28,14 +28,14 @@ Fournex is a full-stack application that utilizes large language models (LLMs) a
 2. Install dependencies for the client
 
    ```bash
-   cd fournex
+   cd fournex/frontend
    npm install
    ```
 
 3. Install dependencies for the server
 
    ```bash
-   cd server
+   cd backend
    pip install -r requirements.txt
    ```
 
@@ -43,6 +43,8 @@ Fournex is a full-stack application that utilizes large language models (LLMs) a
 
    - Create a new Postgres database and user
    - Update the `DATABASE_URL` environment variable in `.env` file
+
+   We recommend using Supabase for managing your Postgres database due to its ease of use and powerful features.
 
 5. Run migrations
 
