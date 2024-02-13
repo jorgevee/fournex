@@ -12,7 +12,7 @@ Fournex is a full-stack application that utilizes large language models (LLMs) a
 
 - Next.js with app router (client)
 - Tailwind (CSS)
-- Django Rest (API)
+- FastAPI (API)
 - LangChain (agent building with LLMs)
 - Postgres (database)
 - tRPC
@@ -78,6 +78,15 @@ Fournex is a full-stack application that utilizes large language models (LLMs) a
 - To use LangGraph, you can create a new `Graph` instance and add `Chain` actors to it.
 - Each `Chain` actor represents a step in the computation and can be connected to other actors to form a cycle.
 - You can then execute the graph and retrieve the results.
+  -This project uses LangServe to expose LangChain runnables and chains as a REST API, powered by the fantastic FastAPI framework. Here's an overview of how it works:
+
+## LangServe & FastAPI Integration
+
+- LangServe seamlessly integrates with FastAPI, allowing you to deploy your LangChain logic as endpoints with ease. This means:
+
+  Automatic validation: Input and output schemas are automatically inferred from your LangChain objects, ensuring correct data format and providing rich error messages during API calls.
+  Comprehensive API docs: Enjoy comprehensive API documentation generated with JSONSchema and Swagger, making it easy for developers to understand and utilize your endpoints.
+  Flexible access: Choose from various endpoints like /invoke/, /batch/, and /stream/ to handle different request types and concurrent calls efficiently.
 
 ## Contributing
 
