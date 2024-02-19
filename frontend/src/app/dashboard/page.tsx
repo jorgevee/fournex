@@ -1,5 +1,10 @@
 import { getServerAuthSession } from "~/server/auth";
 
+export const metadata = {
+  title: "Dashboard",
+  description: "Dashboard page",
+};
+
 export default async function Dashboard() {
   const session = await getServerAuthSession();
 

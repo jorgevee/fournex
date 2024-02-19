@@ -19,10 +19,24 @@ const sidebarLinks = [
 
 export default function DashBoardLayout({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <main className="flex-grow">
-        <aside className="w-full flex-shrink-0 bg-gray-200 px-4 py-6 md:w-64">
+        {/* Toggle button on left for mobile */}
+        <button
+          className={`fixed left-4 top-4 z-50 md:hidden ${
+            isOpen ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={() => setIsOpen(!isOpen)}
+        >
+          Toggle Sidebar
+        </button>
+        <aside
+          className={`w-full bg-gray-200 px-4 py-6 md:w-64 ${
+            isOpen ? "block" : "hidden"
+          }`}
+        >
           <ul className="space-y-4">
             {sidebarLinks.map((link) => (
               <li
@@ -41,6 +55,13 @@ export default function DashBoardLayout({ children }: { children: ReactNode }) {
         </aside>
         <div className="overflow-auto bg-white p-4">{children}</div>
       </main>
+      {/* Hide button on larger screens */}
+      <button
+        className="right-4 top-4 z-50 hidden md:fixed"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        Toggle Sidebar
+      </button>
     </div>
   );
 }
