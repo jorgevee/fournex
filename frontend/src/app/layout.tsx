@@ -33,8 +33,8 @@ export default function RootLayout({
             <Footer />
           </TRPCReactProvider>
         </NextAuthProvider>
-        <GoogleAnalytics gaId="G-00T268ELW1" />
       </body>
+      <GoogleAnalytics gaId="G-00T268ELW1" />
     </html>
   );
 }
