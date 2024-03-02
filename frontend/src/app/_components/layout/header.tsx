@@ -69,6 +69,7 @@ export default function Header() {
                       <Link
                         className="mr-2 rounded-lg bg-white px-4 py-2 font-semibold text-black hover:bg-gray-200"
                         href="/login"
+                        onClick={handleMobileMenuToggle}
                       >
                         Log In
                       </Link>
@@ -77,6 +78,7 @@ export default function Header() {
                       <Link
                         className="rounded-lg bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-500"
                         href="/signup"
+                        onClick={handleMobileMenuToggle}
                       >
                         Sign Up
                       </Link>

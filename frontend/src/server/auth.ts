@@ -54,14 +54,18 @@ export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
       credentials: {
-        email: { type: "email" },
-        password: { type: "password" },
+        email: { type: "email", required: true },
+        password: { type: "password", required: true },
       },
       async authorize(
-        credentials: { email: string; password: string } | undefined,
+        credentials
       ) {
-        const getUser = await api.user.loginUser.mutate(credentials!);
-        return getUser;
+        if (!credentials) {
+          return null;
+        }
+          const getUser = await api.user.loginUser.mutate(credentials);
+          return getUser;
+        
       },
     }),
     GoogleProvider({

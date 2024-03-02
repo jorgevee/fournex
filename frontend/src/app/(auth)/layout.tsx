@@ -1,10 +1,7 @@
 import { getServerAuthSession } from "~/server/auth";
 import { redirect } from "next/navigation";
 
-export const metadata = {
-  title: "Fournex Auth",
-  description: "...",
-};
+
 export default async function AuthLayout({
   children,
 }: {

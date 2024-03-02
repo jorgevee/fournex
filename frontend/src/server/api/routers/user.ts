@@ -61,10 +61,13 @@ export const userRouter = createTRPCRouter({
           email: input.email,
         },
       });
-      if (!logUser) {
-        return null;
+      const pswd = logUser?.password;
+      if (!pswd) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Invalid Email or Password",
+        });
       }
-      const pswd = logUser.password;
       const isValidPassword = await verify(pswd, input.password);
       if (!isValidPassword) {
         throw new TRPCError({

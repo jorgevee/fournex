@@ -3,10 +3,11 @@ import type { Metadata } from "next/types";
 
 export const metadata: Metadata = {
   title: "Create AI Agents - Fournex",
-  description: "Create AI autonomus agents using Fournex",
+  description: "Create AI autonomus agents using Fournex. Build stateful, multi-agent applications with LLMs.",
+  
 };
 
-export default function Main() {
+export default async function Main() {
   return (
     <main>
       <HeroTop />
