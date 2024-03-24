@@ -64,12 +64,23 @@ export default async function Component() {
               </p>
             </div>
             <div className="flex flex-col gap-2 md:flex-row">
-              <Link
-                className="group relative mb-2 me-2 inline-flex items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-purple-600 to-blue-500 p-2 text-sm font-medium text-gray-900 transition duration-300 ease-in-out hover:scale-105 hover:text-white hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-300 group-hover:from-purple-600 group-hover:to-blue-500 dark:text-white dark:focus:ring-blue-800"
-                href="/"
-              >
-                Back To Home
-              </Link>
+                  
+<Link 
+  className="
+    inline-flex items-center justify-center 
+    rounded-lg bg-blue-500 
+    p-2 text-sm font-medium text-white 
+    transition duration-300 ease-in-out 
+    hover:bg-blue-600 focus:bg-blue-700 
+    focus:outline-none focus:ring-2 focus:ring-blue-300
+  " 
+  href="/"
+>
+  <span className="mr-2">Back To Home</span>
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+</Link>
+
+    
             </div>
           </div>
         </div>
