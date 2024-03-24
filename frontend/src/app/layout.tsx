@@ -4,7 +4,6 @@ import { Inter } from "next/font/google";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import Header from "./_components/layout/header";
 import Footer from "./_components/layout/footer";
-import NextAuthProvider from "./_context/ClientAuth";
 import { TRPCReactProvider } from "~/trpc/react";
 
 const inter = Inter({
