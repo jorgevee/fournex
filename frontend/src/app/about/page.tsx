@@ -64,7 +64,6 @@ export default async function Component() {
               </p>
             </div>
             <div className="flex flex-col gap-2 md:flex-row">
-                  
 <Link 
   className="
     inline-flex items-center justify-center 
