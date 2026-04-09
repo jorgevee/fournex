@@ -1,0 +1,664 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Autopilot Telemetry Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "timestamp_ns",
+    "pid",
+    "tid",
+    "job_id",
+    "run_id",
+    "event_type",
+    "event_source",
+    "level",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "gpu_sample",
+        "step_start",
+        "step_end",
+        "phase_span",
+        "dataloader_span",
+        "memcpy_span",
+        "shape_snapshot",
+        "sync_wait",
+        "profiler_window",
+        "system_info",
+        "warning_annotation"
+      ]
+    },
+    "event_source": {
+      "type": "string",
+      "enum": [
+        "python_sdk",
+        "native_engine"
+      ]
+    },
+    "gpu_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "step_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "span_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "parent_span_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "duration_ns": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "level": {
+      "type": "string",
+      "enum": [
+        "debug",
+        "info",
+        "warning",
+        "error"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "gpu_sample"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/gpu_sample_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "step_start"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/step_start_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "step_end"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/step_end_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "phase_span"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_ns"
+        ],
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/phase_span_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "dataloader_span"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_ns"
+        ],
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/dataloader_span_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "memcpy_span"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_ns"
+        ],
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/memcpy_span_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "shape_snapshot"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/shape_snapshot_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "sync_wait"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_ns"
+        ],
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/sync_wait_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "profiler_window"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/profiler_window_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "system_info"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/system_info_payload"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "warning_annotation"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/warning_annotation_payload"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "gpu_sample_payload": {
+      "type": "object",
+      "required": [
+        "utilization_gpu_pct",
+        "utilization_mem_pct",
+        "memory_used_bytes",
+        "memory_total_bytes"
+      ],
+      "properties": {
+        "utilization_gpu_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "utilization_mem_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "memory_used_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "memory_total_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "temperature_c": {
+          "type": "number"
+        },
+        "power_w": {
+          "type": "number"
+        },
+        "sm_clock_mhz": {
+          "type": "number"
+        },
+        "mem_clock_mhz": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "step_start_payload": {
+      "type": "object",
+      "required": [
+        "step_kind"
+      ],
+      "properties": {
+        "step_kind": {
+          "type": "string",
+          "enum": [
+            "train",
+            "eval",
+            "inference"
+          ]
+        },
+        "global_step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "step_end_payload": {
+      "type": "object",
+      "required": [
+        "step_kind",
+        "status"
+      ],
+      "properties": {
+        "step_kind": {
+          "type": "string",
+          "enum": [
+            "train",
+            "eval",
+            "inference"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "cancelled"
+          ]
+        },
+        "global_step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "throughput_items_per_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "loss": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "phase_span_payload": {
+      "type": "object",
+      "required": [
+        "phase_name"
+      ],
+      "properties": {
+        "phase_name": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataloader_span_payload": {
+      "type": "object",
+      "required": [
+        "stage"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "next",
+            "collate",
+            "transfer_ready"
+          ]
+        },
+        "num_workers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefetch_factor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pinned_memory": {
+          "type": "boolean"
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "memcpy_span_payload": {
+      "type": "object",
+      "required": [
+        "copy_kind"
+      ],
+      "properties": {
+        "copy_kind": {
+          "type": "string",
+          "enum": [
+            "h2d",
+            "d2h",
+            "d2d"
+          ]
+        },
+        "src_device": {
+          "type": "string"
+        },
+        "dst_device": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "non_blocking": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "shape_snapshot_payload": {
+      "type": "object",
+      "required": [
+        "batch_size",
+        "shapes"
+      ],
+      "properties": {
+        "batch_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shapes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "dtypes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "precision_mode": {
+          "type": "string"
+        },
+        "is_training": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sync_wait_payload": {
+      "type": "object",
+      "required": [
+        "wait_kind"
+      ],
+      "properties": {
+        "wait_kind": {
+          "type": "string",
+          "enum": [
+            "cuda_synchronize",
+            "stream_synchronize",
+            "item",
+            "barrier",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "profiler_window_payload": {
+      "type": "object",
+      "required": [
+        "window_state"
+      ],
+      "properties": {
+        "window_state": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "started",
+            "completed",
+            "exported"
+          ]
+        },
+        "start_step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_step": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trace_path": {
+          "type": "string"
+        },
+        "recorded_ops": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "system_info_payload": {
+      "type": "object",
+      "required": [
+        "hostname",
+        "platform"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "cpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "gpu_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "driver_version": {
+          "type": "string"
+        },
+        "cuda_runtime_version": {
+          "type": "string"
+        },
+        "python_version": {
+          "type": "string"
+        },
+        "pytorch_version": {
+          "type": "string"
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "warning_annotation_payload": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "object"
+        },
+        "suggested_action": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

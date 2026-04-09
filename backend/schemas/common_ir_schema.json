@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Common Performance IR",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "job",
+    "workload",
+    "events",
+    "metrics",
+    "annotations"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "job": {
+      "type": "object",
+      "required": [
+        "job_id",
+        "workload_class",
+        "status"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "workload_class": {
+          "type": "string",
+          "enum": [
+            "training",
+            "inference",
+            "eval",
+            "preprocessing",
+            "unknown"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "workload": {
+      "type": "object",
+      "properties": {
+        "model_family": {
+          "type": "string",
+          "enum": [
+            "transformer",
+            "cnn",
+            "recsys",
+            "diffusion",
+            "unknown"
+          ]
+        },
+        "model_name": {
+          "type": "string"
+        },
+        "precision_mode": {
+          "type": "string"
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence_length": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/metric"
+      }
+    },
+    "annotations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/annotation"
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "event": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "event_family",
+        "event_type",
+        "ts_start_ns",
+        "ts_end_ns",
+        "duration_ns",
+        "source",
+        "attrs"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_family": {
+          "type": "string",
+          "enum": [
+            "kernel",
+            "memory",
+            "cpu",
+            "data_pipeline",
+            "distributed",
+            "metric",
+            "annotation"
+          ]
+        },
+        "event_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ts_start_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts_end_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clock_domain": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": ["string", "null"]
+        },
+        "process_id": {
+          "type": ["integer", "null"]
+        },
+        "thread_id": {
+          "type": ["integer", "null"]
+        },
+        "device_id": {
+          "type": ["string", "null"]
+        },
+        "step_id": {
+          "type": ["string", "null"]
+        },
+        "span_id": {
+          "type": ["string", "null"]
+        },
+        "parent_span_id": {
+          "type": ["string", "null"]
+        },
+        "correlation_id": {
+          "type": ["string", "null"]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "metric": {
+      "type": "object",
+      "required": [
+        "metric_id",
+        "metric_name",
+        "metric_unit",
+        "value",
+        "ts_ns",
+        "source",
+        "attrs"
+      ],
+      "properties": {
+        "metric_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "number"
+        },
+        "ts_ns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clock_domain": {
+          "type": "string"
+        },
+        "host_id": {
+          "type": ["string", "null"]
+        },
+        "device_id": {
+          "type": ["string", "null"]
+        },
+        "step_id": {
+          "type": ["string", "null"]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "annotation_id",
+        "annotation_type",
+        "target_id",
+        "label",
+        "score",
+        "source",
+        "attrs"
+      ],
+      "properties": {
+        "annotation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotation_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attrs": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
