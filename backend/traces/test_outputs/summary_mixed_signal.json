@@ -1,0 +1,118 @@
+{
+  "bottlenecks": [
+    {
+      "evidence": {
+        "average_gpu_utilization_pct": 34.0,
+        "utilization_instability_pct": 2.0
+      },
+      "label": "underutilized_gpu",
+      "score": 0.66
+    },
+    {
+      "evidence": {
+        "avg_dataloader_fraction": 0.26,
+        "dominant_stall_type": "input_bound"
+      },
+      "label": "input_bound",
+      "score": 0.26
+    },
+    {
+      "evidence": {
+        "avg_h2d_fraction": 0.18,
+        "steps_with_h2d": 2
+      },
+      "label": "copy_bound",
+      "score": 0.18
+    }
+  ],
+  "diagnosis": {
+    "confidence": {
+      "level": "high",
+      "reason": "underutilized_gpu leads the ranking with a score gap of 0.4, but other signals remain present.",
+      "score": 0.76
+    },
+    "dominant_stall_type": "input_bound",
+    "evidence": {
+      "average_gpu_utilization_pct": 34.0,
+      "utilization_instability_pct": 2.0
+    },
+    "primary_bottleneck": "underutilized_gpu",
+    "recommendations": [
+      "Increase batch size if memory allows.",
+      "Look for small kernels or fragmented execution.",
+      "Use profiler windows to confirm launch overhead or input stalls."
+    ],
+    "secondary_bottlenecks": [
+      "input_bound",
+      "copy_bound"
+    ],
+    "why": [
+      "Average GPU utilization is 34.0%.",
+      "Run summary dominant stall type is input_bound."
+    ],
+    "why_not_others": [
+      "input_bound also triggered with score 0.260.",
+      "copy_bound also triggered with score 0.180.",
+      "Run summary stall type is input_bound, which does not exactly match the top-ranked diagnosis."
+    ]
+  },
+  "event_count": 16,
+  "per_step": [
+    {
+      "backward_time_ns": 18,
+      "batch_size": 0,
+      "dataloader_wait_time_ns": 28,
+      "forward_time_ns": 20,
+      "gpu_active_fraction_proxy": 0.43,
+      "h2d_copy_time_ns": 19,
+      "optimizer_time_ns": 5,
+      "profiler_windows_exported": 0,
+      "sequence_length": null,
+      "shape_changed": false,
+      "shape_signature": null,
+      "status": "ok",
+      "step_id": 1,
+      "step_kind": "train",
+      "step_wall_time_ns": 100,
+      "sync_wait_time_ns": 0
+    },
+    {
+      "backward_time_ns": 18,
+      "batch_size": 0,
+      "dataloader_wait_time_ns": 24,
+      "forward_time_ns": 21,
+      "gpu_active_fraction_proxy": 0.44,
+      "h2d_copy_time_ns": 17,
+      "optimizer_time_ns": 5,
+      "profiler_windows_exported": 0,
+      "sequence_length": null,
+      "shape_changed": false,
+      "shape_signature": null,
+      "status": "ok",
+      "step_id": 2,
+      "step_kind": "train",
+      "step_wall_time_ns": 100,
+      "sync_wait_time_ns": 0
+    }
+  ],
+  "run_summary": {
+    "average_gpu_utilization_pct": 34.0,
+    "average_memory_utilization_pct": 37.5,
+    "dominant_stall_type": "input_bound",
+    "memory_pressure_peak_ratio": 0.46,
+    "profiler_windows_exported": 0,
+    "shape_volatility_ratio": 0.0,
+    "step_time_avg_ns": 100,
+    "step_time_max_ns": 100,
+    "throughput_steps_per_sec": 10000000.0,
+    "utilization_instability_pct": 2.0
+  },
+  "scope": {
+    "name": "run",
+    "step_ids": [
+      1,
+      2
+    ]
+  },
+  "step_count": 2
+}

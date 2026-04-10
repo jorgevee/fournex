@@ -16,7 +16,23 @@ from .sdk import (
     shutdown,
 )
 from .dataloader import InstrumentedDataLoader, instrument_dataloader
-from .analysis import classify_bottlenecks, derive_run_summary, derive_step_metrics, summarize_run
+from .analysis import (
+    build_diagnosis_result,
+    classify_bottlenecks,
+    derive_run_summary,
+    derive_step_metrics,
+    select_steady_state_step_ids,
+    summarize_run,
+    summarize_run_with_steady_state,
+    summarize_steady_state,
+    summarize_step_scope,
+)
+from .common_ir_analysis import (
+    derive_ir_bottleneck_annotations,
+    derive_ir_run_summary,
+    derive_ir_step_summaries,
+    summarize_ir_run,
+)
 from .common_ir import (
     AnnotationRecord,
     BOTTLENECK_CLASSES,
@@ -31,8 +47,21 @@ from .common_ir import (
     WorkloadInfo,
     validate_run_dict,
 )
+from .common_ir_validators import (
+    semantic_warnings_for_run,
+    validate_annotation_record,
+    validate_event_record,
+    validate_metric_record,
+    validate_run_payload,
+    validate_run_record,
+)
 from .cuda_timers import time_memcpy, time_phase, time_region
-from .storage import persist_local_trace, persist_run_artifacts, persist_run_summary
+from .storage import (
+    persist_local_trace,
+    persist_run_artifacts,
+    persist_run_summary,
+    persist_run_with_steady_state_summary,
+)
 from .profiler import (
     ProfilerSchedule,
     configure_sampled_profiler,
@@ -47,6 +76,8 @@ from .pytorch_profiler_ir import (
     map_pytorch_profiler_to_ir,
 )
 from .nvml_ir import NvmlSampleRecord, map_nvml_sample_to_ir
+from .distributed_ir import DistributedCommRecord, map_distributed_record_to_ir
+from .data_pipeline_ir import DataPipelineRecord, map_data_pipeline_record_to_ir
 from .step_context import phase, step_context
 from .shapes import (
     describe_batch,
@@ -59,6 +90,8 @@ from .shapes import (
 __all__ = [
     "AnnotationRecord",
     "BOTTLENECK_CLASSES",
+    "DataPipelineRecord",
+    "DistributedCommRecord",
     "EVENT_LEVELS",
     "EVENT_FAMILIES",
     "EVENT_SOURCES",
@@ -78,9 +111,13 @@ __all__ = [
     "WORKLOAD_CLASSES",
     "WorkloadInfo",
     "begin_span",
+    "build_diagnosis_result",
     "build_runtime_event",
     "classify_bottlenecks",
     "clear_local_events",
+    "derive_ir_bottleneck_annotations",
+    "derive_ir_run_summary",
+    "derive_ir_step_summaries",
     "describe_batch",
     "derive_run_summary",
     "derive_step_metrics",
@@ -97,15 +134,23 @@ __all__ = [
     "profiler_step_end",
     "profiler_step_start",
     "profiler_window",
+    "select_steady_state_step_ids",
     "shutdown",
     "phase",
     "map_pytorch_profiler_to_ir",
     "map_nvml_sample_to_ir",
+    "map_distributed_record_to_ir",
+    "map_data_pipeline_record_to_ir",
     "persist_local_trace",
     "persist_run_artifacts",
     "persist_run_summary",
+    "persist_run_with_steady_state_summary",
     "step_context",
     "summarize_run",
+    "summarize_run_with_steady_state",
+    "summarize_steady_state",
+    "summarize_step_scope",
+    "summarize_ir_run",
     "extract_shapes",
     "infer_batch_size",
     "infer_sequence_length",
@@ -114,4 +159,10 @@ __all__ = [
     "time_phase",
     "time_region",
     "validate_run_dict",
+    "validate_annotation_record",
+    "validate_event_record",
+    "validate_metric_record",
+    "validate_run_payload",
+    "validate_run_record",
+    "semantic_warnings_for_run",
 ]

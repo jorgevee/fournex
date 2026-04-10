@@ -62,3 +62,59 @@ Each classification carries:
 * `label`
 * `score`
 * `evidence`
+
+## Diagnosis result
+
+The stored run summary now includes a thin diagnosis contract built from the ranked bottleneck list.
+
+Fields:
+
+* `primary_bottleneck`
+* `secondary_bottlenecks`
+* `confidence`
+* `evidence`
+* `why`
+* `why_not_others`
+* `recommendations`
+* `dominant_stall_type`
+
+Notes:
+
+* `bottlenecks` remains the raw ranked rules output for tuning and debugging.
+* `diagnosis` is the more stable user-facing summary shape for downstream API or UI use.
+
+## Example artifact
+
+A concrete stored summary example lives in `schemas/derived_summary_example.json`.
+
+This example shows:
+
+* a minimal `per_step` section
+* the aggregate `run_summary`
+* the raw ranked `bottlenecks` list
+* the user-facing `diagnosis` object derived from that ranking
+
+## Combined run plus steady-state artifact
+
+Phase 8 also supports a combined report that carries both whole-run and steady-state summaries in one payload.
+
+Top-level fields:
+
+* `event_count`
+* `step_count`
+* `selector`
+* `scope_comparison`
+* `run`
+* `steady_state`
+
+Notes:
+
+* `run` and `steady_state` each use the same summary shape as the single-scope artifact.
+* The combined artifact is useful when the full run is mixed or ambiguous but the steady-state slice is still decisive.
+* The storage helper for this artifact is `persist_run_with_steady_state_summary(...)`.
+* `selector.policy` indicates whether the steady-state parameters came from backend defaults or explicit caller input.
+* `scope_comparison` makes run-versus-steady-state diagnosis disagreement explicit for downstream consumers.
+
+Example:
+
+* `schemas/derived_run_with_steady_state_example.json`

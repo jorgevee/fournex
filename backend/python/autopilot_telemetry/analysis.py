@@ -4,17 +4,94 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
+DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
+DEFAULT_STEADY_STATE_LAST_K: int | None = None
+
 
 def summarize_run(events: list[dict[str, Any]]) -> dict[str, Any]:
     per_step = derive_step_metrics(events)
-    run_summary = derive_run_summary(events, per_step)
-    bottlenecks = classify_bottlenecks(events, per_step, run_summary)
+    return summarize_step_scope(events, per_step=per_step)
+
+
+def summarize_step_scope(
+    events: list[dict[str, Any]],
+    *,
+    step_ids: list[int] | None = None,
+    per_step: list[dict[str, Any]] | None = None,
+    scope_name: str | None = None,
+) -> dict[str, Any]:
+    resolved_per_step = list(per_step) if per_step is not None else derive_step_metrics(events)
+    selected_step_ids = sorted({int(step_id) for step_id in step_ids}) if step_ids is not None else None
+    scoped_steps = _select_steps(resolved_per_step, selected_step_ids)
+    run_summary = derive_run_summary(events, scoped_steps)
+    bottlenecks = classify_bottlenecks(events, scoped_steps, run_summary)
+    diagnosis = build_diagnosis_result(bottlenecks, run_summary)
+
+    summary = {
+        "event_count": len(events),
+        "step_count": len(scoped_steps),
+        "per_step": scoped_steps,
+        "run_summary": run_summary,
+        "bottlenecks": bottlenecks,
+        "diagnosis": diagnosis,
+        "scope": {
+            "name": scope_name or ("selected_steps" if selected_step_ids is not None else "run"),
+            "step_ids": selected_step_ids if selected_step_ids is not None else [step["step_id"] for step in scoped_steps],
+        },
+    }
+    return summary
+
+
+def summarize_steady_state(
+    events: list[dict[str, Any]],
+    *,
+    skip_first_n: int = 0,
+    last_k: int | None = None,
+    per_step: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    resolved_per_step = list(per_step) if per_step is not None else derive_step_metrics(events)
+    steady_state_step_ids = select_steady_state_step_ids(
+        resolved_per_step,
+        skip_first_n=skip_first_n,
+        last_k=last_k,
+    )
+    return summarize_step_scope(
+        events,
+        step_ids=steady_state_step_ids,
+        per_step=resolved_per_step,
+        scope_name="steady_state",
+    )
+
+
+def summarize_run_with_steady_state(
+    events: list[dict[str, Any]],
+    *,
+    skip_first_n: int | None = None,
+    last_k: int | None = None,
+) -> dict[str, Any]:
+    resolved_skip_first_n, resolved_last_k, selector_policy = _resolve_steady_state_selector(
+        skip_first_n=skip_first_n,
+        last_k=last_k,
+    )
+    per_step = derive_step_metrics(events)
+    run_summary = summarize_step_scope(events, per_step=per_step, scope_name="run")
+    steady_state_summary = summarize_steady_state(
+        events,
+        skip_first_n=resolved_skip_first_n,
+        last_k=resolved_last_k,
+        per_step=per_step,
+    )
     return {
         "event_count": len(events),
         "step_count": len(per_step),
-        "per_step": per_step,
-        "run_summary": run_summary,
-        "bottlenecks": bottlenecks,
+        "selector": {
+            "policy": selector_policy,
+            "skip_first_n": resolved_skip_first_n,
+            "last_k": resolved_last_k,
+        },
+        "run": run_summary,
+        "steady_state": steady_state_summary,
+        "scope_comparison": _scope_comparison(run_summary, steady_state_summary),
     }
 
 
@@ -185,6 +262,108 @@ def _classification(label: str, score: float, evidence: dict[str, Any]) -> dict[
     }
 
 
+def build_diagnosis_result(
+    bottlenecks: list[dict[str, Any]],
+    run_summary: dict[str, Any],
+) -> dict[str, Any]:
+    if not bottlenecks:
+        return {
+            "primary_bottleneck": None,
+            "secondary_bottlenecks": [],
+            "confidence": {
+                "level": "low",
+                "score": 0.0,
+                "reason": "No bottleneck cleared the current ruleset thresholds.",
+            },
+            "evidence": {},
+            "why": [],
+            "why_not_others": [],
+            "recommendations": [],
+            "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
+        }
+
+    primary = bottlenecks[0]
+    secondary = [item["label"] for item in bottlenecks[1:3]]
+    confidence_score = _confidence_score(primary, bottlenecks, run_summary)
+
+    if confidence_score >= 0.75:
+        confidence_level = "high"
+    elif confidence_score >= 0.4:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+
+    return {
+        "primary_bottleneck": primary["label"],
+        "secondary_bottlenecks": secondary,
+        "confidence": {
+            "level": confidence_level,
+            "score": confidence_score,
+            "reason": _confidence_reason(primary, bottlenecks, run_summary),
+        },
+        "evidence": primary["evidence"],
+        "why": _explanation_bullets(primary, run_summary),
+        "why_not_others": _contradiction_bullets(primary, bottlenecks[1:3], run_summary),
+        "recommendations": _recommendations_for_label(primary["label"]),
+        "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
+    }
+
+
+def _select_steps(per_step: list[dict[str, Any]], step_ids: list[int] | None) -> list[dict[str, Any]]:
+    if step_ids is None:
+        return list(per_step)
+    selected = set(step_ids)
+    return [step for step in per_step if step["step_id"] in selected]
+
+
+def select_steady_state_step_ids(
+    per_step: list[dict[str, Any]],
+    *,
+    skip_first_n: int = 0,
+    last_k: int | None = None,
+) -> list[int]:
+    completed_step_ids = [
+        step["step_id"]
+        for step in per_step
+        if step["status"] == "ok" and step["step_wall_time_ns"] > 0
+    ]
+
+    skip_count = max(0, skip_first_n)
+    selected = completed_step_ids[skip_count:]
+
+    if last_k is not None:
+        keep_count = max(0, last_k)
+        if keep_count == 0:
+            selected = []
+        else:
+            selected = selected[-keep_count:]
+
+    return selected
+
+
+def _resolve_steady_state_selector(
+    *,
+    skip_first_n: int | None,
+    last_k: int | None,
+) -> tuple[int, int | None, str]:
+    if skip_first_n is None and last_k is None:
+        return DEFAULT_STEADY_STATE_SKIP_FIRST_N, DEFAULT_STEADY_STATE_LAST_K, "default"
+
+    resolved_skip_first_n = max(0, skip_first_n or 0)
+    resolved_last_k = None if last_k is None else max(0, last_k)
+    return resolved_skip_first_n, resolved_last_k, "explicit"
+
+
+def _scope_comparison(run_summary: dict[str, Any], steady_state_summary: dict[str, Any]) -> dict[str, Any]:
+    run_primary = run_summary["diagnosis"]["primary_bottleneck"]
+    steady_state_primary = steady_state_summary["diagnosis"]["primary_bottleneck"]
+    return {
+        "diagnosis_changed": run_primary != steady_state_primary,
+        "run_primary_bottleneck": run_primary,
+        "steady_state_primary_bottleneck": steady_state_primary,
+    }
+
+
 def _empty_step_metrics(step_id: int) -> dict[str, Any]:
     return {
         "step_id": step_id,
@@ -204,6 +383,137 @@ def _empty_step_metrics(step_id: int) -> dict[str, Any]:
         "sequence_length": None,
         "profiler_windows_exported": 0,
     }
+
+
+def _confidence_reason(
+    primary: dict[str, Any],
+    bottlenecks: list[dict[str, Any]],
+    run_summary: dict[str, Any],
+) -> str:
+    second_score = bottlenecks[1]["score"] if len(bottlenecks) > 1 else 0.0
+    score_gap = round(primary["score"] - second_score, 4)
+    stall_type = run_summary.get("dominant_stall_type", "unknown")
+    if len(bottlenecks) == 1:
+        return f"{primary['label']} is the only bottleneck above threshold."
+    if stall_type == primary["label"]:
+        return f"{primary['label']} leads the ranking and matches the dominant stall summary with a score gap of {score_gap}."
+    return f"{primary['label']} leads the ranking with a score gap of {score_gap}, but other signals remain present."
+
+
+def _confidence_score(
+    primary: dict[str, Any],
+    bottlenecks: list[dict[str, Any]],
+    run_summary: dict[str, Any],
+) -> float:
+    second_score = bottlenecks[1]["score"] if len(bottlenecks) > 1 else 0.0
+    score_gap = primary["score"] - second_score
+    stall_type = run_summary.get("dominant_stall_type", "unknown")
+
+    score = float(primary["score"])
+
+    if len(bottlenecks) == 1:
+        score += 0.15
+
+    if score_gap >= 0.25:
+        score += 0.15
+    elif score_gap >= 0.1:
+        score += 0.1
+    elif score_gap > 0:
+        score += 0.05
+
+    if stall_type == primary["label"]:
+        score += 0.1
+    elif stall_type not in {"unknown", "compute_bound"}:
+        score -= 0.05
+
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _explanation_bullets(primary: dict[str, Any], run_summary: dict[str, Any]) -> list[str]:
+    bullets: list[str] = []
+    label = primary["label"]
+    evidence = primary["evidence"]
+
+    if label == "input_bound":
+        bullets.append(f"Average DataLoader wait fraction is {evidence.get('avg_dataloader_fraction', 0):.3f}.")
+    elif label == "copy_bound":
+        bullets.append(f"Average H2D copy fraction is {evidence.get('avg_h2d_fraction', 0):.3f}.")
+    elif label == "sync_bound":
+        bullets.append(f"Average sync wait fraction is {evidence.get('avg_sync_fraction', 0):.3f}.")
+    elif label == "underutilized_gpu":
+        bullets.append(
+            f"Average GPU utilization is {evidence.get('average_gpu_utilization_pct', run_summary.get('average_gpu_utilization_pct', 0)):.1f}%."
+        )
+    elif label == "memory_pressure":
+        bullets.append(
+            f"Peak memory pressure ratio reached {evidence.get('memory_pressure_peak_ratio', run_summary.get('memory_pressure_peak_ratio', 0)):.3f}."
+        )
+    elif label == "shape_instability":
+        bullets.append(f"Shape volatility ratio is {evidence.get('shape_volatility_ratio', 0):.3f}.")
+    elif label == "launch_bound":
+        bullets.append(f"Profiler exported {evidence.get('profiler_windows_exported', 0)} windows while GPU utilization stayed low.")
+
+    stall_type = run_summary.get("dominant_stall_type", "unknown")
+    if stall_type != "unknown":
+        bullets.append(f"Run summary dominant stall type is {stall_type}.")
+
+    return bullets[:3]
+
+
+def _contradiction_bullets(
+    primary: dict[str, Any],
+    secondary_candidates: list[dict[str, Any]],
+    run_summary: dict[str, Any],
+) -> list[str]:
+    bullets: list[str] = []
+    for item in secondary_candidates:
+        bullets.append(f"{item['label']} also triggered with score {item['score']:.3f}.")
+    if run_summary.get("dominant_stall_type") not in {"unknown", primary["label"]}:
+        bullets.append(
+            f"Run summary stall type is {run_summary.get('dominant_stall_type')}, which does not exactly match the top-ranked diagnosis."
+        )
+    return bullets[:3]
+
+
+def _recommendations_for_label(label: str) -> list[str]:
+    mapping = {
+        "input_bound": [
+            "Increase DataLoader workers.",
+            "Enable pinned memory.",
+            "Prefetch batches or move CPU transforms off the critical path.",
+        ],
+        "copy_bound": [
+            "Reduce host-to-device transfer volume.",
+            "Enable pinned memory for input batches.",
+            "Improve overlap between copies and compute.",
+        ],
+        "sync_bound": [
+            "Reduce explicit synchronization points.",
+            "Check for host waits on CUDA events or device syncs.",
+            "Increase overlap between CPU and GPU work.",
+        ],
+        "underutilized_gpu": [
+            "Increase batch size if memory allows.",
+            "Look for small kernels or fragmented execution.",
+            "Use profiler windows to confirm launch overhead or input stalls.",
+        ],
+        "memory_pressure": [
+            "Reduce batch size or sequence length.",
+            "Check for allocator churn or fragmentation.",
+            "Lower activation or optimizer memory footprint.",
+        ],
+        "shape_instability": [
+            "Reduce shape variability across steps.",
+            "Bucket or pad inputs to stabilize execution shape.",
+            "Review dynamic-shape overhead in the input pipeline.",
+        ],
+        "launch_bound": [
+            "Look for many short kernels in profiler output.",
+            "Fuse small operations where possible.",
+            "Reduce Python dispatch overhead or consider graph capture.",
+        ],
+    }
+    return mapping.get(label, [])
 
 
 def _accumulate_step_event(step: dict[str, Any], event: dict[str, Any]) -> None:
@@ -332,19 +642,23 @@ def _shape_volatility_ratio(per_step: list[dict[str, Any]]) -> float:
 
 
 def _dominant_stall_type(per_step: list[dict[str, Any]]) -> str:
-    totals = defaultdict(int)
-    for step in per_step:
-        totals["input_bound"] += step["dataloader_wait_time_ns"]
-        totals["copy_bound"] += step["h2d_copy_time_ns"]
-        totals["sync_bound"] += step["sync_wait_time_ns"]
-        compute_total = step["forward_time_ns"] + step["backward_time_ns"] + step["optimizer_time_ns"]
-        totals["compute_bound"] += compute_total
+    stall_totals = defaultdict(int)
+    compute_total = 0
 
-    if not totals:
+    for step in per_step:
+        stall_totals["input_bound"] += step["dataloader_wait_time_ns"]
+        stall_totals["copy_bound"] += step["h2d_copy_time_ns"]
+        stall_totals["sync_bound"] += step["sync_wait_time_ns"]
+        compute_total += step["forward_time_ns"] + step["backward_time_ns"] + step["optimizer_time_ns"]
+
+    if not stall_totals and compute_total <= 0:
         return "unknown"
 
-    dominant = max(totals.items(), key=lambda item: item[1])
-    return dominant[0] if dominant[1] > 0 else "unknown"
+    dominant_stall = max(stall_totals.items(), key=lambda item: item[1]) if stall_totals else ("unknown", 0)
+    if dominant_stall[1] > 0:
+        return dominant_stall[0]
+
+    return "compute_bound" if compute_total > 0 else "unknown"
 
 
 def _to_float(value: Any) -> float | None:

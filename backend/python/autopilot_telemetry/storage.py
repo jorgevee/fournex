@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .analysis import summarize_run
+from .analysis import summarize_run, summarize_run_with_steady_state
 from .sdk import get_local_events, get_runtime_config
 
 
@@ -55,3 +55,28 @@ def persist_run_artifacts(events: list[dict[str, Any]] | None = None) -> dict[st
         "raw_trace_path": raw_trace_path,
         "derived_summary_path": derived_summary_path,
     }
+
+
+def persist_run_with_steady_state_summary(
+    events: list[dict[str, Any]] | None = None,
+    *,
+    output_path: str | None = None,
+    summary: dict[str, Any] | None = None,
+    skip_first_n: int = 0,
+    last_k: int | None = None,
+) -> str:
+    runtime = get_runtime_config()
+    resolved_events = list(events) if events is not None else get_local_events()
+    resolved_summary = (
+        summary
+        if summary is not None
+        else summarize_run_with_steady_state(
+            resolved_events,
+            skip_first_n=skip_first_n,
+            last_k=last_k,
+        )
+    )
+    resolved_output = Path(output_path or runtime["derived_summary_path"])
+    resolved_output.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output.write_text(json.dumps(resolved_summary, indent=2, sort_keys=True), encoding="utf-8")
+    return str(resolved_output)
