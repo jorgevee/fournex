@@ -16,6 +16,7 @@ from analysis_bottleneck_golden_cases import (
     SHAPE_INSTABILITY_EVENTS,
     SPARSE_TELEMETRY_EVENTS,
     SYNC_BOUND_EVENTS,
+    UNDERUTILIZED_GPU_EVENTS,
 )
 
 
@@ -89,7 +90,7 @@ def test_mixed_signal_case_ranks_multiple_bottlenecks() -> None:
     assert summary["diagnosis"]["confidence"]["level"] == "high"
 
 
-def test_sparse_telemetry_case_degrades_gracefully() -> None:
+def test_sparse_telemetry_case_emits_insufficient_telemetry() -> None:
     per_step = at.derive_step_metrics(SPARSE_TELEMETRY_EVENTS)
     run_summary = at.derive_run_summary(SPARSE_TELEMETRY_EVENTS, per_step)
     bottlenecks = at.classify_bottlenecks(SPARSE_TELEMETRY_EVENTS, per_step, run_summary)
@@ -97,9 +98,12 @@ def test_sparse_telemetry_case_degrades_gracefully() -> None:
 
     assert len(per_step) == 2
     assert run_summary["average_gpu_utilization_pct"] == 0.0
-    assert bottlenecks == []
-    assert diagnosis["primary_bottleneck"] is None
-    assert diagnosis["confidence"]["score"] == 0.0
+    assert bottlenecks[0]["label"] == "insufficient_telemetry"
+    assert bottlenecks[0]["score"] == 1.0
+    assert bottlenecks[0]["evidence"]["step_count"] == 2
+    assert diagnosis["primary_bottleneck"] == "insufficient_telemetry"
+    assert diagnosis["confidence"]["level"] == "high"
+    assert diagnosis["recommendations"]
 
 
 def test_summarize_step_scope_can_classify_selected_steps() -> None:
@@ -229,3 +233,81 @@ def test_summarize_run_with_steady_state_uses_default_selector_policy() -> None:
     assert summary["selector"] == {"policy": "default", "skip_first_n": 2, "last_k": None}
     assert summary["steady_state"]["scope"]["step_ids"] == [3, 4]
     assert summary["steady_state"]["diagnosis"]["primary_bottleneck"] == "copy_bound"
+
+
+def test_underutilized_gpu_standalone_golden_case() -> None:
+    summary = at.summarize_run(UNDERUTILIZED_GPU_EVENTS)
+    assert summary["bottlenecks"][0]["label"] == "underutilized_gpu"
+    assert len(summary["bottlenecks"]) == 1
+    assert summary["diagnosis"]["primary_bottleneck"] == "underutilized_gpu"
+    assert summary["diagnosis"]["secondary_bottlenecks"] == []
+    assert summary["diagnosis"]["confidence"]["level"] == "high"
+    assert summary["diagnosis"]["recommendations"]
+
+
+def test_classifier_version_present_in_diagnosis() -> None:
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    assert summary["diagnosis"]["classifier_version"] == "0.2.0"
+
+
+def test_insufficient_telemetry_does_not_fire_when_timing_data_exists() -> None:
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    labels = [item["label"] for item in summary["bottlenecks"]]
+    assert "insufficient_telemetry" not in labels
+
+
+def test_worst_steps_input_bound_ordered_by_dataloader_fraction() -> None:
+    # Step 1: dataloader=35/100=0.35, Step 2: dataloader=30/100=0.30
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    worst = summary["bottlenecks"][0]["worst_steps"]
+    assert worst[0] == {"step_id": 1, "value": 0.35}
+    assert worst[1] == {"step_id": 2, "value": 0.30}
+
+
+def test_worst_steps_copy_bound_ordered_by_h2d_fraction() -> None:
+    # Step 1: h2d=20/100=0.20, Step 2: h2d=18/100=0.18
+    summary = at.summarize_run(COPY_BOUND_EVENTS)
+    worst = summary["bottlenecks"][0]["worst_steps"]
+    assert worst[0] == {"step_id": 1, "value": 0.20}
+    assert worst[1] == {"step_id": 2, "value": 0.18}
+
+
+def test_worst_steps_sync_bound_ordered_by_sync_fraction() -> None:
+    # Step 1: sync=15/100=0.15, Step 2: sync=12/100=0.12
+    summary = at.summarize_run(SYNC_BOUND_EVENTS)
+    worst = summary["bottlenecks"][0]["worst_steps"]
+    assert worst[0] == {"step_id": 1, "value": 0.15}
+    assert worst[1] == {"step_id": 2, "value": 0.12}
+
+
+def test_worst_steps_shape_instability_lists_changed_steps() -> None:
+    # Steps 2 and 3 change shape; step 1 does not
+    summary = at.summarize_run(SHAPE_INSTABILITY_EVENTS)
+    worst = summary["bottlenecks"][0]["worst_steps"]
+    step_ids = [entry["step_id"] for entry in worst]
+    assert step_ids == [2, 3]
+    assert all(entry["value"] == 1.0 for entry in worst)
+
+
+def test_worst_steps_memory_pressure_is_empty() -> None:
+    summary = at.summarize_run(MEMORY_PRESSURE_EVENTS)
+    assert summary["bottlenecks"][0]["label"] == "memory_pressure"
+    assert summary["bottlenecks"][0]["worst_steps"] == []
+
+
+def test_worst_steps_capped_at_three() -> None:
+    # Build a 5-step run; worst_steps should return at most 3
+    events = []
+    for i in range(1, 6):
+        events += [
+            {"event_type": "step_start", "step_id": i, "payload": {"step_kind": "train"}},
+            {"event_type": "dataloader_span", "step_id": i, "duration_ns": 20 + i, "payload": {"stage": "next"}},
+            {"event_type": "phase_span", "step_id": i, "duration_ns": 30, "payload": {"phase_name": "forward"}},
+            {"event_type": "step_end", "step_id": i, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+        ]
+    summary = at.summarize_run(events)
+    worst = summary["bottlenecks"][0]["worst_steps"]
+    assert len(worst) <= 3
+    # Values should be descending
+    values = [entry["value"] for entry in worst]
+    assert values == sorted(values, reverse=True)

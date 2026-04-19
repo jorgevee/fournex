@@ -6,10 +6,21 @@
         "dominant_stall_type": "input_bound"
       },
       "label": "input_bound",
-      "score": 0.325
+      "score": 0.325,
+      "worst_steps": [
+        {
+          "step_id": 1,
+          "value": 0.35
+        },
+        {
+          "step_id": 2,
+          "value": 0.3
+        }
+      ]
     }
   ],
   "diagnosis": {
+    "classifier_version": "0.2.0",
     "confidence": {
       "level": "medium",
       "reason": "input_bound is the only bottleneck above threshold.",

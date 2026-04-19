@@ -3,6 +3,7 @@
   "run": {
     "bottlenecks": [],
     "diagnosis": {
+      "classifier_version": "0.2.0",
       "confidence": {
         "level": "low",
         "reason": "No bottleneck cleared the current ruleset thresholds.",
@@ -132,10 +133,21 @@
           "steps_with_h2d": 2
         },
         "label": "copy_bound",
-        "score": 0.19
+        "score": 0.19,
+        "worst_steps": [
+          {
+            "step_id": 3,
+            "value": 0.2
+          },
+          {
+            "step_id": 4,
+            "value": 0.18
+          }
+        ]
       }
     ],
     "diagnosis": {
+      "classifier_version": "0.2.0",
       "confidence": {
         "level": "medium",
         "reason": "copy_bound is the only bottleneck above threshold.",

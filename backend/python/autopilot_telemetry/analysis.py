@@ -4,6 +4,8 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
+CLASSIFIER_VERSION = "0.2.0"
+
 DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
 DEFAULT_STEADY_STATE_LAST_K: int | None = None
 
@@ -160,6 +162,10 @@ def classify_bottlenecks(
                     "avg_dataloader_fraction": round(input_ratio, 4),
                     "dominant_stall_type": run_summary["dominant_stall_type"],
                 },
+                worst_steps=_top_steps(
+                    completed_steps,
+                    lambda s: _bounded_ratio(s["dataloader_wait_time_ns"], s["step_wall_time_ns"]),
+                ),
             )
         )
 
@@ -176,6 +182,10 @@ def classify_bottlenecks(
                     "avg_h2d_fraction": round(copy_ratio, 4),
                     "steps_with_h2d": sum(1 for step in completed_steps if step["h2d_copy_time_ns"] > 0),
                 },
+                worst_steps=_top_steps(
+                    completed_steps,
+                    lambda s: _bounded_ratio(s["h2d_copy_time_ns"], s["step_wall_time_ns"]),
+                ),
             )
         )
 
@@ -192,6 +202,10 @@ def classify_bottlenecks(
                     "avg_sync_fraction": round(sync_ratio, 4),
                     "steps_with_sync_wait": sum(1 for step in completed_steps if step["sync_wait_time_ns"] > 0),
                 },
+                worst_steps=_top_steps(
+                    completed_steps,
+                    lambda s: _bounded_ratio(s["sync_wait_time_ns"], s["step_wall_time_ns"]),
+                ),
             )
         )
 
@@ -204,6 +218,10 @@ def classify_bottlenecks(
                     "average_gpu_utilization_pct": round(run_summary["average_gpu_utilization_pct"], 2),
                     "utilization_instability_pct": round(run_summary["utilization_instability_pct"], 2),
                 },
+                worst_steps=_top_steps(
+                    completed_steps,
+                    lambda s: 1.0 - s["gpu_active_fraction_proxy"],
+                ),
             )
         )
 
@@ -228,6 +246,11 @@ def classify_bottlenecks(
                     "shape_volatility_ratio": round(run_summary["shape_volatility_ratio"], 4),
                     "changed_steps": [step["step_id"] for step in per_step if step["shape_changed"]],
                 },
+                worst_steps=[
+                    {"step_id": step["step_id"], "value": 1.0}
+                    for step in per_step
+                    if step["shape_changed"]
+                ],
             )
         )
 
@@ -238,14 +261,32 @@ def classify_bottlenecks(
         and input_ratio < 0.1
         and sync_ratio < 0.1
     ):
+        avg_gpu = run_summary["average_gpu_utilization_pct"]
+        launch_bound_score = round(min(0.5, max(0.3, (50.0 - avg_gpu) / 100.0 + 0.3)), 4)
         classifications.append(
             _classification(
                 "launch_bound",
-                0.5,
+                launch_bound_score,
                 {
                     "profiler_windows_exported": run_summary["profiler_windows_exported"],
-                    "average_gpu_utilization_pct": round(run_summary["average_gpu_utilization_pct"], 2),
+                    "average_gpu_utilization_pct": round(avg_gpu, 2),
                     "note": "Profiler windows were captured but dominant stalls were not input, copy, or sync heavy.",
+                },
+                worst_steps=_top_steps(
+                    completed_steps,
+                    lambda s: 1.0 - s["gpu_active_fraction_proxy"],
+                ),
+            )
+        )
+
+    if run_summary["average_gpu_utilization_pct"] <= 0.0 and run_summary["dominant_stall_type"] == "unknown":
+        classifications.append(
+            _classification(
+                "insufficient_telemetry",
+                1.0,
+                {
+                    "step_count": len(completed_steps),
+                    "note": "No timing breakdowns or GPU utilization data were recorded.",
                 },
             )
         )
@@ -254,11 +295,17 @@ def classify_bottlenecks(
     return classifications
 
 
-def _classification(label: str, score: float, evidence: dict[str, Any]) -> dict[str, Any]:
+def _classification(
+    label: str,
+    score: float,
+    evidence: dict[str, Any],
+    worst_steps: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "label": label,
         "score": round(score, 4),
         "evidence": evidence,
+        "worst_steps": worst_steps if worst_steps is not None else [],
     }
 
 
@@ -280,6 +327,7 @@ def build_diagnosis_result(
             "why_not_others": [],
             "recommendations": [],
             "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
+            "classifier_version": CLASSIFIER_VERSION,
         }
 
     primary = bottlenecks[0]
@@ -306,6 +354,7 @@ def build_diagnosis_result(
         "why_not_others": _contradiction_bullets(primary, bottlenecks[1:3], run_summary),
         "recommendations": _recommendations_for_label(primary["label"]),
         "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
+        "classifier_version": CLASSIFIER_VERSION,
     }
 
 
@@ -452,6 +501,9 @@ def _explanation_bullets(primary: dict[str, Any], run_summary: dict[str, Any]) -
         bullets.append(f"Shape volatility ratio is {evidence.get('shape_volatility_ratio', 0):.3f}.")
     elif label == "launch_bound":
         bullets.append(f"Profiler exported {evidence.get('profiler_windows_exported', 0)} windows while GPU utilization stayed low.")
+    elif label == "insufficient_telemetry":
+        bullets.append(f"No timing breakdowns were observed across {evidence.get('step_count', 0)} completed steps.")
+        bullets.append("GPU utilization data is absent — no utilization samples were recorded.")
 
     stall_type = run_summary.get("dominant_stall_type", "unknown")
     if stall_type != "unknown":
@@ -511,6 +563,11 @@ def _recommendations_for_label(label: str) -> list[str]:
             "Look for many short kernels in profiler output.",
             "Fuse small operations where possible.",
             "Reduce Python dispatch overhead or consider graph capture.",
+        ],
+        "insufficient_telemetry": [
+            "Verify that telemetry collection is properly configured.",
+            "Check that event hooks are attached before training begins.",
+            "Ensure the profiler or tracing layer is active during the run.",
         ],
     }
     return mapping.get(label, [])
@@ -659,6 +716,20 @@ def _dominant_stall_type(per_step: list[dict[str, Any]]) -> str:
         return dominant_stall[0]
 
     return "compute_bound" if compute_total > 0 else "unknown"
+
+
+def _top_steps(
+    steps: list[dict[str, Any]],
+    key_fn: Any,
+    n: int = 3,
+) -> list[dict[str, Any]]:
+    ranked = sorted(steps, key=key_fn, reverse=True)
+    result = []
+    for step in ranked[:n]:
+        value = key_fn(step)
+        if value > 0:
+            result.append({"step_id": step["step_id"], "value": round(value, 4)})
+    return result
 
 
 def _to_float(value: Any) -> float | None:

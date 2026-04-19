@@ -6,7 +6,17 @@
         "utilization_instability_pct": 2.0
       },
       "label": "underutilized_gpu",
-      "score": 0.66
+      "score": 0.66,
+      "worst_steps": [
+        {
+          "step_id": 1,
+          "value": 0.57
+        },
+        {
+          "step_id": 2,
+          "value": 0.56
+        }
+      ]
     },
     {
       "evidence": {
@@ -14,7 +24,17 @@
         "dominant_stall_type": "input_bound"
       },
       "label": "input_bound",
-      "score": 0.26
+      "score": 0.26,
+      "worst_steps": [
+        {
+          "step_id": 1,
+          "value": 0.28
+        },
+        {
+          "step_id": 2,
+          "value": 0.24
+        }
+      ]
     },
     {
       "evidence": {
@@ -22,10 +42,21 @@
         "steps_with_h2d": 2
       },
       "label": "copy_bound",
-      "score": 0.18
+      "score": 0.18,
+      "worst_steps": [
+        {
+          "step_id": 1,
+          "value": 0.19
+        },
+        {
+          "step_id": 2,
+          "value": 0.17
+        }
+      ]
     }
   ],
   "diagnosis": {
+    "classifier_version": "0.2.0",
     "confidence": {
       "level": "high",
       "reason": "underutilized_gpu leads the ranking with a score gap of 0.4, but other signals remain present.",

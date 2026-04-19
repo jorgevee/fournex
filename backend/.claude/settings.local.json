@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/python/test_analysis_bottlenecks.py tests/python/test_storage_summary.py -q)",
+      "Bash(pip install:*)",
+      "Bash(python:*)"
+    ]
+  }
+}

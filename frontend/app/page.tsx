@@ -1,132 +1,272 @@
 import Link from "next/link";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  Boxes,
+  CheckCircle2,
+  CircuitBoard,
+  Clock,
+  Cpu,
+  Database,
+  FlaskConical,
+  Gauge,
+  GitBranch,
+  LineChart,
+  ListChecks,
+  Microscope,
+  Play,
+  Radar,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  Workflow,
+  Zap,
+} from "lucide-react";
+import Hero from "./_components/heromain";
 
-const trustCategories = [
-  "AI infra",
+const trustLogos = [
+  "AI training teams",
+  "Inference platforms",
   "Robotics",
   "Simulation",
-  "Gaming",
-  "Quant systems",
   "HPC",
+  "Quant research",
 ];
 
-const problemPoints = [
+const bottleneckPatterns = [
   {
-    title: "GPU spend keeps rising",
-    description:
-      "Teams scale training and inference faster than they can tune workloads, turning cluster growth into a budget problem.",
+    icon: Database,
+    title: "Dataloader starvation",
+    symptom: "GPU idle while CPU workers stall",
+    detail:
+      "Detect when the input pipeline can't feed the device. Tune workers, prefetching, and pinned memory before re-running.",
+    tone: "emerald",
   },
   {
-    title: "Manual tuning does not scale",
-    description:
-      "Kernel fusion, launch parameters, and memory layouts still depend on a small pool of CUDA specialists.",
+    icon: Boxes,
+    title: "Small-batch inefficiency",
+    symptom: "Low SM occupancy under real batch sizes",
+    detail:
+      "Pinpoint shapes that under-utilize kernels. Recommend batching, padding, or recompile-safe shape hints.",
+    tone: "cyan",
   },
   {
-    title: "Observability stops at diagnosis",
-    description:
-      "Most tools expose hotspots and stalls, but engineering teams still carry the burden of fixing them by hand.",
+    icon: Clock,
+    title: "Host-device sync overhead",
+    symptom: "Frequent .item() and blocking transfers",
+    detail:
+      "Find hidden synchronization stalls — scalar reads, premature .cpu() calls, and chatty copy patterns.",
+    tone: "amber",
+  },
+  {
+    icon: Sparkles,
+    title: "Mixed-precision opportunities",
+    symptom: "FP32 where AMP is safe and faster",
+    detail:
+      "Identify layers and ops that can move to bf16/fp16 without loss of accuracy, ranked by expected speedup.",
+    tone: "violet",
+  },
+  {
+    icon: CircuitBoard,
+    title: "Kernel launch fragmentation",
+    symptom: "Many tiny kernels, launch overhead dominates",
+    detail:
+      "Spot fusion candidates for torch.compile, CUDA graphs, or Triton — with concrete before/after projections.",
+    tone: "sky",
+  },
+  {
+    icon: Radar,
+    title: "Memory pressure & fragmentation",
+    symptom: "OOM risk, swaps, cache thrashing",
+    detail:
+      "Track allocator behavior, fragmentation, and layout choices that silently cap throughput ceiling.",
+    tone: "rose",
   },
 ];
 
-const workflowSteps = [
+const toneMap: Record<
+  string,
+  { ring: string; bg: string; text: string; dot: string }
+> = {
+  emerald: {
+    ring: "ring-emerald-400/20",
+    bg: "bg-emerald-400/10",
+    text: "text-emerald-300",
+    dot: "bg-emerald-400",
+  },
+  cyan: {
+    ring: "ring-cyan-400/20",
+    bg: "bg-cyan-400/10",
+    text: "text-cyan-300",
+    dot: "bg-cyan-400",
+  },
+  amber: {
+    ring: "ring-amber-400/20",
+    bg: "bg-amber-400/10",
+    text: "text-amber-300",
+    dot: "bg-amber-400",
+  },
+  violet: {
+    ring: "ring-violet-400/20",
+    bg: "bg-violet-400/10",
+    text: "text-violet-300",
+    dot: "bg-violet-400",
+  },
+  sky: {
+    ring: "ring-sky-400/20",
+    bg: "bg-sky-400/10",
+    text: "text-sky-300",
+    dot: "bg-sky-400",
+  },
+  rose: {
+    ring: "ring-rose-400/20",
+    bg: "bg-rose-400/10",
+    text: "text-rose-300",
+    dot: "bg-rose-400",
+  },
+};
+
+const rankedFixes = [
   {
-    step: "01",
-    title: "Profile live GPU workloads",
-    description:
-      "Capture kernel timing, occupancy, memory traffic, and launch behavior directly from production environments.",
+    rank: "01",
+    title: "Increase dataloader workers 4 → 12, enable pinned memory",
+    effort: "Low",
+    confidence: "High",
+    speedup: "+28%",
+    risk: "Low",
   },
   {
-    step: "02",
-    title: "Detect bottlenecks automatically",
-    description:
-      "Identify memory divergence, underutilized kernels, launch inefficiencies, and throughput cliffs without manual investigation.",
+    rank: "02",
+    title: "Enable bf16 mixed precision on forward pass",
+    effort: "Low",
+    confidence: "High",
+    speedup: "+19%",
+    risk: "Low",
   },
   {
-    step: "03",
-    title: "Recommend or apply fixes",
-    description:
-      "Generate optimization actions across kernel fusion, memory layouts, launch configuration, and scheduling policies.",
+    rank: "03",
+    title: "Compile hot module with torch.compile (mode=\"reduce-overhead\")",
+    effort: "Medium",
+    confidence: "Medium",
+    speedup: "+14%",
+    risk: "Medium",
   },
   {
-    step: "04",
-    title: "Improve with search and RL",
-    description:
-      "Continuously learn from workload outcomes so optimization policies compound in quality over time.",
+    rank: "04",
+    title: "Remove per-step .item() calls from training loop",
+    effort: "Low",
+    confidence: "High",
+    speedup: "+6%",
+    risk: "Low",
+  },
+];
+
+const productPhases = [
+  {
+    phase: "Phase 1",
+    title: "Profiler with opinions",
+    status: "Shipping now",
+    icon: Microscope,
+    bullets: [
+      "Low-overhead trace collection",
+      "Deterministic bottleneck classifier",
+      "Normalized performance IR",
+    ],
+  },
+  {
+    phase: "Phase 2",
+    title: "Ranked recommendations",
+    status: "Shipping now",
+    icon: ListChecks,
+    bullets: [
+      "Map bottlenecks to concrete fixes",
+      "Score by ROI, effort, and risk",
+      "Explainable, repeatable output",
+    ],
+  },
+  {
+    phase: "Phase 3",
+    title: "Experiment runner",
+    status: "Early access",
+    icon: FlaskConical,
+    bullets: [
+      "Safe config sweeps",
+      "Before/after benchmark validation",
+      "Regression guardrails",
+    ],
+  },
+  {
+    phase: "Phase 4",
+    title: "Policy-driven autopilot",
+    status: "On the roadmap",
+    icon: Workflow,
+    bullets: [
+      "Auto-apply within your guardrails",
+      "Continuous adaptation",
+      "Learned optimization policies",
+    ],
   },
 ];
 
 const capabilityCards = [
   {
+    icon: Gauge,
     title: "Production profiling",
     description:
-      "Low-overhead telemetry for kernels, streams, allocators, and memory traffic across your fleet.",
+      "Low-overhead telemetry for kernels, streams, allocators, and memory traffic.",
   },
   {
-    title: "Kernel optimization recommendations",
+    icon: ListChecks,
+    title: "Ranked fixes",
     description:
-      "Surface concrete changes around fusion, launch shape, thread/block sizing, and execution paths.",
+      "Concrete, explainable recommendations — scored by expected ROI, effort, and risk.",
   },
   {
-    title: "Memory access analysis",
+    icon: FlaskConical,
+    title: "Safe experiment runner",
     description:
-      "Pinpoint coalescing issues, cache misses, transfers, and layout choices that degrade effective throughput.",
+      "Sweep configs safely, validate every trial, and stop bad runs early.",
   },
   {
-    title: "Launch config tuning",
+    icon: ShieldCheck,
+    title: "Regression guardrails",
     description:
-      "Search parameter space for occupancy, latency, and throughput gains instead of relying on static defaults.",
+      "Throughput, memory, loss divergence, and NaN checks — so trust comes built in.",
   },
   {
-    title: "Continuous learning engine",
+    icon: TrendingUp,
+    title: "Before/after validation",
     description:
-      "Use search and reinforcement learning to evolve optimization strategies as workload patterns change.",
+      "Every applied change ships with an auditable benchmark delta and reproducibility hash.",
   },
   {
-    title: "Safe rollout controls",
+    icon: GitBranch,
+    title: "CI-native",
     description:
-      "Gate optimizations with review flows, staged deployment, fallback policies, and human-in-the-loop approval.",
-  },
-  {
-    title: "Fleet-wide optimization insights",
-    description:
-      "Track recurring bottlenecks, highest-value opportunities, and realized savings across teams and clusters.",
+      "Run as a CLI, in CI, or as a continuous agent. No hardware changes, no vendor lock-in.",
   },
 ];
 
 const metrics = [
   { value: "Up to 35%", label: "lower GPU cost" },
-  { value: "20-50%", label: "throughput gains" },
-  { value: "Weeks to hours", label: "faster tuning cycles" },
+  { value: "20–50%", label: "throughput gains" },
+  { value: "Weeks → hours", label: "faster tuning cycles" },
   { value: "0 new hardware", label: "required for ROI" },
 ];
 
-const useCases = [
-  "AI training",
-  "Inference serving",
-  "Simulation",
-  "Robotics",
-  "Gaming engines",
-  "Quant and HPC",
-];
-
-const moatSteps = [
-  "More workloads analyzed",
-  "Richer optimization traces",
-  "Better policy learning",
-  "Stronger recommendations",
-];
-
-const testimonials = [
+const footerLinks = [
   {
-    quote:
-      "We had profiling coverage already. What we lacked was a system that could turn those traces into performance actions automatically.",
-    author: "Platform Engineering Lead",
-    team: "Large-scale inference team",
+    heading: "Product",
+    items: ["How it works", "Capabilities", "Pricing", "Changelog"],
   },
   {
-    quote:
-      "The value is not another dashboard. It is closing the loop between bottleneck detection and measurable GPU savings.",
-    author: "VP of Infrastructure",
-    team: "Simulation and robotics company",
+    heading: "Resources",
+    items: ["Docs", "Benchmarks", "Blog", "Security"],
+  },
+  {
+    heading: "Company",
+    items: ["About", "Careers", "Contact", "Press kit"],
   },
 ];
 
@@ -134,17 +274,24 @@ function SectionHeading({
   eyebrow,
   title,
   description,
+  align = "center",
 }: {
   eyebrow: string;
   title: string;
   description: string;
+  align?: "center" | "left";
 }) {
+  const alignment =
+    align === "center"
+      ? "mx-auto text-center"
+      : "text-left";
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 text-center lg:text-left">
-      <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300/80">
+    <div className={`${alignment} flex w-full max-w-3xl flex-col gap-4`}>
+      <span className="inline-flex items-center gap-2 self-start text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300/80">
+        <span className="h-px w-8 bg-cyan-300/40" />
         {eyebrow}
       </span>
-      <h2 className="text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
+      <h2 className="text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl lg:text-[2.6rem] lg:leading-[1.1]">
         {title}
       </h2>
       <p className="text-base leading-7 text-slate-300 sm:text-lg">
@@ -161,28 +308,34 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,0.22),_transparent_60%)] blur-3xl" />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 sm:px-8 lg:px-10">
+        {/* Header */}
         <header className="sticky top-0 z-20 -mx-6 border-b border-white/8 bg-slate-950/70 px-6 backdrop-blur-xl sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
-          <div className="mx-auto flex h-18 w-full max-w-7xl items-center justify-between">
+          <div className="mx-auto flex h-[4.5rem] w-full max-w-7xl items-center justify-between">
             <Link href="/" className="flex items-center gap-3 text-sm font-medium">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-200 shadow-[0_0_30px_rgba(56,189,248,0.15)]">
-                GP
+              <span className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/30 bg-[linear-gradient(135deg,rgba(56,189,248,0.18),rgba(16,185,129,0.12))] text-cyan-200 shadow-[0_0_30px_rgba(56,189,248,0.18)]">
+                <Cpu size={18} />
               </span>
-              <span className="text-sm tracking-[0.12em] text-slate-100 uppercase">
-                GPU Performance Autopilot
+              <span className="flex flex-col leading-tight">
+                <span className="text-sm tracking-[0.18em] text-white uppercase">
+                  GPU Autopilot
+                </span>
+                <span className="text-[0.65rem] tracking-[0.28em] text-slate-500 uppercase">
+                  Performance, on policy
+                </span>
               </span>
             </Link>
             <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
+              <a href="#bottlenecks" className="transition hover:text-white">
+                Bottlenecks
+              </a>
               <a href="#how-it-works" className="transition hover:text-white">
                 How it works
               </a>
               <a href="#capabilities" className="transition hover:text-white">
                 Capabilities
               </a>
-              <a href="#use-cases" className="transition hover:text-white">
-                Use cases
-              </a>
-              <a href="#roi" className="transition hover:text-white">
-                ROI
+              <a href="#roadmap" className="transition hover:text-white">
+                Roadmap
               </a>
             </nav>
             <div className="flex items-center gap-3">
@@ -194,210 +347,31 @@ export default function Home() {
               </a>
               <a
                 href="#demo"
-                className="inline-flex rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-100"
+                className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-100"
               >
                 Request access
+                <ArrowRight size={14} />
               </a>
             </div>
           </div>
         </header>
 
-        <section className="relative flex flex-col justify-center py-20 sm:py-24 lg:min-h-[calc(100vh-4.5rem)] lg:py-12">
-          <div className="grid items-center gap-14 xl:gap-18 lg:grid-cols-[1fr_1.08fr]">
-            <div className="max-w-3xl">
-              <span className="inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.3em] text-cyan-200">
-                Autonomous GPU optimization
-              </span>
-              <h1 className="mt-8 max-w-4xl text-5xl font-semibold tracking-[-0.06em] text-white sm:text-6xl lg:text-7xl">
-                Put Your GPU Fleet on Autopilot.
-              </h1>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl">
-                Automatically profile, tune, and improve CUDA workloads in
-                production. GPU Performance Autopilot turns wasted compute into
-                lower spend, higher throughput, and faster engineering loops.
-              </p>
-
-              <div className="mt-10 flex flex-col gap-4 sm:flex-row">
-                <a
-                  href="#demo"
-                  className="inline-flex items-center justify-center rounded-full bg-cyan-400 px-6 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300"
-                >
-                  Book a demo
-                </a>
-                <a
-                  href="#how-it-works"
-                  className="inline-flex items-center justify-center rounded-full border border-white/12 bg-white/5 px-6 py-3.5 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/8"
-                >
-                  See how it works
-                </a>
-              </div>
-
-              <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-3xl border border-white/8 bg-white/5 p-5 backdrop-blur-sm">
-                  <div className="text-2xl font-semibold text-white">30-70%</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    of GPU compute often goes unused or under-optimized.
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-white/8 bg-white/5 p-5 backdrop-blur-sm">
-                  <div className="text-2xl font-semibold text-white">RL + search</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    compounds improvements instead of freezing tuning logic in
-                    static rules.
-                  </p>
-                </div>
-                <div className="rounded-3xl border border-white/8 bg-white/5 p-5 backdrop-blur-sm">
-                  <div className="text-2xl font-semibold text-white">No hardware swap</div>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">
-                    capture ROI on the GPUs and clusters you already run today.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 rounded-[2rem] bg-cyan-400/10 blur-3xl" />
-              <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/75 p-5 shadow-[0_30px_120px_rgba(2,6,23,0.9)] backdrop-blur-xl">
-                <div className="flex items-center justify-between border-b border-white/8 pb-4">
-                  <div>
-                    <p className="text-sm font-medium text-white">
-                      Fleet optimization control plane
-                    </p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.24em] text-slate-400">
-                      profiler loop / policy learning / rollout safety
-                    </p>
-                  </div>
-                  <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300">
-                    Live
-                  </div>
-                </div>
-
-                <div className="mt-5 grid gap-5 xl:gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-                  <div className="rounded-[1.5rem] border border-white/8 bg-slate-900/70 p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-slate-200">Profiler trace</p>
-                      <p className="text-xs text-slate-400">A100 cluster / us-west</p>
-                    </div>
-                    <div className="mt-5 space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs text-slate-400">
-                          <span>Kernel occupancy</span>
-                          <span>62% to 84%</span>
-                        </div>
-                        <div className="h-3 rounded-full bg-white/6 p-0.5">
-                          <div className="h-full w-[84%] rounded-full bg-[linear-gradient(90deg,#06b6d4,#8b5cf6)]" />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs text-slate-400">
-                          <span>Memory efficiency</span>
-                          <span>71% to 89%</span>
-                        </div>
-                        <div className="h-3 rounded-full bg-white/6 p-0.5">
-                          <div className="h-full w-[89%] rounded-full bg-[linear-gradient(90deg,#14b8a6,#22c55e)]" />
-                        </div>
-                      </div>
-                      <div className="rounded-2xl border border-white/8 bg-black/30 p-4">
-                        <div className="flex items-center justify-between text-xs uppercase tracking-[0.22em] text-slate-500">
-                          <span>Kernel timeline</span>
-                          <span>120 ms window</span>
-                        </div>
-                        <div className="mt-4 space-y-3">
-                          {[
-                            ["embed_forward", "w-[76%]", "bg-cyan-400"],
-                            ["fused_attention", "w-[92%]", "bg-violet-400"],
-                            ["kv_cache_repack", "w-[41%]", "bg-teal-400"],
-                            ["decode_step", "w-[68%]", "bg-emerald-400"],
-                          ].map(([label, width, color]) => (
-                            <div key={label} className="grid grid-cols-[110px_1fr] items-center gap-3">
-                              <span className="text-xs text-slate-400">{label}</span>
-                              <div className="h-4 rounded-full bg-white/6 p-0.5">
-                                <div className={`h-full rounded-full ${width} ${color}`} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="rounded-[1.5rem] border border-white/8 bg-white/5 p-4">
-                      <p className="text-xs uppercase tracking-[0.22em] text-slate-500">
-                        Suggested actions
-                      </p>
-                      <div className="mt-4 space-y-3">
-                        {[
-                          "Fuse attention epilogue to reduce global memory traffic",
-                          "Adjust thread block size from 128 to 256 for occupancy gain",
-                          "Re-layout cache writes to improve coalescing",
-                        ].map((item) => (
-                          <div
-                            key={item}
-                            className="rounded-2xl border border-white/8 bg-slate-950/70 p-3 text-sm leading-6 text-slate-200"
-                          >
-                            {item}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="rounded-[1.5rem] border border-emerald-400/20 bg-emerald-400/10 p-4">
-                      <p className="text-xs uppercase tracking-[0.22em] text-emerald-200/80">
-                        Estimated uplift
-                      </p>
-                      <div className="mt-4 grid grid-cols-2 gap-3">
-                        <div className="rounded-2xl bg-black/20 p-4">
-                          <div className="text-2xl font-semibold text-white">-28%</div>
-                          <p className="mt-1 text-xs text-emerald-100/80">
-                            GPU cost per job
-                          </p>
-                        </div>
-                        <div className="rounded-2xl bg-black/20 p-4">
-                          <div className="text-2xl font-semibold text-white">+34%</div>
-                          <p className="mt-1 text-xs text-emerald-100/80">
-                            Throughput gain
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-[1.5rem] border border-white/8 bg-slate-900/70 p-4">
-                      <p className="text-sm text-slate-200">Optimization loop</p>
-                      <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-300">
-                        {["Trace", "Diagnose", "Tune", "Validate", "Deploy", "Learn"].map(
-                          (item, index) => (
-                            <span
-                              key={item}
-                              className={`rounded-full px-3 py-2 ${
-                                index === 2 || index === 4
-                                  ? "border border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
-                                  : "border border-white/8 bg-white/5"
-                              }`}
-                            >
-                              {item}
-                            </span>
-                          )
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* Hero */}
+        <section aria-label="Hero" className="relative border-b border-white/8">
+          <Hero />
         </section>
 
-        <section className="border-y border-white/8 py-6">
-          <div className="grid gap-4 lg:grid-cols-[240px_1fr] lg:items-center">
+        {/* Trust band */}
+        <section className="border-b border-white/8 py-8">
+          <div className="grid gap-5 lg:grid-cols-[260px_1fr] lg:items-center">
             <p className="text-xs font-medium uppercase tracking-[0.32em] text-slate-500">
-              Built for high-performance teams
+              Built for teams running real GPU workloads
             </p>
             <div className="grid grid-cols-2 gap-3 text-sm text-slate-300 sm:grid-cols-3 lg:grid-cols-6">
-              {trustCategories.map((item) => (
+              {trustLogos.map((item) => (
                 <div
                   key={item}
-                  className="rounded-full border border-white/8 bg-white/4 px-4 py-3 text-center"
+                  className="rounded-full border border-white/8 bg-white/[0.04] px-4 py-3 text-center backdrop-blur-sm"
                 >
                   {item}
                 </div>
@@ -406,203 +380,495 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="py-24 sm:py-28">
+        {/* Bottleneck showcase */}
+        <section id="bottlenecks" className="py-24 sm:py-28">
           <SectionHeading
-            eyebrow="The problem"
-            title="GPU performance tuning is still too manual for modern infrastructure."
-            description="As GPU fleets grow, the economics get harsher. Teams can see utilization gaps, kernel stalls, and memory waste, but turning those traces into improvements remains slow, fragile, and expensive."
+            eyebrow="What we detect"
+            title="Six GPU bottleneck families. Named, ranked, and fixable."
+            description="We skip the raw profiler dumps and go straight to diagnosis. Every bottleneck maps to a concrete, explainable fix — not another dashboard to stare at."
           />
-          <div className="mt-12 grid gap-6 lg:grid-cols-3">
-            {problemPoints.map((item) => (
-              <article
-                key={item.title}
-                className="rounded-[1.75rem] border border-white/8 bg-white/5 p-7"
-              >
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-semibold text-cyan-200">
-                  0{problemPoints.indexOf(item) + 1}
-                </div>
-                <h3 className="mt-5 text-xl font-semibold text-white">
-                  {item.title}
-                </h3>
-                <p className="mt-3 text-base leading-7 text-slate-300">
-                  {item.description}
-                </p>
-              </article>
-            ))}
+          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {bottleneckPatterns.map((item) => {
+              const tone = toneMap[item.tone];
+              const Icon = item.icon;
+              return (
+                <article
+                  key={item.title}
+                  className={`group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-white/20 hover:bg-white/[0.06]`}
+                >
+                  <div
+                    className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ${tone.ring} ${tone.bg} ${tone.text}`}
+                  >
+                    <Icon size={20} />
+                  </div>
+                  <div className="mt-5 flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                    <span className={`text-xs font-medium uppercase tracking-[0.22em] ${tone.text}`}>
+                      {item.symptom}
+                    </span>
+                  </div>
+                  <h3 className="mt-3 text-xl font-semibold tracking-[-0.02em] text-white">
+                    {item.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-slate-300">
+                    {item.detail}
+                  </p>
+                  <div className="mt-6 inline-flex items-center gap-1.5 text-xs text-slate-400 transition group-hover:text-white">
+                    See sample trace
+                    <ArrowUpRight size={14} />
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
 
+        {/* Ranked recommendations mockup */}
         <section id="how-it-works" className="py-24 sm:py-28">
-          <SectionHeading
-            eyebrow="How it works"
-            title="A closed-loop system for profiling, optimization, and continuous learning."
-            description="GPU Performance Autopilot does more than monitor. It connects production telemetry to optimization policies and safe rollout controls so improvements can ship continuously."
-          />
-          <div className="mt-12 grid gap-6 lg:grid-cols-2">
-            {workflowSteps.map((item) => (
-              <article
-                key={item.step}
-                className="rounded-[1.75rem] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(15,23,42,0.55))] p-7"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold tracking-[0.25em] text-cyan-300/80">
-                    {item.step}
+          <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-center">
+            <div>
+              <SectionHeading
+                align="left"
+                eyebrow="Ranked recommendations"
+                title="From trace to ranked fix list in under a minute."
+                description="Every finding comes with an estimated speedup, implementation effort, confidence level, and blast radius. No more guessing which fix matters first."
+              />
+              <ul className="mt-8 grid gap-3 text-sm text-slate-300">
+                {[
+                  "Explainable, rule-based classifier — no hallucinations",
+                  "ROI-weighted ranking using real workload outcomes",
+                  "Safe-to-apply set separated from numerics-changing set",
+                  "One-click repro: every fix ships with a benchmark harness",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
+                      <CheckCircle2 size={14} />
+                    </span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-10 flex flex-wrap items-center gap-3">
+                <a
+                  href="#demo"
+                  className="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                >
+                  <Play size={16} />
+                  See a live report
+                </a>
+                <a
+                  href="#roadmap"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white transition hover:border-white/20 hover:bg-white/10"
+                >
+                  Product roadmap
+                  <ArrowRight size={14} />
+                </a>
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.14),transparent_60%)] blur-2xl" />
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.9))] shadow-[0_30px_100px_rgba(2,6,23,0.55)]">
+                <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-400/10 text-cyan-300">
+                      <BarChart3 size={14} />
+                    </div>
+                    <span className="font-mono">trace-14c2b / resnet50_train</span>
+                  </div>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-emerald-300">
+                    Analyzed
                   </span>
-                  <span className="h-px flex-1 bg-white/8 ml-4" />
                 </div>
-                <h3 className="mt-5 text-2xl font-semibold tracking-[-0.03em] text-white">
-                  {item.title}
-                </h3>
-                <p className="mt-3 text-base leading-7 text-slate-300">
-                  {item.description}
-                </p>
-              </article>
-            ))}
+                <div className="grid grid-cols-3 divide-x divide-white/8 border-b border-white/8">
+                  {[
+                    { label: "GPU active", value: "42%" },
+                    { label: "Potential uplift", value: "+68%" },
+                    { label: "Est. monthly save", value: "$12.4k" },
+                  ].map((stat) => (
+                    <div key={stat.label} className="p-4">
+                      <div className="text-[0.65rem] uppercase tracking-[0.22em] text-slate-500">
+                        {stat.label}
+                      </div>
+                      <div className="mt-1 text-xl font-semibold tracking-[-0.03em] text-white">
+                        {stat.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <ul className="divide-y divide-white/8">
+                  {rankedFixes.map((fix) => (
+                    <li
+                      key={fix.rank}
+                      className="flex items-center gap-4 p-5 transition hover:bg-white/[0.03]"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 font-mono text-xs text-slate-400">
+                        {fix.rank}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium text-white">
+                          {fix.title}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem] text-slate-400">
+                          <span>Effort · {fix.effort}</span>
+                          <span>Confidence · {fix.confidence}</span>
+                          <span>Risk · {fix.risk}</span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-emerald-300">
+                          {fix.speedup}
+                        </div>
+                        <div className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">
+                          speedup
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex items-center justify-between border-t border-white/8 bg-white/[0.02] px-5 py-3 text-xs text-slate-400">
+                  <span className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
+                    Live recommendation stream
+                  </span>
+                  <span className="font-mono">report_7a1.json</span>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
+        {/* Product phases / roadmap */}
+        <section id="roadmap" className="py-24 sm:py-28">
+          <SectionHeading
+            eyebrow="Product evolution"
+            title="Profiler today. Autopilot tomorrow. Trust built in at every step."
+            description="We don't ship blind automation. The product walks from diagnosis to optimization to full autopilot — each phase validated by real workload outcomes before the next one turns on."
+          />
+          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            {productPhases.map((phase, index) => {
+              const Icon = phase.icon;
+              const isLive = phase.status === "Shipping now";
+              const isAccess = phase.status === "Early access";
+              return (
+                <article
+                  key={phase.phase}
+                  className="relative flex flex-col overflow-hidden rounded-[1.5rem] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.7))] p-6"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-cyan-300/80">
+                      {phase.phase}
+                    </span>
+                    <span
+                      className={`rounded-full px-3 py-1 text-[0.6rem] font-medium uppercase tracking-[0.18em] ${
+                        isLive
+                          ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                          : isAccess
+                            ? "border border-cyan-400/20 bg-cyan-400/10 text-cyan-300"
+                            : "border border-white/10 bg-white/[0.04] text-slate-400"
+                      }`}
+                    >
+                      {phase.status}
+                    </span>
+                  </div>
+                  <div className="mt-6 flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white">
+                    <Icon size={20} />
+                  </div>
+                  <h3 className="mt-5 text-xl font-semibold tracking-[-0.02em] text-white">
+                    {phase.title}
+                  </h3>
+                  <ul className="mt-4 flex flex-1 flex-col gap-2 text-sm text-slate-300">
+                    {phase.bullets.map((b) => (
+                      <li key={b} className="flex items-start gap-2">
+                        <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-cyan-300/70" />
+                        {b}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-6 h-px w-full bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                  <div className="mt-3 text-[0.65rem] font-mono uppercase tracking-[0.28em] text-slate-500">
+                    0{index + 1} · closed loop
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Capabilities */}
         <section id="capabilities" className="py-24 sm:py-28">
           <SectionHeading
             eyebrow="Capabilities"
-            title="Built for platform engineers operating real GPU workloads."
-            description="The product surface is designed for technical teams that care about telemetry fidelity, optimization quality, and controlled deployment into production systems."
+            title="Built for platform engineers operating production GPU fleets."
+            description="Telemetry fidelity, explainable ranking, and controlled rollout — the product surface is designed for technical teams, not executive dashboards."
           />
-          <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {capabilityCards.map((item) => (
-              <article
-                key={item.title}
-                className="group rounded-[1.5rem] border border-white/8 bg-white/5 p-6 transition hover:border-cyan-400/20 hover:bg-white/[0.07]"
-              >
-                <div className="h-10 w-10 rounded-2xl border border-white/10 bg-slate-900/80" />
-                <h3 className="mt-5 text-lg font-semibold text-white">
-                  {item.title}
-                </h3>
-                <p className="mt-3 text-sm leading-7 text-slate-300">
-                  {item.description}
-                </p>
-              </article>
-            ))}
+          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {capabilityCards.map((item) => {
+              const Icon = item.icon;
+              return (
+                <article
+                  key={item.title}
+                  className="group rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-cyan-400/20 hover:bg-white/[0.06]"
+                >
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/[0.02] text-cyan-200">
+                    <Icon size={20} />
+                  </div>
+                  <h3 className="mt-5 text-lg font-semibold text-white">
+                    {item.title}
+                  </h3>
+                  <p className="mt-3 text-sm leading-7 text-slate-300">
+                    {item.description}
+                  </p>
+                </article>
+              );
+            })}
           </div>
         </section>
 
+        {/* Integration / code snippet */}
+        <section className="py-24 sm:py-28">
+          <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+            <div>
+              <SectionHeading
+                align="left"
+                eyebrow="Drop in. Go."
+                title="One command. No hardware changes. No vendor lock-in."
+                description="Works as a CLI, a CI job, or a long-running agent. Bring your own cluster, keep your own training code. We just turn traces into ranked fixes."
+              />
+              <div className="mt-8 grid gap-4 text-sm">
+                {[
+                  { label: "Install", value: "pip install gpu-autopilot" },
+                  { label: "Profile", value: "gpu-pilot analyze --pid $TRAIN_PID" },
+                  { label: "Validate", value: "gpu-pilot bench --apply top-3" },
+                ].map((step) => (
+                  <div
+                    key={step.label}
+                    className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+                  >
+                    <span className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-cyan-300/80">
+                      {step.label}
+                    </span>
+                    <code className="font-mono text-sm text-slate-200">
+                      {step.value}
+                    </code>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="relative">
+              <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_bottom_left,rgba(99,102,241,0.18),transparent_60%)] blur-2xl" />
+              <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-slate-950/80 font-mono text-sm shadow-[0_30px_100px_rgba(2,6,23,0.55)] backdrop-blur-xl">
+                <div className="flex items-center border-b border-white/10 bg-white/5 px-4 py-3">
+                  <div className="flex gap-2">
+                    <div className="h-3 w-3 rounded-full bg-red-500/80" />
+                    <div className="h-3 w-3 rounded-full bg-yellow-500/80" />
+                    <div className="h-3 w-3 rounded-full bg-green-500/80" />
+                  </div>
+                  <div className="mx-auto text-xs text-slate-400">
+                    gpu-pilot ~ run.sh
+                  </div>
+                </div>
+                <div className="space-y-3 p-6 leading-7">
+                  <div>
+                    <span className="text-slate-500">$</span>{" "}
+                    <span className="text-cyan-300">gpu-pilot</span>{" "}
+                    <span className="text-slate-200">analyze</span>{" "}
+                    <span className="text-amber-300">--pid</span>{" "}
+                    <span className="text-slate-400">4492</span>
+                  </div>
+                  <div className="text-slate-400">
+                    <span className="text-emerald-300">✓</span> trace captured in
+                    18.2s (low-overhead mode)
+                  </div>
+                  <div className="text-slate-400">
+                    <span className="text-emerald-300">✓</span> classifier ran
+                    against 6 bottleneck families
+                  </div>
+                  <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-amber-200">
+                    <div className="text-xs uppercase tracking-[0.2em] text-amber-300/80">
+                      Primary bottleneck
+                    </div>
+                    <div className="mt-1 text-slate-100">
+                      Dataloader starvation · GPU idle 58% of step time
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">$</span>{" "}
+                    <span className="text-cyan-300">gpu-pilot</span>{" "}
+                    <span className="text-slate-200">bench</span>{" "}
+                    <span className="text-amber-300">--apply</span>{" "}
+                    <span className="text-slate-400">top-3</span>
+                  </div>
+                  <div className="space-y-1 text-slate-400">
+                    <div>
+                      <span className="text-emerald-300">✓</span> trial 1 ·
+                      workers=12, pin_memory=on{" "}
+                      <span className="text-emerald-300">+28.4%</span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-300">✓</span> trial 2 · bf16
+                      amp <span className="text-emerald-300">+19.1%</span>
+                    </div>
+                    <div>
+                      <span className="text-emerald-300">✓</span> trial 3 ·
+                      torch.compile reduce-overhead{" "}
+                      <span className="text-emerald-300">+14.6%</span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-emerald-100">
+                    <div className="flex items-center justify-between">
+                      <span>Final validated speedup</span>
+                      <span className="font-semibold">+61.2%</span>
+                    </div>
+                    <div className="mt-1 text-xs text-emerald-200/70">
+                      no loss divergence · no OOM · reproducible across 3 seeds
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ROI */}
         <section id="roi" className="py-24 sm:py-28">
-          <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(135deg,rgba(8,15,31,0.94),rgba(15,23,42,0.8))] p-8 sm:p-10 lg:p-12">
+          <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(135deg,rgba(8,15,31,0.94),rgba(15,23,42,0.8))] p-8 sm:p-10 lg:p-14">
             <SectionHeading
               eyebrow="ROI"
-              title="Immediate infrastructure leverage, not a long science project."
-              description="The business case is direct: reduce wasted GPU spend, increase throughput, and shrink the manual effort required to keep performance healthy as workloads evolve."
+              title="Immediate infrastructure leverage. Not a long science project."
+              description="Cut wasted GPU spend, increase throughput, and shrink the manual tuning backlog. No migrations. No new hardware. Just measurable deltas in production."
             />
-            <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((item) => (
                 <div
                   key={item.label}
-                  className="rounded-[1.5rem] border border-white/8 bg-black/20 p-6"
+                  className="group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-black/30 p-6"
                 >
-                  <div className="text-4xl font-semibold tracking-[-0.05em] text-white">
+                  <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cyan-400/10 blur-3xl transition group-hover:bg-cyan-400/20" />
+                  <div className="relative text-4xl font-semibold tracking-[-0.05em] text-white">
                     {item.value}
                   </div>
-                  <p className="mt-3 text-sm uppercase tracking-[0.2em] text-slate-400">
+                  <p className="relative mt-3 text-sm uppercase tracking-[0.2em] text-slate-400">
                     {item.label}
                   </p>
                 </div>
               ))}
             </div>
-          </div>
-        </section>
-
-        <section id="use-cases" className="py-24 sm:py-28">
-          <SectionHeading
-            eyebrow="Use cases"
-            title="One platform for every team where GPU efficiency matters."
-            description="Whether the bottleneck sits in training throughput, inference latency, simulation jobs, or execution engines, the optimization loop stays the same: measure, tune, validate, and keep learning."
-          />
-          <div className="mt-12 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {useCases.map((item) => (
-              <article
-                key={item}
-                className="rounded-[1.5rem] border border-white/8 bg-white/5 p-6"
+            <div className="mt-10 flex flex-col items-start gap-4 rounded-[1.5rem] border border-emerald-400/15 bg-emerald-400/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="max-w-xl text-sm leading-7 text-emerald-50/90">
+                A team running a $1.2M/yr GPU training budget typically recovers
+                <span className="font-semibold text-white">
+                  {" "}$280k–$420k
+                </span>{" "}
+                in the first quarter after onboarding — before any code changes
+                beyond recommended ones.
+              </div>
+              <a
+                href="#demo"
+                className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/20 sm:self-auto"
               >
-                <div className="text-sm uppercase tracking-[0.24em] text-cyan-300/80">
-                  {item}
-                </div>
-                <p className="mt-4 text-base leading-7 text-slate-300">
-                  Optimize kernels, memory behavior, and launch patterns across
-                  production GPU jobs without relying on a manual tuning backlog.
-                </p>
-              </article>
-            ))}
+                Model your savings
+                <ArrowRight size={14} />
+              </a>
+            </div>
           </div>
         </section>
 
+        {/* Moat */}
         <section className="py-24 sm:py-28">
           <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
             <div>
               <SectionHeading
+                align="left"
                 eyebrow="Moat"
-                title="A data flywheel that gets smarter as more workloads run through it."
-                description="This is not a static rules engine. The product compounds because every analyzed workload expands the space of bottlenecks, optimization outcomes, and policy quality."
+                title="A workload-performance dataset that compounds every week."
+                description="We're not another rules engine. Every analyzed workload expands the mapping from trace patterns to validated fixes — turning usage into defensibility."
               />
+              <div className="mt-8 grid gap-3 text-sm text-slate-300">
+                {[
+                  "Proprietary trace → fix → outcome dataset",
+                  "Validated optimization deltas across hardware",
+                  "Policies that improve as more teams onboard",
+                  "Trust layer: every change auditable and reversible",
+                ].map((item) => (
+                  <div
+                    key={item}
+                    className="flex items-start gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3"
+                  >
+                    <LineChart size={16} className="mt-0.5 text-cyan-300" />
+                    {item}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="rounded-[2rem] border border-white/8 bg-white/5 p-7">
-              <div className="grid gap-4">
-                {moatSteps.map((item, index) => (
+            <div className="relative overflow-hidden rounded-[2rem] border border-white/8 bg-white/[0.04] p-7">
+              <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
+              <div className="relative grid gap-4">
+                {[
+                  "More workloads analyzed",
+                  "Richer optimization traces",
+                  "Better policy learning",
+                  "Stronger recommendations",
+                  "More workloads onboard",
+                ].map((item, index, arr) => (
                   <div key={item} className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-semibold text-cyan-200">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-xs font-semibold text-cyan-200">
                       0{index + 1}
                     </div>
-                    <div className="flex-1 rounded-2xl border border-white/8 bg-slate-950/70 px-4 py-4 text-sm text-slate-200">
+                    <div className="relative flex-1 rounded-2xl border border-white/8 bg-slate-950/70 px-4 py-3 text-sm text-slate-200">
                       {item}
+                      {index < arr.length - 1 && (
+                        <span className="absolute -bottom-3 left-6 h-3 w-px bg-cyan-400/30" />
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
-              <div className="mt-6 rounded-[1.5rem] border border-emerald-400/15 bg-emerald-400/10 p-5">
+              <div className="relative mt-6 rounded-[1.5rem] border border-emerald-400/15 bg-emerald-400/10 p-5">
                 <p className="text-sm leading-7 text-emerald-50/90">
-                  More coverage leads to better optimization policies. Better
-                  policies drive better recommendations and safer automation.
-                  Better outcomes attract more workloads, strengthening the
-                  product again.
+                  Better data → better policies → better outcomes → more
+                  workloads. That loop is the product.
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="py-12 sm:py-16">
-          <div className="grid gap-6 lg:grid-cols-2">
-            {testimonials.map((item) => (
-              <blockquote
-                key={item.author}
-                className="rounded-[1.75rem] border border-white/8 bg-white/5 p-7"
-              >
-                <p className="text-lg leading-8 text-slate-100">
-                  &ldquo;{item.quote}&rdquo;
-                </p>
-                <footer className="mt-6 text-sm text-slate-400">
-                  {item.author} / {item.team}
-                </footer>
-              </blockquote>
-            ))}
-          </div>
-        </section>
-
+        {/* CTA */}
         <section id="demo" className="py-24 sm:py-28">
-          <div className="rounded-[2rem] border border-cyan-400/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.16),rgba(14,165,233,0.08),rgba(15,23,42,0.88))] p-8 sm:p-10 lg:p-14">
-            <div className="grid gap-10 lg:grid-cols-[1fr_0.75fr] lg:items-end">
+          <div className="relative overflow-hidden rounded-[2rem] border border-cyan-400/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.18),rgba(14,165,233,0.08),rgba(15,23,42,0.92))] p-8 sm:p-10 lg:p-14">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl" />
+            <div className="pointer-events-none absolute -left-24 bottom-0 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+            <div className="relative grid gap-10 lg:grid-cols-[1fr_0.75fr] lg:items-end">
               <div className="max-w-3xl">
-                <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-200">
-                  Final CTA
+                <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">
+                  <Zap size={12} />
+                  Early access
                 </span>
-                <h2 className="mt-4 text-4xl font-semibold tracking-[-0.05em] text-white sm:text-5xl">
+                <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-white sm:text-5xl lg:text-[3.2rem] lg:leading-[1.05]">
                   Turn wasted GPU compute into measurable performance gains.
                 </h2>
                 <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200">
-                  Show your team where GPU efficiency is leaking today, what can
-                  be tuned automatically, and how quickly those gains can land in
-                  production.
+                  See where your GPU efficiency leaks today, what can be tuned
+                  automatically, and how quickly those gains can land in
+                  production. First report is free.
                 </p>
+                <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                    No code changes to onboard
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                    SOC 2 ready
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-300" />
+                    Works with PyTorch + NVIDIA today
+                  </div>
+                </div>
               </div>
-              <form className="rounded-[1.75rem] border border-white/10 bg-slate-950/75 p-6 backdrop-blur">
+              <form className="rounded-[1.75rem] border border-white/10 bg-slate-950/80 p-6 backdrop-blur">
                 <label className="block text-sm text-slate-300">
                   Work email
                   <input
@@ -615,24 +881,83 @@ export default function Home() {
                   Primary workload
                   <input
                     type="text"
-                    placeholder="Inference, training, simulation..."
+                    placeholder="Inference, training, simulation…"
                     className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40 focus:bg-white/[0.07]"
                   />
                 </label>
+                <label className="mt-4 block text-sm text-slate-300">
+                  Monthly GPU spend
+                  <select
+                    className="mt-3 w-full appearance-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-cyan-400/40 focus:bg-white/[0.07]"
+                    defaultValue=""
+                  >
+                    <option value="" disabled className="bg-slate-900">
+                      Select a range
+                    </option>
+                    <option className="bg-slate-900">Under $25k</option>
+                    <option className="bg-slate-900">$25k – $100k</option>
+                    <option className="bg-slate-900">$100k – $500k</option>
+                    <option className="bg-slate-900">$500k+</option>
+                  </select>
+                </label>
                 <button
                   type="submit"
-                  className="mt-5 inline-flex w-full items-center justify-center rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100"
+                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100"
                 >
                   Request early access
+                  <ArrowRight size={14} />
                 </button>
                 <p className="mt-4 text-xs leading-6 text-slate-500">
-                  Placeholder form for design purposes. Replace with your CRM,
-                  waitlist, or booking flow.
+                  We'll reply within one business day with next steps.
                 </p>
               </form>
             </div>
           </div>
         </section>
+
+        {/* Footer */}
+        <footer className="mt-10 border-t border-white/8 py-12">
+          <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
+            <div>
+              <Link href="/" className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-200">
+                  <Cpu size={18} />
+                </span>
+                <span className="text-sm tracking-[0.18em] text-white uppercase">
+                  GPU Autopilot
+                </span>
+              </Link>
+              <p className="mt-4 max-w-xs text-sm leading-7 text-slate-400">
+                The performance autopilot for PyTorch on NVIDIA. From profiler
+                with opinions to closed-loop optimization.
+              </p>
+            </div>
+            {footerLinks.map((group) => (
+              <div key={group.heading}>
+                <h4 className="text-[0.7rem] font-semibold uppercase tracking-[0.28em] text-slate-500">
+                  {group.heading}
+                </h4>
+                <ul className="mt-4 space-y-3 text-sm text-slate-300">
+                  {group.items.map((item) => (
+                    <li key={item}>
+                      <a href="#" className="transition hover:text-white">
+                        {item}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-white/8 pt-6 text-xs text-slate-500 sm:flex-row sm:items-center">
+            <span>© {new Date().getFullYear()} GPU Autopilot. All rights reserved.</span>
+            <div className="flex items-center gap-5">
+              <a href="#" className="transition hover:text-white">Privacy</a>
+              <a href="#" className="transition hover:text-white">Terms</a>
+              <a href="#" className="transition hover:text-white">Status</a>
+            </div>
+          </div>
+        </footer>
       </div>
     </main>
   );

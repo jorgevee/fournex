@@ -14,7 +14,7 @@ The current repository already has a usable first-pass implementation in `python
 * [x] Phase 6 classifier regression tests implemented.
 * [x] Phase 7 explanation contract hardened for storage and UI consumption.
 * [x] Phase 8 initial phase-window and steady-state classification support implemented.
-* [ ] Phase 9 threshold tuning and taxonomy expansion implemented.
+* [x] Phase 9 threshold tuning and taxonomy expansion implemented.
 
 ## Product goal for v1
 
