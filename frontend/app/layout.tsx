@@ -13,9 +13,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GPU Performance Autopilot",
+  title: "Fournex — Open-source GPU Optimizer",
   description:
-    "Automatically profile and optimize GPU workloads in production for lower spend, higher throughput, and faster CUDA tuning.",
+    "Profile your PyTorch training and inference jobs, get the bottleneck named for you, and ship the highest-ROI fix — validated by safe experiments, not hope.",
+  openGraph: {
+    title: "Fournex — Open-source GPU Optimizer",
+    description:
+      "Profile your PyTorch training and inference jobs, get the bottleneck named for you, and ship the highest-ROI fix.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

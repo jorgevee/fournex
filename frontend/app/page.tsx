@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   CircuitBoard,
   Clock,
-  Cpu,
   Database,
   FlaskConical,
   Gauge,
@@ -24,6 +23,69 @@ import {
   Zap,
 } from "lucide-react";
 import Hero from "./_components/heromain";
+
+// ── Fournex logo mark ──────────────────────────────────────────────────────
+function FournexMark({ size = 36 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none">
+      <rect
+        x="0.75"
+        y="0.75"
+        width="30.5"
+        height="30.5"
+        rx="9"
+        fill="rgba(34,211,238,0.1)"
+        stroke="rgba(34,211,238,0.4)"
+        strokeWidth="1.5"
+      />
+      <rect x="7" y="7" width="7" height="7" rx="2" fill="rgb(34,211,238)" />
+      <rect
+        x="18"
+        y="7"
+        width="7"
+        height="7"
+        rx="2"
+        fill="rgba(34,211,238,0.45)"
+      />
+      <rect
+        x="7"
+        y="18"
+        width="7"
+        height="7"
+        rx="2"
+        fill="rgba(34,211,238,0.45)"
+      />
+      <rect
+        x="18"
+        y="18"
+        width="7"
+        height="7"
+        rx="2"
+        fill="rgba(34,211,238,0.2)"
+      />
+      <line
+        x1="14"
+        y1="10.5"
+        x2="18"
+        y2="10.5"
+        stroke="rgba(34,211,238,0.5)"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+      <line
+        x1="10.5"
+        y1="14"
+        x2="10.5"
+        y2="18"
+        stroke="rgba(34,211,238,0.5)"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+// ── Data ───────────────────────────────────────────────────────────────────
 
 const trustLogos = [
   "AI training teams",
@@ -90,10 +152,10 @@ const toneMap: Record<
   { ring: string; bg: string; text: string; dot: string }
 > = {
   emerald: {
-    ring: "ring-emerald-400/20",
-    bg: "bg-emerald-400/10",
-    text: "text-emerald-300",
-    dot: "bg-emerald-400",
+    ring: "ring-blue-400/20",
+    bg: "bg-blue-400/10",
+    text: "text-blue-300",
+    dot: "bg-blue-400",
   },
   cyan: {
     ring: "ring-cyan-400/20",
@@ -146,7 +208,7 @@ const rankedFixes = [
   },
   {
     rank: "03",
-    title: "Compile hot module with torch.compile (mode=\"reduce-overhead\")",
+    title: 'Compile hot module with torch.compile (mode="reduce-overhead")',
     effort: "Medium",
     confidence: "Medium",
     speedup: "+14%",
@@ -265,10 +327,12 @@ const footerLinks = [
     items: ["Docs", "Benchmarks", "Blog", "Security"],
   },
   {
-    heading: "Company",
-    items: ["About", "Careers", "Contact", "Press kit"],
+    heading: "Community",
+    items: ["GitHub", "Discord", "Contributing", "Roadmap"],
   },
 ];
+
+// ── Shared components ──────────────────────────────────────────────────────
 
 function SectionHeading({
   eyebrow,
@@ -281,10 +345,7 @@ function SectionHeading({
   description: string;
   align?: "center" | "left";
 }) {
-  const alignment =
-    align === "center"
-      ? "mx-auto text-center"
-      : "text-left";
+  const alignment = align === "center" ? "mx-auto text-center" : "text-left";
   return (
     <div className={`${alignment} flex w-full max-w-3xl flex-col gap-4`}>
       <span className="inline-flex items-center gap-2 self-start text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300/80">
@@ -301,29 +362,31 @@ function SectionHeading({
   );
 }
 
+// ── Page ───────────────────────────────────────────────────────────────────
+
 export default function Home() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_26%),radial-gradient(circle_at_80%_20%,_rgba(129,140,248,0.16),_transparent_22%),linear-gradient(180deg,_#020617_0%,_#050816_42%,_#02030a_100%)] text-white">
+    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.18),_transparent_26%),radial-gradient(circle_at_80%_20%,_rgba(99,102,241,0.16),_transparent_22%),linear-gradient(180deg,_#020617_0%,_#050816_42%,_#02030a_100%)] text-white">
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:96px_96px] [mask-image:radial-gradient(circle_at_center,black,transparent_82%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,_rgba(45,212,191,0.22),_transparent_60%)] blur-3xl" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.22),_transparent_60%)] blur-3xl" />
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 sm:px-8 lg:px-10">
-        {/* Header */}
+
+        {/* ── Header ── */}
         <header className="sticky top-0 z-20 -mx-6 border-b border-white/8 bg-slate-950/70 px-6 backdrop-blur-xl sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
           <div className="mx-auto flex h-[4.5rem] w-full max-w-7xl items-center justify-between">
             <Link href="/" className="flex items-center gap-3 text-sm font-medium">
-              <span className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/30 bg-[linear-gradient(135deg,rgba(56,189,248,0.18),rgba(16,185,129,0.12))] text-cyan-200 shadow-[0_0_30px_rgba(56,189,248,0.18)]">
-                <Cpu size={18} />
-              </span>
+              <FournexMark size={32} />
               <span className="flex flex-col leading-tight">
-                <span className="text-sm tracking-[0.18em] text-white uppercase">
-                  GPU Autopilot
+                <span className="text-sm font-semibold tracking-[-0.01em] text-white">
+                  Fournex
                 </span>
-                <span className="text-[0.65rem] tracking-[0.28em] text-slate-500 uppercase">
-                  Performance, on policy
+                <span className="text-[0.6rem] tracking-[0.24em] text-slate-500 uppercase">
+                  GPU Optimizer
                 </span>
               </span>
             </Link>
+
             <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
               <a href="#bottlenecks" className="transition hover:text-white">
                 Bottlenecks
@@ -338,30 +401,34 @@ export default function Home() {
                 Roadmap
               </a>
             </nav>
+
             <div className="flex items-center gap-3">
               <a
-                href="#demo"
-                className="hidden rounded-full border border-white/12 px-4 py-2 text-sm text-slate-200 transition hover:border-white/25 hover:bg-white/6 sm:inline-flex"
+                href="https://github.com/fournex/fournex"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden items-center gap-2 rounded-full border border-white/12 px-4 py-2 text-sm text-slate-300 transition hover:border-white/25 hover:bg-white/6 hover:text-white sm:inline-flex"
               >
-                Book a demo
+                <GitBranch size={14} />
+                1.4k
               </a>
               <a
                 href="#demo"
                 className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-100"
               >
-                Request access
+                Get started
                 <ArrowRight size={14} />
               </a>
             </div>
           </div>
         </header>
 
-        {/* Hero */}
+        {/* ── Hero ── */}
         <section aria-label="Hero" className="relative border-b border-white/8">
           <Hero />
         </section>
 
-        {/* Trust band */}
+        {/* ── Trust band ── */}
         <section className="border-b border-white/8 py-8">
           <div className="grid gap-5 lg:grid-cols-[260px_1fr] lg:items-center">
             <p className="text-xs font-medium uppercase tracking-[0.32em] text-slate-500">
@@ -380,7 +447,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Bottleneck showcase */}
+        {/* ── Bottleneck showcase ── */}
         <section id="bottlenecks" className="py-24 sm:py-28">
           <SectionHeading
             eyebrow="What we detect"
@@ -394,7 +461,7 @@ export default function Home() {
               return (
                 <article
                   key={item.title}
-                  className={`group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-white/20 hover:bg-white/[0.06]`}
+                  className="group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-white/20 hover:bg-white/[0.06]"
                 >
                   <div
                     className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ${tone.ring} ${tone.bg} ${tone.text}`}
@@ -423,7 +490,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Ranked recommendations mockup */}
+        {/* ── Ranked recommendations ── */}
         <section id="how-it-works" className="py-24 sm:py-28">
           <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-center">
             <div>
@@ -441,7 +508,7 @@ export default function Home() {
                   "One-click repro: every fix ships with a benchmark harness",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-3">
-                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300">
+                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-400/15 text-blue-300">
                       <CheckCircle2 size={14} />
                     </span>
                     {item}
@@ -451,7 +518,7 @@ export default function Home() {
               <div className="mt-10 flex flex-wrap items-center gap-3">
                 <a
                   href="#demo"
-                  className="inline-flex items-center gap-2 rounded-full bg-emerald-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+                  className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-400"
                 >
                   <Play size={16} />
                   See a live report
@@ -466,8 +533,9 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Mockup card */}
             <div className="relative">
-              <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.14),transparent_60%)] blur-2xl" />
+              <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_60%)] blur-2xl" />
               <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.9))] shadow-[0_30px_100px_rgba(2,6,23,0.55)]">
                 <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
                   <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -476,7 +544,7 @@ export default function Home() {
                     </div>
                     <span className="font-mono">trace-14c2b / resnet50_train</span>
                   </div>
-                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-emerald-300">
+                  <span className="rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-blue-300">
                     Analyzed
                   </span>
                 </div>
@@ -516,7 +584,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-emerald-300">
+                        <div className="text-sm font-semibold text-blue-300">
                           {fix.speedup}
                         </div>
                         <div className="text-[0.65rem] uppercase tracking-[0.2em] text-slate-500">
@@ -528,7 +596,7 @@ export default function Home() {
                 </ul>
                 <div className="flex items-center justify-between border-t border-white/8 bg-white/[0.02] px-5 py-3 text-xs text-slate-400">
                   <span className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
                     Live recommendation stream
                   </span>
                   <span className="font-mono">report_7a1.json</span>
@@ -538,7 +606,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Product phases / roadmap */}
+        {/* ── Roadmap ── */}
         <section id="roadmap" className="py-24 sm:py-28">
           <SectionHeading
             eyebrow="Product evolution"
@@ -562,7 +630,7 @@ export default function Home() {
                     <span
                       className={`rounded-full px-3 py-1 text-[0.6rem] font-medium uppercase tracking-[0.18em] ${
                         isLive
-                          ? "border border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                          ? "border border-blue-400/20 bg-blue-400/10 text-blue-300"
                           : isAccess
                             ? "border border-cyan-400/20 bg-cyan-400/10 text-cyan-300"
                             : "border border-white/10 bg-white/[0.04] text-slate-400"
@@ -595,7 +663,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Capabilities */}
+        {/* ── Capabilities ── */}
         <section id="capabilities" className="py-24 sm:py-28">
           <SectionHeading
             eyebrow="Capabilities"
@@ -625,7 +693,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Integration / code snippet */}
+        {/* ── CLI integration ── */}
         <section className="py-24 sm:py-28">
           <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
             <div>
@@ -637,9 +705,9 @@ export default function Home() {
               />
               <div className="mt-8 grid gap-4 text-sm">
                 {[
-                  { label: "Install", value: "pip install gpu-autopilot" },
-                  { label: "Profile", value: "gpu-pilot analyze --pid $TRAIN_PID" },
-                  { label: "Validate", value: "gpu-pilot bench --apply top-3" },
+                  { label: "Install", value: "pip install fournex" },
+                  { label: "Profile", value: "fournex analyze --pid $TRAIN_PID" },
+                  { label: "Validate", value: "fournex bench --apply top-3" },
                 ].map((step) => (
                   <div
                     key={step.label}
@@ -655,6 +723,8 @@ export default function Home() {
                 ))}
               </div>
             </div>
+
+            {/* Terminal */}
             <div className="relative">
               <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_bottom_left,rgba(99,102,241,0.18),transparent_60%)] blur-2xl" />
               <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-slate-950/80 font-mono text-sm shadow-[0_30px_100px_rgba(2,6,23,0.55)] backdrop-blur-xl">
@@ -665,23 +735,23 @@ export default function Home() {
                     <div className="h-3 w-3 rounded-full bg-green-500/80" />
                   </div>
                   <div className="mx-auto text-xs text-slate-400">
-                    gpu-pilot ~ run.sh
+                    fournex ~ run.sh
                   </div>
                 </div>
                 <div className="space-y-3 p-6 leading-7">
                   <div>
                     <span className="text-slate-500">$</span>{" "}
-                    <span className="text-cyan-300">gpu-pilot</span>{" "}
+                    <span className="text-cyan-300">fournex</span>{" "}
                     <span className="text-slate-200">analyze</span>{" "}
                     <span className="text-amber-300">--pid</span>{" "}
                     <span className="text-slate-400">4492</span>
                   </div>
                   <div className="text-slate-400">
-                    <span className="text-emerald-300">✓</span> trace captured in
+                    <span className="text-blue-300">✓</span> trace captured in
                     18.2s (low-overhead mode)
                   </div>
                   <div className="text-slate-400">
-                    <span className="text-emerald-300">✓</span> classifier ran
+                    <span className="text-blue-300">✓</span> classifier ran
                     against 6 bottleneck families
                   </div>
                   <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-amber-200">
@@ -694,33 +764,33 @@ export default function Home() {
                   </div>
                   <div>
                     <span className="text-slate-500">$</span>{" "}
-                    <span className="text-cyan-300">gpu-pilot</span>{" "}
+                    <span className="text-cyan-300">fournex</span>{" "}
                     <span className="text-slate-200">bench</span>{" "}
                     <span className="text-amber-300">--apply</span>{" "}
                     <span className="text-slate-400">top-3</span>
                   </div>
                   <div className="space-y-1 text-slate-400">
                     <div>
-                      <span className="text-emerald-300">✓</span> trial 1 ·
+                      <span className="text-blue-300">✓</span> trial 1 ·
                       workers=12, pin_memory=on{" "}
-                      <span className="text-emerald-300">+28.4%</span>
+                      <span className="text-blue-300">+28.4%</span>
                     </div>
                     <div>
-                      <span className="text-emerald-300">✓</span> trial 2 · bf16
-                      amp <span className="text-emerald-300">+19.1%</span>
+                      <span className="text-blue-300">✓</span> trial 2 · bf16
+                      amp <span className="text-blue-300">+19.1%</span>
                     </div>
                     <div>
-                      <span className="text-emerald-300">✓</span> trial 3 ·
+                      <span className="text-blue-300">✓</span> trial 3 ·
                       torch.compile reduce-overhead{" "}
-                      <span className="text-emerald-300">+14.6%</span>
+                      <span className="text-blue-300">+14.6%</span>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-emerald-100">
+                  <div className="rounded-xl border border-blue-400/20 bg-blue-400/10 p-3 text-blue-100">
                     <div className="flex items-center justify-between">
                       <span>Final validated speedup</span>
                       <span className="font-semibold">+61.2%</span>
                     </div>
-                    <div className="mt-1 text-xs text-emerald-200/70">
+                    <div className="mt-1 text-xs text-blue-200/70">
                       no loss divergence · no OOM · reproducible across 3 seeds
                     </div>
                   </div>
@@ -730,7 +800,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ROI */}
+        {/* ── ROI ── */}
         <section id="roi" className="py-24 sm:py-28">
           <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(135deg,rgba(8,15,31,0.94),rgba(15,23,42,0.8))] p-8 sm:p-10 lg:p-14">
             <SectionHeading
@@ -754,8 +824,8 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <div className="mt-10 flex flex-col items-start gap-4 rounded-[1.5rem] border border-emerald-400/15 bg-emerald-400/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
-              <div className="max-w-xl text-sm leading-7 text-emerald-50/90">
+            <div className="mt-10 flex flex-col items-start gap-4 rounded-[1.5rem] border border-blue-400/15 bg-blue-400/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="max-w-xl text-sm leading-7 text-blue-50/90">
                 A team running a $1.2M/yr GPU training budget typically recovers
                 <span className="font-semibold text-white">
                   {" "}$280k–$420k
@@ -765,7 +835,7 @@ export default function Home() {
               </div>
               <a
                 href="#demo"
-                className="inline-flex items-center gap-2 self-start rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-100 transition hover:bg-emerald-400/20 sm:self-auto"
+                className="inline-flex items-center gap-2 self-start rounded-full border border-blue-400/30 bg-blue-400/10 px-4 py-2 text-sm text-blue-100 transition hover:bg-blue-400/20 sm:self-auto"
               >
                 Model your savings
                 <ArrowRight size={14} />
@@ -774,7 +844,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Moat */}
+        {/* ── Moat ── */}
         <section className="py-24 sm:py-28">
           <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
             <div>
@@ -824,8 +894,8 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <div className="relative mt-6 rounded-[1.5rem] border border-emerald-400/15 bg-emerald-400/10 p-5">
-                <p className="text-sm leading-7 text-emerald-50/90">
+              <div className="relative mt-6 rounded-[1.5rem] border border-blue-400/15 bg-blue-400/10 p-5">
+                <p className="text-sm leading-7 text-blue-50/90">
                   Better data → better policies → better outcomes → more
                   workloads. That loop is the product.
                 </p>
@@ -834,16 +904,16 @@ export default function Home() {
           </div>
         </section>
 
-        {/* CTA */}
+        {/* ── CTA ── */}
         <section id="demo" className="py-24 sm:py-28">
           <div className="relative overflow-hidden rounded-[2rem] border border-cyan-400/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.18),rgba(14,165,233,0.08),rgba(15,23,42,0.92))] p-8 sm:p-10 lg:p-14">
-            <div className="pointer-events-none absolute -right-16 -top-16 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl" />
-            <div className="pointer-events-none absolute -left-24 bottom-0 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+            <div className="pointer-events-none absolute -right-16 -top-16 h-72 w-72 rounded-full bg-blue-400/10 blur-3xl" />
+            <div className="pointer-events-none absolute -left-24 bottom-0 h-72 w-72 rounded-full bg-indigo-400/10 blur-3xl" />
             <div className="relative grid gap-10 lg:grid-cols-[1fr_0.75fr] lg:items-end">
               <div className="max-w-3xl">
                 <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200">
                   <Zap size={12} />
-                  Early access
+                  Early access · Open source
                 </span>
                 <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-white sm:text-5xl lg:text-[3.2rem] lg:leading-[1.05]">
                   Turn wasted GPU compute into measurable performance gains.
@@ -855,16 +925,16 @@ export default function Home() {
                 </p>
                 <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-300">
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 size={16} className="text-emerald-300" />
+                    <CheckCircle2 size={16} className="text-blue-300" />
                     No code changes to onboard
                   </div>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 size={16} className="text-emerald-300" />
-                    SOC 2 ready
+                    <CheckCircle2 size={16} className="text-blue-300" />
+                    Works with PyTorch + NVIDIA today
                   </div>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 size={16} className="text-emerald-300" />
-                    Works with PyTorch + NVIDIA today
+                    <CheckCircle2 size={16} className="text-blue-300" />
+                    Apache 2.0 license
                   </div>
                 </div>
               </div>
@@ -881,7 +951,7 @@ export default function Home() {
                   Primary workload
                   <input
                     type="text"
-                    placeholder="Inference, training, simulation…"
+                    placeholder="Training, inference, simulation…"
                     className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40 focus:bg-white/[0.07]"
                   />
                 </label>
@@ -915,22 +985,30 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Footer */}
+        {/* ── Footer ── */}
         <footer className="mt-10 border-t border-white/8 py-12">
           <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
             <div>
               <Link href="/" className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-400/10 text-cyan-200">
-                  <Cpu size={18} />
-                </span>
-                <span className="text-sm tracking-[0.18em] text-white uppercase">
-                  GPU Autopilot
+                <FournexMark size={28} />
+                <span className="text-sm font-semibold tracking-[-0.01em] text-white">
+                  Fournex
                 </span>
               </Link>
               <p className="mt-4 max-w-xs text-sm leading-7 text-slate-400">
-                The performance autopilot for PyTorch on NVIDIA. From profiler
-                with opinions to closed-loop optimization.
+                Open-source GPU performance optimizer for PyTorch + NVIDIA.
+                From profiler to closed-loop autopilot.
               </p>
+              <div className="mt-5 flex items-center gap-3">
+                <a
+                  href="https://github.com/fournex/fournex"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 transition hover:border-white/20 hover:text-white"
+                >
+                  <GitBranch size={14} />
+                </a>
+              </div>
             </div>
             {footerLinks.map((group) => (
               <div key={group.heading}>
@@ -950,7 +1028,7 @@ export default function Home() {
             ))}
           </div>
           <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-white/8 pt-6 text-xs text-slate-500 sm:flex-row sm:items-center">
-            <span>© {new Date().getFullYear()} GPU Autopilot. All rights reserved.</span>
+            <span>© {new Date().getFullYear()} Fournex. Open source under Apache 2.0.</span>
             <div className="flex items-center gap-5">
               <a href="#" className="transition hover:text-white">Privacy</a>
               <a href="#" className="transition hover:text-white">Terms</a>
@@ -958,6 +1036,7 @@ export default function Home() {
             </div>
           </div>
         </footer>
+
       </div>
     </main>
   );

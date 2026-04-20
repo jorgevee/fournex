@@ -8,6 +8,7 @@ import {
   Database,
   Boxes,
   Clock,
+  GitBranch,
   Zap,
 } from "lucide-react";
 
@@ -23,33 +24,34 @@ const detectedBottlenecks = [
     label: "Dataloader starvation",
     severity: 82,
     metric: "GPU idle 58%",
-    tone: "bg-emerald-400 text-emerald-300 border-emerald-400/30",
+    tone: "bg-blue-400 text-blue-300 border-blue-400/30",
   },
   {
     icon: Boxes,
     label: "Small-batch inefficiency",
     severity: 64,
     metric: "Occupancy 31%",
-    tone: "bg-cyan-400 text-cyan-300 border-cyan-400/30",
+    tone: "bg-indigo-400 text-indigo-300 border-indigo-400/30",
   },
   {
     icon: Clock,
     label: "Host-device sync",
     severity: 48,
     metric: "14 stalls / step",
-    tone: "bg-amber-400 text-amber-300 border-amber-400/30",
+    tone: "bg-sky-400 text-sky-300 border-sky-400/30",
   },
 ];
 
 export default function Hero() {
   return (
     <section className="relative w-full py-20 sm:py-24 lg:py-28">
-      <div className="grid items-start gap-14 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16">
+      <div className="grid items-center gap-14 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-16">
         {/* Left: Copy */}
         <div className="flex flex-col items-start gap-8">
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-sm font-medium text-emerald-300">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            GPU Autopilot for PyTorch + NVIDIA
+          {/* Open source badge */}
+          <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1 text-sm font-medium text-blue-300">
+            <span className="flex h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+            Open source · Apache 2.0
           </div>
 
           <div className="space-y-6">
@@ -58,7 +60,7 @@ export default function Hero() {
               <span className="hidden lg:inline">
                 <br />
               </span>
-              <span className="text-emerald-300">70% of your GPU.</span>
+              <span className="text-blue-300">70% of your GPU.</span>
             </h1>
 
             <p className="max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
@@ -70,8 +72,8 @@ export default function Hero() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Link
-              href="#demo"
-              className="group inline-flex items-center justify-center gap-2 rounded-full bg-emerald-400 px-6 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300"
+              href="#cta"
+              className="group inline-flex items-center justify-center gap-2 rounded-full bg-blue-500 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-blue-400"
             >
               <Zap size={18} />
               Start saving compute
@@ -80,13 +82,15 @@ export default function Hero() {
                 className="transition group-hover:translate-x-0.5"
               />
             </Link>
-            <Link
-              href="#how-it-works"
+            <a
+              href="https://github.com/fournex/fournex"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3.5 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/10"
             >
-              <Code2 size={18} />
-              See a sample report
-            </Link>
+              <GitBranch size={18} />
+              View on GitHub
+            </a>
           </div>
 
           {/* Stat strip */}
@@ -122,7 +126,7 @@ export default function Hero() {
                   </div>
                 </div>
               </div>
-              <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-[0.6rem] font-medium uppercase tracking-[0.2em] text-emerald-300">
+              <span className="rounded-full border border-blue-400/25 bg-blue-400/10 px-3 py-1 text-[0.6rem] font-medium uppercase tracking-[0.2em] text-blue-300">
                 Analyzed
               </span>
             </div>
@@ -141,7 +145,7 @@ export default function Hero() {
                 <div className="text-[0.6rem] uppercase tracking-[0.22em] text-slate-500">
                   Uplift
                 </div>
-                <div className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-emerald-300">
+                <div className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-blue-300">
                   +68%
                 </div>
               </div>
@@ -155,7 +159,7 @@ export default function Hero() {
               </div>
             </div>
 
-            {/* Bottleneck rows with solid severity bars */}
+            {/* Bottleneck rows with severity bars */}
             <ul className="divide-y divide-white/10">
               {detectedBottlenecks.map((b) => {
                 const Icon = b.icon;
@@ -193,7 +197,7 @@ export default function Hero() {
             {/* Footer action */}
             <div className="flex items-center justify-between border-t border-white/10 px-5 py-4">
               <div className="text-xs text-slate-400">
-                <span className="font-mono text-emerald-300">3 fixes</span>{" "}
+                <span className="font-mono text-blue-300">3 fixes</span>{" "}
                 ranked, ready to validate
               </div>
               <button
@@ -209,7 +213,7 @@ export default function Hero() {
           {/* Floating badge */}
           <div className="absolute -bottom-5 -right-3 hidden rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl md:block">
             <div className="flex items-center gap-3">
-              <div className="rounded-lg border border-emerald-400/30 bg-emerald-400/10 p-2 text-emerald-300">
+              <div className="rounded-lg border border-blue-400/30 bg-blue-400/10 p-2 text-blue-300">
                 <Zap size={16} />
               </div>
               <div>
