@@ -1,0 +1,445 @@
+# Recommendation catalog — policy definitions, not engine logic.
+# Each entry is a recommendation template the rules engine can emit.
+
+# ── Input pipeline ────────────────────────────────────────────────────────────
+
+- id: rec_input_num_workers
+  title: Increase DataLoader workers
+  category: input_pipeline
+  applies_to: [input_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: high
+  effort: low
+  safety: medium
+  action_templates:
+    - "Benchmark num_workers at 4, 8, and 16 (relative to available CPU cores)."
+    - "Start with num_workers = cpu_count // 2 and tune from there."
+    - "Watch for step-time variance and CPU memory pressure as workers increase."
+  validation_templates:
+    - "GPU active fraction should rise after increasing workers."
+    - "DataLoader wait fraction should drop below 0.10."
+    - "Step-time standard deviation should decrease."
+  caveats:
+    - "Too many workers can cause CPU contention or excessive RAM pressure."
+    - "On machines with few cores, gains plateau quickly."
+
+- id: rec_input_pinned_memory
+  title: Enable pinned memory for DataLoader
+  category: input_pipeline
+  applies_to: [input_bound, copy_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  effort: low
+  safety: high
+  action_templates:
+    - "Set pin_memory=True in DataLoader constructor."
+    - "Verify the host has enough page-locked memory available."
+  validation_templates:
+    - "H2D copy time should decrease after enabling pin_memory."
+    - "GPU active fraction should improve slightly."
+  caveats:
+    - "Pinned memory is limited; too many workers with pin_memory can exhaust it."
+
+- id: rec_input_prefetch_factor
+  title: Increase DataLoader prefetch factor
+  category: input_pipeline
+  applies_to: [input_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  effort: low
+  safety: high
+  action_templates:
+    - "Set prefetch_factor=2 or 4 (requires num_workers > 0)."
+    - "Monitor RAM usage — prefetching increases memory held in worker queues."
+  validation_templates:
+    - "Batch-ready gaps between steps should shrink."
+    - "DataLoader wait fraction should decrease."
+  caveats:
+    - "prefetch_factor requires num_workers >= 1."
+
+- id: rec_input_move_transforms
+  title: Move CPU-heavy transforms off the critical path
+  category: input_pipeline
+  applies_to: [input_bound]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: high
+  action_templates:
+    - "Profile __getitem__ to identify expensive per-sample operations."
+    - "Pre-compute or cache expensive transforms (resizing, tokenizing, decoding)."
+    - "Consider offline preprocessing and caching to disk or memory."
+  validation_templates:
+    - "DataLoader wait fraction should drop significantly."
+    - "Step-time should become more consistent."
+  caveats:
+    - "Offline caching trades storage for compute — ensure disk I/O is not the new bottleneck."
+
+# ── Host-to-device copy ───────────────────────────────────────────────────────
+
+- id: rec_copy_pinned_memory
+  title: Enable pinned memory to speed up H2D transfers
+  category: copy
+  applies_to: [copy_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Set pin_memory=True in DataLoader."
+    - "Use tensor.pin_memory() for tensors created outside DataLoader."
+  validation_templates:
+    - "H2D copy fraction should drop after enabling pin_memory."
+  caveats:
+    - "Available pinned memory is limited by the OS."
+
+- id: rec_copy_overlap
+  title: Overlap H2D copies with compute
+  category: copy
+  applies_to: [copy_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Use non_blocking=True when calling .cuda() or .to(device)."
+    - "Ensure the CPU side does not immediately block on the result."
+    - "Prefetch the next batch onto the GPU while the current one is processing."
+  validation_templates:
+    - "H2D copy time should no longer appear as a sequential stall."
+    - "Step time should decrease as copy and compute overlap."
+  caveats:
+    - "non_blocking requires the tensor to be in pinned memory for true async behavior."
+
+- id: rec_copy_reduce_volume
+  title: Reduce host-to-device transfer volume
+  category: copy
+  applies_to: [copy_bound]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: high
+  action_templates:
+    - "Audit which tensors are moved to GPU each step — avoid redundant copies."
+    - "Keep persistent buffers on device across steps rather than re-uploading."
+    - "Move augmentation or preprocessing to GPU using frameworks like Kornia or DALI."
+  validation_templates:
+    - "H2D copy fraction should decrease."
+    - "Bytes moved per step should drop."
+  caveats: []
+
+# ── Synchronization ───────────────────────────────────────────────────────────
+
+- id: rec_sync_remove_item
+  title: Remove .item() calls from the hot path
+  category: synchronization
+  applies_to: [sync_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Search the training loop for .item(), .cpu(), and .numpy() calls."
+    - "Batch scalar reads — accumulate tensors and call .item() once per N steps."
+    - "Use tensor operations instead of Python scalars in the forward/backward pass."
+  validation_templates:
+    - "Sync wait fraction should drop significantly."
+    - "Host stall events per step should decrease."
+  caveats:
+    - "Some .item() calls may be load-bearing for conditional logic — audit carefully."
+
+- id: rec_sync_batch_logging
+  title: Batch and defer metric logging
+  category: synchronization
+  applies_to: [sync_bound]
+  prerequisites: {}
+  impact: medium
+  effort: low
+  safety: high
+  action_templates:
+    - "Log metrics every N steps rather than every step."
+    - "Accumulate loss tensors and average before reading to CPU."
+    - "Move checkpoint and logging I/O off the critical training loop."
+  validation_templates:
+    - "Sync events per step should decrease."
+    - "Step time should become more uniform."
+  caveats: []
+
+- id: rec_sync_reduce_explicit
+  title: Reduce explicit device synchronizations
+  category: synchronization
+  applies_to: [sync_bound]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Search for torch.cuda.synchronize() calls and remove where not required."
+    - "Avoid synchronizing inside loops — synchronize at step boundaries if needed."
+    - "Replace event.synchronize() with event.wait() where possible."
+  validation_templates:
+    - "Sync wait fraction should drop."
+    - "GPU timeline gaps should shrink."
+  caveats:
+    - "Some synchronization may be required for correctness — verify before removing."
+
+# ── GPU underutilization ──────────────────────────────────────────────────────
+
+- id: rec_util_increase_batch
+  title: Increase batch size to improve GPU occupancy
+  category: occupancy
+  applies_to: [underutilized_gpu]
+  prerequisites: {}
+  impact: high
+  effort: low
+  safety: medium
+  action_templates:
+    - "Double the per-device batch size and monitor GPU utilization."
+    - "Use gradient accumulation if memory prevents a larger batch."
+    - "Benchmark step time per sample — it should drop as batch size grows."
+  validation_templates:
+    - "GPU utilization should rise above 60%."
+    - "Throughput (samples/sec) should increase."
+  caveats:
+    - "Larger batches can affect model convergence — monitor validation metrics."
+    - "Memory headroom must be sufficient."
+
+- id: rec_util_mixed_precision
+  title: Enable mixed precision (FP16/BF16) training
+  category: occupancy
+  applies_to: [underutilized_gpu, memory_pressure]
+  prerequisites:
+    framework: [pytorch]
+    mixed_precision_enabled: false
+  impact: high
+  effort: low
+  safety: medium
+  action_templates:
+    - "Wrap the training loop with torch.cuda.amp.autocast()."
+    - "Use GradScaler to handle FP16 gradient underflow."
+    - "Prefer BF16 on Ampere+ GPUs (A100, H100) for numerical stability."
+  validation_templates:
+    - "GPU utilization should increase — tensor cores are engaged with FP16/BF16."
+    - "Step time should drop, especially for matrix-heavy workloads."
+    - "Memory usage should decrease, allowing larger batches."
+  caveats:
+    - "Some ops do not support FP16 and will auto-cast to FP32 — check for NaN/Inf."
+    - "BF16 has lower numerical precision than FP32."
+
+- id: rec_util_inspect_kernels
+  title: Profile for small or fragmented kernel execution
+  category: occupancy
+  applies_to: [underutilized_gpu, launch_bound]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: high
+  action_templates:
+    - "Run torch.profiler or Nsight Systems to capture a kernel-level trace."
+    - "Look for many short (<10 µs) kernels — these indicate launch overhead."
+    - "Identify which ops produce the most kernel launches per step."
+  validation_templates:
+    - "After fusion or compile, average kernel duration should increase."
+    - "Kernel launch count per step should decrease."
+  caveats:
+    - "Profiling adds overhead — collect only a few steps for the baseline."
+
+# ── Kernel launch overhead ────────────────────────────────────────────────────
+
+- id: rec_launch_torch_compile
+  title: Enable torch.compile to reduce kernel launch overhead
+  category: kernel_launch
+  applies_to: [launch_bound, underutilized_gpu]
+  prerequisites:
+    framework: [pytorch]
+  impact: high
+  effort: low
+  safety: medium
+  action_templates:
+    - "Wrap the model with model = torch.compile(model)."
+    - "Use mode='reduce-overhead' for launch-heavy workloads."
+    - "Warm up the compiled model for several steps before benchmarking."
+  validation_templates:
+    - "Kernel launch count per step should decrease after compilation."
+    - "Step time should drop after the warm-up phase."
+  caveats:
+    - "torch.compile adds a one-time compilation cost on first run."
+    - "Dynamic shapes can cause repeated recompilation — prefer stable shapes."
+    - "Do not apply if graph breaks are severe; profile first."
+
+- id: rec_launch_cuda_graphs
+  title: Use CUDA Graphs to eliminate per-step launch overhead
+  category: kernel_launch
+  applies_to: [launch_bound]
+  prerequisites:
+    framework: [pytorch]
+    shape_stable: true
+  impact: high
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Capture a static training step with torch.cuda.CUDAGraph()."
+    - "Use torch.cuda.make_graphed_callables() for a simpler API."
+    - "Ensure input shapes are fixed — CUDA Graphs require static shapes."
+  validation_templates:
+    - "CPU-side launch time should drop to near zero for captured steps."
+    - "Step time should decrease significantly for launch-bound workloads."
+  caveats:
+    - "Requires static input shapes — do not use if shapes vary across steps."
+    - "Graph capture and replay add complexity to the training loop."
+
+- id: rec_launch_fuse_ops
+  title: Fuse small operations to reduce kernel launch count
+  category: kernel_launch
+  applies_to: [launch_bound]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: high
+  action_templates:
+    - "Replace chains of elementwise ops with fused alternatives (e.g., F.gelu vs manual)."
+    - "Use torch.compile or custom Triton kernels for hot elementwise sequences."
+    - "Identify high-frequency op patterns in profiler output and target them first."
+  validation_templates:
+    - "Kernel launch count per step should decrease."
+    - "Median kernel duration should increase (fewer, larger kernels)."
+  caveats: []
+
+# ── Memory pressure ───────────────────────────────────────────────────────────
+
+- id: rec_mem_reduce_batch
+  title: Reduce batch size or sequence length to relieve memory pressure
+  category: memory
+  applies_to: [memory_pressure]
+  prerequisites: {}
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Reduce per-device batch size until peak memory drops below 80% capacity."
+    - "Use gradient accumulation to maintain effective batch size."
+    - "Reduce sequence length if truncation is acceptable for the task."
+  validation_templates:
+    - "Peak memory ratio should drop below 0.85."
+    - "OOM errors should stop occurring."
+  caveats:
+    - "Reducing batch size may slow throughput — use gradient accumulation to compensate."
+
+- id: rec_mem_gradient_checkpointing
+  title: Enable gradient checkpointing to reduce activation memory
+  category: memory
+  applies_to: [memory_pressure]
+  prerequisites:
+    framework: [pytorch]
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Call model.gradient_checkpointing_enable() for HuggingFace models."
+    - "Use torch.utils.checkpoint.checkpoint() on memory-heavy layers."
+    - "Target transformer blocks or large residual layers first."
+  validation_templates:
+    - "Peak memory usage should decrease significantly."
+    - "Backward pass time may increase slightly — measure the tradeoff."
+  caveats:
+    - "Recomputes activations during backward — increases compute by ~30%."
+
+- id: rec_mem_reduce_alloc_churn
+  title: Reduce allocation churn and memory fragmentation
+  category: memory
+  applies_to: [memory_pressure]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: high
+  action_templates:
+    - "Preallocate output buffers and reuse them across steps."
+    - "Avoid creating new tensors inside the training loop when possible."
+    - "Set PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128 to reduce fragmentation."
+  validation_templates:
+    - "Peak memory ratio should stabilize rather than creeping up over time."
+    - "Allocation/free events per step should decrease."
+  caveats: []
+
+# ── Shape instability ─────────────────────────────────────────────────────────
+
+- id: rec_shape_bucket_inputs
+  title: Bucket or pad inputs to stabilize execution shapes
+  category: shape_stability
+  applies_to: [shape_instability]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: high
+  action_templates:
+    - "Group samples into length buckets and pad within each bucket."
+    - "Use a custom sampler that minimizes intra-batch shape variance."
+    - "Pre-sort the dataset by sequence length before batching."
+  validation_templates:
+    - "Shape volatility ratio should drop below 0.05."
+    - "torch.compile recompilation frequency should decrease."
+  caveats:
+    - "Bucketing can introduce mild sampling bias — shuffle within buckets."
+
+- id: rec_shape_disable_dynamic
+  title: Reduce dynamic shape overhead
+  category: shape_stability
+  applies_to: [shape_instability]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Fix input shapes where possible by padding to a maximum length."
+    - "Use torch.compile(dynamic=False) if shapes are nearly static."
+    - "Profile recompilation events with TORCH_LOGS=recompiles."
+  validation_templates:
+    - "Recompilation count should decrease."
+    - "Step time variance should decrease."
+  caveats:
+    - "Padding wastes compute if sequences vary widely in length."
+
+# ── Telemetry ─────────────────────────────────────────────────────────────────
+
+- id: rec_telemetry_check_hooks
+  title: Verify telemetry collection hooks are attached
+  category: telemetry
+  applies_to: [insufficient_telemetry]
+  prerequisites: {}
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Call autopilot.init() before the training loop begins."
+    - "Verify that instrument_dataloader() wraps the DataLoader."
+    - "Confirm step_start and step_end events appear in the event log."
+  validation_templates:
+    - "Event count per step should include dataloader_span and step_end records."
+    - "GPU samples should appear if NVML is available."
+  caveats: []
+
+- id: rec_telemetry_enable_profiler
+  title: Enable profiler to collect kernel-level data
+  category: telemetry
+  applies_to: [insufficient_telemetry, launch_bound]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  effort: low
+  safety: high
+  action_templates:
+    - "Use torch.profiler.profile() to capture a few training steps."
+    - "Export a Chrome trace and inspect kernel durations and launch gaps."
+    - "Enable profiler_windows_exported to feed data into the classifier."
+  validation_templates:
+    - "profiler_windows_exported should be > 0 after profiling."
+    - "Kernel-level evidence should appear in the bottleneck diagnosis."
+  caveats:
+    - "Profiling adds overhead — collect only a few steps, not the full run."

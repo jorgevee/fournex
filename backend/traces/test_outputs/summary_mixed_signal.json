@@ -68,10 +68,144 @@
       "utilization_instability_pct": 2.0
     },
     "primary_bottleneck": "underutilized_gpu",
+    "recommendation_bundles": [
+      {
+        "category": "input_pipeline",
+        "label": "Input Pipeline Optimization",
+        "recommendation_ids": [
+          "rec_input_num_workers",
+          "rec_input_pinned_memory",
+          "rec_input_prefetch_factor"
+        ]
+      },
+      {
+        "category": "copy",
+        "label": "Host-to-Device Transfer Optimization",
+        "recommendation_ids": [
+          "rec_copy_pinned_memory",
+          "rec_copy_overlap"
+        ]
+      }
+    ],
     "recommendations": [
-      "Increase batch size if memory allows.",
-      "Look for small kernels or fragmented execution.",
-      "Use profiler windows to confirm launch overhead or input stalls."
+      {
+        "actions": [
+          "Benchmark num_workers at 4, 8, and 16 (relative to available CPU cores).",
+          "Start with num_workers = cpu_count // 2 and tune from there.",
+          "Watch for step-time variance and CPU memory pressure as workers increase."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.26,
+        "effort": "low",
+        "expected_impact": "high",
+        "id": "rec_input_num_workers",
+        "priority": "medium",
+        "risks": [
+          "Too many workers can cause CPU contention or excessive RAM pressure.",
+          "On machines with few cores, gains plateau quickly."
+        ],
+        "score": 0.554,
+        "title": "Increase DataLoader workers",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "GPU active fraction should rise after increasing workers.",
+          "DataLoader wait fraction should drop below 0.10.",
+          "Step-time standard deviation should decrease."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      },
+      {
+        "actions": [
+          "Set pin_memory=True in DataLoader.",
+          "Use tensor.pin_memory() for tensors created outside DataLoader."
+        ],
+        "category": "copy",
+        "confidence": 0.18,
+        "effort": "low",
+        "expected_impact": "high",
+        "id": "rec_copy_pinned_memory",
+        "priority": "medium",
+        "risks": [
+          "Available pinned memory is limited by the OS."
+        ],
+        "score": 0.547,
+        "title": "Enable pinned memory to speed up H2D transfers",
+        "triggered_by": "rule_copy_bound_moderate",
+        "validation": [
+          "H2D copy fraction should drop after enabling pin_memory."
+        ],
+        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+      },
+      {
+        "actions": [
+          "Set pin_memory=True in DataLoader constructor.",
+          "Verify the host has enough page-locked memory available."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.26,
+        "effort": "low",
+        "expected_impact": "medium",
+        "id": "rec_input_pinned_memory",
+        "priority": "low",
+        "risks": [
+          "Pinned memory is limited; too many workers with pin_memory can exhaust it."
+        ],
+        "score": 0.499,
+        "title": "Enable pinned memory for DataLoader",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "H2D copy time should decrease after enabling pin_memory.",
+          "GPU active fraction should improve slightly."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      },
+      {
+        "actions": [
+          "Set prefetch_factor=2 or 4 (requires num_workers > 0).",
+          "Monitor RAM usage \u2014 prefetching increases memory held in worker queues."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.26,
+        "effort": "low",
+        "expected_impact": "medium",
+        "id": "rec_input_prefetch_factor",
+        "priority": "low",
+        "risks": [
+          "prefetch_factor requires num_workers >= 1."
+        ],
+        "score": 0.499,
+        "title": "Increase DataLoader prefetch factor",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "Batch-ready gaps between steps should shrink.",
+          "DataLoader wait fraction should decrease."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      },
+      {
+        "actions": [
+          "Use non_blocking=True when calling .cuda() or .to(device).",
+          "Ensure the CPU side does not immediately block on the result.",
+          "Prefetch the next batch onto the GPU while the current one is processing."
+        ],
+        "category": "copy",
+        "confidence": 0.18,
+        "effort": "medium",
+        "expected_impact": "medium",
+        "id": "rec_copy_overlap",
+        "priority": "low",
+        "risks": [
+          "non_blocking requires the tensor to be in pinned memory for true async behavior."
+        ],
+        "score": 0.392,
+        "title": "Overlap H2D copies with compute",
+        "triggered_by": "rule_copy_bound_moderate",
+        "validation": [
+          "H2D copy time should no longer appear as a sequential stall.",
+          "Step time should decrease as copy and compute overlap."
+        ],
+        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+      }
     ],
     "secondary_bottlenecks": [
       "input_bound",

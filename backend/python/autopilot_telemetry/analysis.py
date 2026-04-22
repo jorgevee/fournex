@@ -4,6 +4,8 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
+from .recommendations import generate_recommendations
+
 CLASSIFIER_VERSION = "0.2.0"
 
 DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
@@ -21,13 +23,14 @@ def summarize_step_scope(
     step_ids: list[int] | None = None,
     per_step: list[dict[str, Any]] | None = None,
     scope_name: str | None = None,
+    environment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_per_step = list(per_step) if per_step is not None else derive_step_metrics(events)
     selected_step_ids = sorted({int(step_id) for step_id in step_ids}) if step_ids is not None else None
     scoped_steps = _select_steps(resolved_per_step, selected_step_ids)
     run_summary = derive_run_summary(events, scoped_steps)
     bottlenecks = classify_bottlenecks(events, scoped_steps, run_summary)
-    diagnosis = build_diagnosis_result(bottlenecks, run_summary)
+    diagnosis = build_diagnosis_result(bottlenecks, run_summary, scoped_steps, environment)
 
     summary = {
         "event_count": len(events),
@@ -312,6 +315,8 @@ def _classification(
 def build_diagnosis_result(
     bottlenecks: list[dict[str, Any]],
     run_summary: dict[str, Any],
+    per_step: list[dict[str, Any]] | None = None,
+    environment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not bottlenecks:
         return {
@@ -326,6 +331,7 @@ def build_diagnosis_result(
             "why": [],
             "why_not_others": [],
             "recommendations": [],
+            "recommendation_bundles": [],
             "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
             "classifier_version": CLASSIFIER_VERSION,
         }
@@ -341,6 +347,8 @@ def build_diagnosis_result(
     else:
         confidence_level = "low"
 
+    rec_output = generate_recommendations(bottlenecks, run_summary, per_step, environment)
+
     return {
         "primary_bottleneck": primary["label"],
         "secondary_bottlenecks": secondary,
@@ -352,7 +360,8 @@ def build_diagnosis_result(
         "evidence": primary["evidence"],
         "why": _explanation_bullets(primary, run_summary),
         "why_not_others": _contradiction_bullets(primary, bottlenecks[1:3], run_summary),
-        "recommendations": _recommendations_for_label(primary["label"]),
+        "recommendations": rec_output["recommendations"],
+        "recommendation_bundles": rec_output["bundles"],
         "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
         "classifier_version": CLASSIFIER_VERSION,
     }

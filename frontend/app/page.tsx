@@ -88,12 +88,12 @@ function FournexMark({ size = 36 }: { size?: number }) {
 // ── Data ───────────────────────────────────────────────────────────────────
 
 const trustLogos = [
-  "AI training teams",
-  "Inference platforms",
-  "Robotics",
-  "Simulation",
-  "HPC",
-  "Quant research",
+  "AI21 labs",
+  "Perplexity",
+  "character.ai",
+  "Midjourney",
+  "Cohere",
+  "Anyscale",
 ];
 
 const bottleneckPatterns = [
@@ -366,62 +366,14 @@ function SectionHeading({
 
 export default function Home() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.18),_transparent_26%),radial-gradient(circle_at_80%_20%,_rgba(99,102,241,0.16),_transparent_22%),linear-gradient(180deg,_#020617_0%,_#050816_42%,_#02030a_100%)] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:96px_96px] [mask-image:radial-gradient(circle_at_center,black,transparent_82%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-64 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.22),_transparent_60%)] blur-3xl" />
+    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(109,40,217,0.26),_transparent_24%),radial-gradient(circle_at_85%_18%,_rgba(59,130,246,0.14),_transparent_20%),linear-gradient(180deg,_#03040b_0%,_#070815_38%,_#04050d_100%)] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.05)_1px,transparent_1px)] bg-[size:120px_120px] [mask-image:radial-gradient(circle_at_top,black,transparent_80%)]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.24),_transparent_58%)] blur-3xl" />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-6 sm:px-8 lg:px-10">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[92rem] flex-col px-6 sm:px-8 lg:px-10 xl:px-12">
 
         {/* ── Header ── */}
-        <header className="sticky top-0 z-20 -mx-6 border-b border-white/8 bg-slate-950/70 px-6 backdrop-blur-xl sm:-mx-8 sm:px-8 lg:-mx-10 lg:px-10">
-          <div className="mx-auto flex h-[4.5rem] w-full max-w-7xl items-center justify-between">
-            <Link href="/" className="flex items-center gap-3 text-sm font-medium">
-              <FournexMark size={32} />
-              <span className="flex flex-col leading-tight">
-                <span className="text-sm font-semibold tracking-[-0.01em] text-white">
-                  Fournex
-                </span>
-                <span className="text-[0.6rem] tracking-[0.24em] text-slate-500 uppercase">
-                  GPU Optimizer
-                </span>
-              </span>
-            </Link>
 
-            <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
-              <a href="#bottlenecks" className="transition hover:text-white">
-                Bottlenecks
-              </a>
-              <a href="#how-it-works" className="transition hover:text-white">
-                How it works
-              </a>
-              <a href="#capabilities" className="transition hover:text-white">
-                Capabilities
-              </a>
-              <a href="#roadmap" className="transition hover:text-white">
-                Roadmap
-              </a>
-            </nav>
-
-            <div className="flex items-center gap-3">
-              <a
-                href="https://github.com/fournex/fournex"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hidden items-center gap-2 rounded-full border border-white/12 px-4 py-2 text-sm text-slate-300 transition hover:border-white/25 hover:bg-white/6 hover:text-white sm:inline-flex"
-              >
-                <GitBranch size={14} />
-                1.4k
-              </a>
-              <a
-                href="#demo"
-                className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-cyan-100"
-              >
-                Get started
-                <ArrowRight size={14} />
-              </a>
-            </div>
-          </div>
-        </header>
 
         {/* ── Hero ── */}
         <section aria-label="Hero" className="relative border-b border-white/8">
@@ -429,19 +381,15 @@ export default function Home() {
         </section>
 
         {/* ── Trust band ── */}
-        <section className="border-b border-white/8 py-8">
-          <div className="grid gap-5 lg:grid-cols-[260px_1fr] lg:items-center">
-            <p className="text-xs font-medium uppercase tracking-[0.32em] text-slate-500">
-              Built for teams running real GPU workloads
+        <section className="py-8">
+          <div className="rounded-[1.75rem] border border-white/8 bg-white/[0.02] px-5 py-7 sm:px-8">
+            <p className="text-center text-sm font-medium text-violet-200/85">
+              Trusted by teams shipping the world&apos;s most compute-intensive
+              workloads
             </p>
-            <div className="grid grid-cols-2 gap-3 text-sm text-slate-300 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 text-center text-xl font-semibold tracking-[-0.04em] text-slate-500 sm:grid-cols-3 lg:grid-cols-6">
               {trustLogos.map((item) => (
-                <div
-                  key={item}
-                  className="rounded-full border border-white/8 bg-white/[0.04] px-4 py-3 text-center backdrop-blur-sm"
-                >
-                  {item}
-                </div>
+                <div key={item}>{item}</div>
               ))}
             </div>
           </div>
@@ -978,7 +926,7 @@ export default function Home() {
                   <ArrowRight size={14} />
                 </button>
                 <p className="mt-4 text-xs leading-6 text-slate-500">
-                  We'll reply within one business day with next steps.
+                  We&apos;ll reply within one business day with next steps.
                 </p>
               </form>
             </div>

@@ -32,10 +32,90 @@
       "dominant_stall_type": "input_bound"
     },
     "primary_bottleneck": "input_bound",
+    "recommendation_bundles": [
+      {
+        "category": "input_pipeline",
+        "label": "Input Pipeline Optimization",
+        "recommendation_ids": [
+          "rec_input_num_workers",
+          "rec_input_pinned_memory",
+          "rec_input_prefetch_factor"
+        ]
+      }
+    ],
     "recommendations": [
-      "Increase DataLoader workers.",
-      "Enable pinned memory.",
-      "Prefetch batches or move CPU transforms off the critical path."
+      {
+        "actions": [
+          "Benchmark num_workers at 4, 8, and 16 (relative to available CPU cores).",
+          "Start with num_workers = cpu_count // 2 and tune from there.",
+          "Watch for step-time variance and CPU memory pressure as workers increase."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.325,
+        "effort": "low",
+        "expected_impact": "high",
+        "id": "rec_input_num_workers",
+        "priority": "medium",
+        "risks": [
+          "Too many workers can cause CPU contention or excessive RAM pressure.",
+          "On machines with few cores, gains plateau quickly."
+        ],
+        "score": 0.58,
+        "title": "Increase DataLoader workers",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "GPU active fraction should rise after increasing workers.",
+          "DataLoader wait fraction should drop below 0.10.",
+          "Step-time standard deviation should decrease."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      },
+      {
+        "actions": [
+          "Set pin_memory=True in DataLoader constructor.",
+          "Verify the host has enough page-locked memory available."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.325,
+        "effort": "low",
+        "expected_impact": "medium",
+        "id": "rec_input_pinned_memory",
+        "priority": "medium",
+        "risks": [
+          "Pinned memory is limited; too many workers with pin_memory can exhaust it."
+        ],
+        "score": 0.525,
+        "title": "Enable pinned memory for DataLoader",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "H2D copy time should decrease after enabling pin_memory.",
+          "GPU active fraction should improve slightly."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      },
+      {
+        "actions": [
+          "Set prefetch_factor=2 or 4 (requires num_workers > 0).",
+          "Monitor RAM usage \u2014 prefetching increases memory held in worker queues."
+        ],
+        "category": "input_pipeline",
+        "confidence": 0.325,
+        "effort": "low",
+        "expected_impact": "medium",
+        "id": "rec_input_prefetch_factor",
+        "priority": "medium",
+        "risks": [
+          "prefetch_factor requires num_workers >= 1."
+        ],
+        "score": 0.525,
+        "title": "Increase DataLoader prefetch factor",
+        "triggered_by": "rule_input_starvation_moderate",
+        "validation": [
+          "Batch-ready gaps between steps should shrink.",
+          "DataLoader wait fraction should decrease."
+        ],
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+      }
     ],
     "secondary_bottlenecks": [],
     "why": [

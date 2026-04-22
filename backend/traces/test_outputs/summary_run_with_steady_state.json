@@ -12,6 +12,7 @@
       "dominant_stall_type": "input_bound",
       "evidence": {},
       "primary_bottleneck": null,
+      "recommendation_bundles": [],
       "recommendations": [],
       "secondary_bottlenecks": [],
       "why": [],
@@ -159,10 +160,63 @@
         "steps_with_h2d": 2
       },
       "primary_bottleneck": "copy_bound",
+      "recommendation_bundles": [
+        {
+          "category": "copy",
+          "label": "Host-to-Device Transfer Optimization",
+          "recommendation_ids": [
+            "rec_copy_pinned_memory",
+            "rec_copy_overlap"
+          ]
+        }
+      ],
       "recommendations": [
-        "Reduce host-to-device transfer volume.",
-        "Enable pinned memory for input batches.",
-        "Improve overlap between copies and compute."
+        {
+          "actions": [
+            "Set pin_memory=True in DataLoader.",
+            "Use tensor.pin_memory() for tensors created outside DataLoader."
+          ],
+          "category": "copy",
+          "confidence": 0.19,
+          "effort": "low",
+          "expected_impact": "high",
+          "id": "rec_copy_pinned_memory",
+          "priority": "medium",
+          "risks": [
+            "Available pinned memory is limited by the OS."
+          ],
+          "score": 0.551,
+          "title": "Enable pinned memory to speed up H2D transfers",
+          "triggered_by": "rule_copy_bound_moderate",
+          "validation": [
+            "H2D copy fraction should drop after enabling pin_memory."
+          ],
+          "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+        },
+        {
+          "actions": [
+            "Use non_blocking=True when calling .cuda() or .to(device).",
+            "Ensure the CPU side does not immediately block on the result.",
+            "Prefetch the next batch onto the GPU while the current one is processing."
+          ],
+          "category": "copy",
+          "confidence": 0.19,
+          "effort": "medium",
+          "expected_impact": "medium",
+          "id": "rec_copy_overlap",
+          "priority": "low",
+          "risks": [
+            "non_blocking requires the tensor to be in pinned memory for true async behavior."
+          ],
+          "score": 0.396,
+          "title": "Overlap H2D copies with compute",
+          "triggered_by": "rule_copy_bound_moderate",
+          "validation": [
+            "H2D copy time should no longer appear as a sequential stall.",
+            "Step time should decrease as copy and compute overlap."
+          ],
+          "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+        }
       ],
       "secondary_bottlenecks": [],
       "why": [

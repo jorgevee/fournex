@@ -1,0 +1,279 @@
+# Rules engine v1 — maps bottleneck + signal conditions to recommendation IDs.
+#
+# Each rule:
+#   id:               unique rule identifier
+#   bottleneck:       label that must be present in bottlenecks list
+#   min_score:        minimum bottleneck score required to fire
+#   signals:          signal conditions (all must be true)
+#   suppressed_if:    signal conditions that block this rule from firing
+#   recommendations:  ordered list of rec IDs to emit
+#   priority_boost:   additive boost to recommendation score (0.0–0.3)
+#   explanation:      human-readable sentence for the report
+
+# ── Input pipeline ────────────────────────────────────────────────────────────
+
+- id: rule_input_starvation_high
+  bottleneck: input_bound
+  min_score: 0.35
+  signals:
+    input_pipeline_severe: true
+    low_gpu_activity: true
+  suppressed_if: {}
+  recommendations:
+    - rec_input_num_workers
+    - rec_input_pinned_memory
+    - rec_input_prefetch_factor
+    - rec_input_move_transforms
+  priority_boost: 0.25
+  explanation: >
+    GPU activity is low while more than 40% of step time is spent waiting for
+    the DataLoader. The input pipeline is severely starving the device.
+
+- id: rule_input_starvation_moderate
+  bottleneck: input_bound
+  min_score: 0.20
+  signals:
+    input_pipeline_stalled: true
+  suppressed_if:
+    input_pipeline_severe: true
+  recommendations:
+    - rec_input_num_workers
+    - rec_input_pinned_memory
+    - rec_input_prefetch_factor
+  priority_boost: 0.10
+  explanation: >
+    DataLoader wait accounts for a significant fraction of step time,
+    suggesting the input pipeline cannot keep pace with the GPU.
+
+# ── H2D copy ─────────────────────────────────────────────────────────────────
+
+- id: rule_copy_bound_severe
+  bottleneck: copy_bound
+  min_score: 0.30
+  signals:
+    h2d_copy_severe: true
+  suppressed_if: {}
+  recommendations:
+    - rec_copy_pinned_memory
+    - rec_copy_overlap
+    - rec_copy_reduce_volume
+  priority_boost: 0.20
+  explanation: >
+    Host-to-device transfers consume over 30% of step time. Pinned memory and
+    async copy overlap should significantly reduce this stall.
+
+- id: rule_copy_bound_moderate
+  bottleneck: copy_bound
+  min_score: 0.15
+  signals:
+    h2d_copy_stalled: true
+  suppressed_if:
+    h2d_copy_severe: true
+  recommendations:
+    - rec_copy_pinned_memory
+    - rec_copy_overlap
+  priority_boost: 0.10
+  explanation: >
+    H2D copy time is elevated. Enabling pinned memory is the lowest-effort
+    first step to improve transfer throughput.
+
+# ── Synchronization ───────────────────────────────────────────────────────────
+
+- id: rule_sync_severe
+  bottleneck: sync_bound
+  min_score: 0.20
+  signals:
+    sync_severe: true
+  suppressed_if: {}
+  recommendations:
+    - rec_sync_remove_item
+    - rec_sync_batch_logging
+    - rec_sync_reduce_explicit
+  priority_boost: 0.20
+  explanation: >
+    Synchronization stalls are consuming over 25% of step time, blocking the
+    GPU from running continuously. Eliminating .item() calls and batching
+    logging are the highest-value first fixes.
+
+- id: rule_sync_moderate
+  bottleneck: sync_bound
+  min_score: 0.10
+  signals:
+    sync_heavy: true
+  suppressed_if:
+    sync_severe: true
+  recommendations:
+    - rec_sync_remove_item
+    - rec_sync_batch_logging
+  priority_boost: 0.10
+  explanation: >
+    Synchronization overhead is present. Look for .item() and .cpu() calls
+    in the training loop that force host–device round-trips.
+
+# ── GPU underutilization ──────────────────────────────────────────────────────
+
+- id: rule_underutilized_no_mixed_precision
+  bottleneck: underutilized_gpu
+  min_score: 0.30
+  signals:
+    very_low_gpu_activity: true
+    mixed_precision_enabled: false
+  suppressed_if:
+    input_pipeline_stalled: true
+    h2d_copy_stalled: true
+    sync_heavy: true
+  recommendations:
+    - rec_util_mixed_precision
+    - rec_util_increase_batch
+    - rec_util_inspect_kernels
+  priority_boost: 0.20
+  explanation: >
+    GPU utilization is very low and mixed precision is not enabled. Enabling
+    FP16/BF16 engages tensor cores and often doubles throughput on modern GPUs.
+
+- id: rule_underutilized_general
+  bottleneck: underutilized_gpu
+  min_score: 0.20
+  signals:
+    low_gpu_activity: true
+  suppressed_if:
+    input_pipeline_stalled: true
+    h2d_copy_stalled: true
+    sync_heavy: true
+    very_low_gpu_activity: true
+  recommendations:
+    - rec_util_increase_batch
+    - rec_util_inspect_kernels
+  priority_boost: 0.10
+  explanation: >
+    GPU utilization is below 50%. If the input pipeline and synchronization
+    overhead are healthy, the batch size may be too small to saturate the device.
+
+# ── Kernel launch overhead ────────────────────────────────────────────────────
+
+- id: rule_launch_bound_stable_shapes
+  bottleneck: launch_bound
+  min_score: 0.30
+  signals:
+    has_profiler_data: true
+  suppressed_if:
+    shapes_unstable: true
+  recommendations:
+    - rec_launch_torch_compile
+    - rec_launch_cuda_graphs
+    - rec_launch_fuse_ops
+  priority_boost: 0.20
+  explanation: >
+    Profiler data confirms low GPU utilization with stable shapes, consistent
+    with kernel launch overhead. torch.compile and CUDA Graphs are the most
+    effective first mitigations.
+
+- id: rule_launch_bound_dynamic_shapes
+  bottleneck: launch_bound
+  min_score: 0.30
+  signals:
+    has_profiler_data: true
+    shapes_unstable: true
+  suppressed_if: {}
+  recommendations:
+    - rec_launch_torch_compile
+    - rec_launch_fuse_ops
+    - rec_shape_bucket_inputs
+  priority_boost: 0.15
+  explanation: >
+    Launch overhead is likely but input shapes are unstable, making CUDA
+    Graphs unsafe. Stabilizing shapes first will unlock the biggest gains.
+
+- id: rule_launch_no_profiler
+  bottleneck: launch_bound
+  min_score: 0.30
+  signals: {}
+  suppressed_if:
+    has_profiler_data: true
+  recommendations:
+    - rec_util_inspect_kernels
+    - rec_launch_torch_compile
+  priority_boost: 0.05
+  explanation: >
+    Launch overhead is suspected but no kernel-level profiler data is available.
+    Capture a profiler trace to confirm before committing to torch.compile.
+
+# ── Memory pressure ───────────────────────────────────────────────────────────
+
+- id: rule_memory_critical
+  bottleneck: memory_pressure
+  min_score: 0.90
+  signals:
+    memory_near_capacity: true
+  suppressed_if: {}
+  recommendations:
+    - rec_mem_reduce_batch
+    - rec_mem_gradient_checkpointing
+    - rec_util_mixed_precision
+    - rec_mem_reduce_alloc_churn
+  priority_boost: 0.30
+  explanation: >
+    Peak memory usage is above 90% of device capacity. OOM errors are likely.
+    Reducing batch size or enabling gradient checkpointing should be the
+    immediate priority.
+
+- id: rule_memory_moderate
+  bottleneck: memory_pressure
+  min_score: 0.75
+  signals:
+    memory_pressure_moderate: true
+  suppressed_if:
+    memory_near_capacity: true
+    mixed_precision_enabled: true
+  recommendations:
+    - rec_util_mixed_precision
+    - rec_mem_gradient_checkpointing
+  priority_boost: 0.15
+  explanation: >
+    Memory usage is elevated. Enabling mixed precision is the lowest-effort
+    way to reduce memory footprint and headroom for larger batches.
+
+# ── Shape instability ─────────────────────────────────────────────────────────
+
+- id: rule_shapes_highly_unstable
+  bottleneck: shape_instability
+  min_score: 0.60
+  signals:
+    shapes_highly_unstable: true
+  suppressed_if: {}
+  recommendations:
+    - rec_shape_bucket_inputs
+    - rec_shape_disable_dynamic
+  priority_boost: 0.20
+  explanation: >
+    More than 60% of steps have shape changes, causing repeated recompilation
+    and preventing kernel reuse. Bucketing inputs is the highest-priority fix.
+
+- id: rule_shapes_moderately_unstable
+  bottleneck: shape_instability
+  min_score: 0.30
+  signals:
+    shapes_unstable: true
+  suppressed_if:
+    shapes_highly_unstable: true
+  recommendations:
+    - rec_shape_bucket_inputs
+  priority_boost: 0.10
+  explanation: >
+    Shape volatility is above 30%. Grouping inputs by length or padding to
+    a fixed size will reduce recompilation overhead.
+
+# ── Insufficient telemetry ────────────────────────────────────────────────────
+
+- id: rule_no_telemetry
+  bottleneck: insufficient_telemetry
+  min_score: 0.50
+  signals: {}
+  suppressed_if: {}
+  recommendations:
+    - rec_telemetry_check_hooks
+    - rec_telemetry_enable_profiler
+  priority_boost: 0.0
+  explanation: >
+    No timing or GPU utilization data was collected. Verify that telemetry
+    hooks are attached and the profiler is active before the training loop.

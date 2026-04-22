@@ -6,7 +6,13 @@
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} in %{time_total}s\\\\n\" http://localhost:3000/)",
       "Bash(curl -s http://localhost:3000/)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(C:/Users/jorge/Documents/app_testing2/semiconductor_eda/backend/venv/Scripts/python.exe -c \"import fastapi; print\\(fastapi.__version__\\)\")",
+      "Bash(C:/Users/jorge/Documents/app_testing2/semiconductor_eda/backend/venv/Scripts/python.exe -c \"import uvicorn; print\\(uvicorn.__version__\\)\")",
+      "Bash(C:/Users/jorge/Documents/app_testing2/semiconductor_eda/backend/venv/Scripts/pip.exe install *)",
+      "Bash(venv/Scripts/pip install *)",
+      "Bash(cmd /c \"C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\venv\\\\Scripts\\\\pip.exe install fastapi uvicorn\")",
+      "PowerShell(& \"C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\venv\\\\Scripts\\\\pip.exe\" install fastapi uvicorn 2>&1 | Select-Object -Last 5)"
     ]
   }
 }
