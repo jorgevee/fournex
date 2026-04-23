@@ -175,7 +175,9 @@ export default function FeedbackPage() {
       topRecommendations: Array.from(recommendationMap.values())
         .sort((a, b) => b.total - a.total || b.accepted - a.accepted)
         .slice(0, 8),
-      runs: Array.from(runMap.values()).sort((a, b) => b.items.length - a.items.length),
+      runSummaries: Array.from(runMap.values()).sort(
+        (a, b) => b.items.length - a.items.length,
+      ),
     };
   }, [records]);
 
@@ -351,7 +353,7 @@ export default function FeedbackPage() {
                   Outcomes by run
                 </h2>
                 <div className="mt-5 space-y-4">
-                  {summary.runs.map((run) => (
+                  {summary.runSummaries.map((run) => (
                     <article
                       key={run.run_id}
                       className="rounded-[1.3rem] border border-white/8 bg-[#090c18] p-5"
