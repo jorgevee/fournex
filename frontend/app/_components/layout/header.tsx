@@ -89,7 +89,7 @@ export default function Header() {
 
         <div className="flex items-center gap-3">
           <Link
-            href="/analyze"
+            href="/signin"
             className="hidden items-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/25 hover:bg-white/[0.06] sm:inline-flex"
           >
             Sign in
