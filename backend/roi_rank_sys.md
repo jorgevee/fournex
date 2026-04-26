@@ -8,6 +8,32 @@ You want the system to answer:
 
 ---
 
+## Status
+
+Use this section as the working checklist. When a task lands in code and has passing tests, change `[ ]` to `[x]`.
+
+* [x] Confirm current recommendation output contract and identify compatibility constraints.
+* [ ] Extend catalog recommendations with ROI fields: speedup estimate, effort, safety/risk, prerequisites, and validation metadata.
+* [x] Implement normalized scoring helpers for speedup, confidence, cost savings, ease, and safety.
+* [x] Replace the current ranking formula with the weighted ROI formula.
+* [x] Add guardrails: confidence floor, risk demotion, dependency ordering, and duplicate suppression.
+* [x] Add tier assignment: `try_now`, `next`, and `advanced`.
+* [x] Expose explanation fields that show why each recommendation ranked where it did.
+* [x] Add or update golden tests for score ordering, tiering, guardrails, and compatibility with existing recommendation output.
+* [ ] Add recommendation outcome logging schema for attempted/applied/user-dismissed results.
+
+## Getting started
+
+The repo already has a first-pass recommendation engine in `python/autopilot_telemetry/recommendations/engine.py` and coverage in `tests/python/test_recommendation_engine.py`. Start by preserving the existing public fields (`id`, `title`, `priority`, `score`, `confidence`, `expected_impact`, `effort`, `category`, `why`, `actions`, `validation`, `risks`, `triggered_by`) while adding the richer ROI fields behind them.
+
+Suggested first implementation slice:
+
+1. Add pure scoring helpers to the recommendation engine or a new small ranker module.
+2. Backfill default ROI metadata from the existing catalog values so old catalog entries still work.
+3. Keep `score` as the final ROI score for API compatibility.
+4. Add a `tier` field without removing `priority`.
+5. Update tests to assert ordering and tier behavior before tuning weights.
+
 # Goal of Step 7
 
 Take the recommendation candidates from Step 6 and rank them using a consistent ROI model based on:

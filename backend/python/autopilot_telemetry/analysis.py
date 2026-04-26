@@ -9,6 +9,11 @@ from .recommendations import generate_recommendations
 CLASSIFIER_VERSION = "0.2.0"
 
 DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
+
+# Bottlenecks that are symptoms (not root causes). When one of these ranks first,
+# look for an underlying stall-type bottleneck to surface instead.
+_SYMPTOM_BOTTLENECKS = {"underutilized_gpu"}
+_STALL_BOTTLENECK_PRIORITY = ["input_bound", "copy_bound", "sync_bound", "launch_bound"]
 DEFAULT_STEADY_STATE_LAST_K: int | None = None
 
 
@@ -321,6 +326,7 @@ def build_diagnosis_result(
     if not bottlenecks:
         return {
             "primary_bottleneck": None,
+            "user_facing_bottleneck": None,
             "secondary_bottlenecks": [],
             "confidence": {
                 "level": "low",
@@ -349,8 +355,20 @@ def build_diagnosis_result(
 
     rec_output = generate_recommendations(bottlenecks, run_summary, per_step, environment)
 
+    # If primary is a symptom, find the root-cause stall bottleneck to surface to users.
+    primary_label = primary["label"]
+    bottleneck_labels = {b["label"] for b in bottlenecks}
+    if primary_label in _SYMPTOM_BOTTLENECKS:
+        user_facing = next(
+            (label for label in _STALL_BOTTLENECK_PRIORITY if label in bottleneck_labels),
+            primary_label,
+        )
+    else:
+        user_facing = primary_label
+
     return {
-        "primary_bottleneck": primary["label"],
+        "primary_bottleneck": primary_label,
+        "user_facing_bottleneck": user_facing,
         "secondary_bottlenecks": secondary,
         "confidence": {
             "level": confidence_level,

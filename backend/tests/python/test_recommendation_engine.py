@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 import autopilot_telemetry as at
 from autopilot_telemetry.recommendations.engine import generate_recommendations
+from autopilot_telemetry.recommendations.engine import _score_recommendation
 
 from analysis_bottleneck_golden_cases import (
     COPY_BOUND_EVENTS,
@@ -366,7 +367,9 @@ def test_insufficient_telemetry_does_not_recommend_tuning_fixes() -> None:
 
 def test_all_recommendations_have_required_fields() -> None:
     required = {"id", "title", "priority", "score", "confidence", "expected_impact",
-                "effort", "category", "why", "actions", "validation", "risks", "triggered_by"}
+                "effort", "category", "why", "actions", "validation", "risks", "triggered_by",
+                "roi_score", "tier", "risk", "why_ranked", "roi_components",
+                "guardrails_applied", "prerequisites"}
 
     for events in [INPUT_BOUND_EVENTS, COPY_BOUND_EVENTS, SYNC_BOUND_EVENTS,
                    MEMORY_PRESSURE_EVENTS, SHAPE_INSTABILITY_EVENTS, UNDERUTILIZED_GPU_EVENTS]:
@@ -380,6 +383,60 @@ def test_recommendation_scores_are_descending() -> None:
     summary = at.summarize_run(INPUT_BOUND_EVENTS)
     scores = [r["score"] for r in summary["diagnosis"]["recommendations"]]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_recommendation_score_aliases_roi_score() -> None:
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    for rec in summary["diagnosis"]["recommendations"]:
+        assert rec["score"] == rec["roi_score"]
+
+
+def test_roi_components_are_normalized() -> None:
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    required_components = {"speedup", "confidence", "cost_savings", "ease", "safety", "priority_boost"}
+    for rec in summary["diagnosis"]["recommendations"]:
+        assert set(rec["roi_components"]) == required_components
+        for value in rec["roi_components"].values():
+            assert 0.0 <= value <= 1.0
+
+
+def test_recommendation_tier_consistent_with_score_and_practicality() -> None:
+    events = (
+        _make_step_events(1, dataloader_ns=50, step_wall_ns=100, gpu_util=42.0) +
+        _make_step_events(2, dataloader_ns=48, step_wall_ns=100, gpu_util=40.0)
+    )
+    summary = at.summarize_run(events)
+
+    tiers = {rec["id"]: rec["tier"] for rec in summary["diagnosis"]["recommendations"]}
+    assert tiers["rec_input_pinned_memory"] == "try_now"
+    assert tiers["rec_input_move_transforms"] in {"next", "advanced"}
+
+
+def test_low_confidence_recommendations_are_demoted_by_guardrail() -> None:
+    entry = {
+        "id": "rec_example",
+        "impact": "high",
+        "effort": "low",
+        "safety": "high",
+    }
+
+    score, components, guardrails = _score_recommendation(
+        entry,
+        confidence=0.30,
+        priority_boost=0.0,
+        signals={"num_gpus": 1},
+    )
+
+    assert "low_confidence_demoted" in guardrails
+    assert components["confidence"] == 0.30
+    assert score < 0.60
+
+
+def test_dependency_order_keeps_compile_before_cuda_graphs() -> None:
+    summary = at.summarize_run(LAUNCH_BOUND_EVENTS)
+    ids = _rec_ids(summary)
+
+    assert ids.index("rec_launch_torch_compile") < ids.index("rec_launch_cuda_graphs")
 
 
 def test_recommendation_priority_consistent_with_score() -> None:

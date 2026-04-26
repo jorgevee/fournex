@@ -1,58 +1,741 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import ConstructionSVG from "./construct_svg";
+import {
+  Terminal,
+  FolderOpen,
+  Stethoscope,
+  FlaskConical,
+  BarChart3,
+  ChevronRight,
+  Package,
+  Cpu,
+  Zap,
+} from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Docs - Fournex",
-  description: "Fournex documentation is under construction.",
+  title: "Docs - GPU Autopilot",
+  description: "Developer reference for the frx CLI.",
 };
 
-export default async function DocsPage() {
+function Section({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(109,40,217,0.22),_transparent_22%),radial-gradient(circle_at_82%_18%,_rgba(56,189,248,0.12),_transparent_18%),linear-gradient(180deg,_#03040b_0%,_#070815_38%,_#04050d_100%)] text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.04)_1px,transparent_1px)] bg-[size:120px_120px] [mask-image:radial-gradient(circle_at_top,black,transparent_82%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.22),_transparent_58%)] blur-3xl" />
+    <section id={id} className="scroll-mt-20 space-y-4">
+      {children}
+    </section>
+  );
+}
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[92rem] items-center px-6 py-16 sm:px-8 lg:px-10 xl:px-12">
-        <div className="grid w-full items-center gap-12 lg:grid-cols-[0.9fr_1.1fr]">
-          <div className="max-w-2xl">
-            <div className="inline-flex items-center rounded-full border border-amber-400/25 bg-amber-400/10 px-4 py-2 text-[0.78rem] font-semibold text-amber-200">
-              Under construction
-            </div>
-            <h1 className="mt-6 text-5xl font-semibold tracking-[-0.07em] text-white sm:text-6xl lg:text-[5rem] lg:leading-[0.95]">
-              Docs are being
-              <br />
-              built right now.
+function H2({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="border-b border-white/10 pb-3 text-xl font-semibold tracking-tight text-white">
+      {children}
+    </h2>
+  );
+}
+
+function H3({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-base font-semibold text-slate-200">{children}</h3>;
+}
+
+function P({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm leading-7 text-slate-400">{children}</p>;
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[0.78rem] text-sky-300">
+      {children}
+    </code>
+  );
+}
+
+function Pre({ children }: { children: React.ReactNode }) {
+  return (
+    <pre className="overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-4 font-mono text-[0.78rem] leading-6 text-slate-300">
+      {children}
+    </pre>
+  );
+}
+
+function Table({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-white/10">
+      <table className="w-full text-left text-sm">{children}</table>
+    </div>
+  );
+}
+
+function Th({ children }: { children: React.ReactNode }) {
+  return (
+    <th className="border-b border-white/10 bg-white/[0.04] px-4 py-3 font-semibold text-slate-300">
+      {children}
+    </th>
+  );
+}
+
+function Td({ children, mono }: { children: React.ReactNode; mono?: boolean }) {
+  return (
+    <td className={`border-b border-white/[0.06] px-4 py-3 text-slate-400 ${mono ? "font-mono text-xs text-sky-300" : ""}`}>
+      {children}
+    </td>
+  );
+}
+
+function NavItem({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <li>
+      <a
+        href={href}
+        className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200"
+      >
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+        {children}
+      </a>
+    </li>
+  );
+}
+
+function CommandBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 font-mono text-[0.7rem] text-sky-300">
+      {children}
+    </span>
+  );
+}
+
+export default function DocsPage() {
+  return (
+    <main className="min-h-screen bg-[linear-gradient(180deg,_#03040b_0%,_#070815_38%,_#04050d_100%)] text-white">
+      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(rgba(148,163,184,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.03)_1px,transparent_1px)] bg-[size:80px_80px] [mask-image:radial-gradient(circle_at_top,black,transparent_75%)]" />
+
+      <div className="relative mx-auto max-w-[88rem] px-6 py-12 sm:px-8 lg:px-10">
+
+        {/* Header */}
+        <div className="mb-12 border-b border-white/10 pb-8">
+          <div className="flex items-center gap-2 text-xs text-slate-500 mb-4">
+            <Link href="/" className="hover:text-slate-300 transition">Home</Link>
+            <ChevronRight className="h-3 w-3" />
+            <span className="text-slate-400">Docs</span>
+          </div>
+          <div className="flex items-center gap-3 mb-3">
+            <Terminal className="h-7 w-7 text-violet-400" />
+            <h1 className="text-3xl font-semibold tracking-tight text-white">
+              GPU Autopilot — CLI Reference
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-8 text-slate-300">
-              The documentation hub is not ready yet. We are still writing the
-              guides, API references, and workflow docs for the product.
-            </p>
-            <p className="mt-4 max-w-xl text-sm leading-7 text-slate-400">
-              In the meantime, you can explore the analyzer, read the product
-              walkthrough, or come back once the first docs set ships.
-            </p>
+          </div>
+          <p className="text-slate-400 text-sm max-w-2xl">
+            Developer documentation for the <Code>frx</Code> CLI.
+            Covers installation, all four subcommands, bundle layout, and how
+            the analysis pipeline works.
+          </p>
+        </div>
 
-            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Link
-                href="/how-it-works"
-                className="inline-flex items-center justify-center rounded-2xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-6 py-4 text-sm font-semibold text-white transition hover:from-violet-500 hover:to-fuchsia-400"
-              >
-                See how it works
-              </Link>
+        <div className="flex gap-10 lg:gap-14">
+
+          {/* Sidebar */}
+          <nav className="hidden shrink-0 lg:block" style={{ width: "14rem" }}>
+            <div className="sticky top-8 space-y-1">
+              <p className="mb-2 px-3 text-[0.65rem] font-semibold uppercase tracking-widest text-slate-600">
+                Getting started
+              </p>
+              <ul className="space-y-0.5">
+                <NavItem href="#install">Installation</NavItem>
+                <NavItem href="#quickstart">Quickstart</NavItem>
+              </ul>
+              <p className="mb-2 mt-6 px-3 text-[0.65rem] font-semibold uppercase tracking-widest text-slate-600">
+                Commands
+              </p>
+              <ul className="space-y-0.5">
+                <NavItem href="#collect">collect</NavItem>
+                <NavItem href="#analyze">analyze</NavItem>
+                <NavItem href="#doctor">doctor</NavItem>
+                <NavItem href="#smoke-test">smoke-test</NavItem>
+              </ul>
+              <p className="mb-2 mt-6 px-3 text-[0.65rem] font-semibold uppercase tracking-widest text-slate-600">
+                Reference
+              </p>
+              <ul className="space-y-0.5">
+                <NavItem href="#bundle-layout">Bundle layout</NavItem>
+                <NavItem href="#analysis">Analysis pipeline</NavItem>
+                <NavItem href="#bottlenecks">Bottleneck labels</NavItem>
+                <NavItem href="#sdk">SDK integration</NavItem>
+              </ul>
+            </div>
+          </nav>
+
+          {/* Content */}
+          <div className="min-w-0 flex-1 space-y-14">
+
+            {/* Installation */}
+            <Section id="install">
+              <H2>Installation</H2>
+              <P>
+                Install the package from the repo root. Python 3.11+ is required.
+                PyTorch is optional — the CLI works without it for bundle analysis;
+                it is only needed when the SDK instruments a live training run.
+              </P>
+              <Pre>{`pip install -e backend/python`}</Pre>
+              <P>
+                This registers the <Code>frx</Code> entry point.
+                Verify with:
+              </P>
+              <Pre>{`frx doctor`}</Pre>
+            </Section>
+
+            {/* Quickstart */}
+            <Section id="quickstart">
+              <H2>Quickstart</H2>
+              <div className="space-y-4">
+                <P>
+                  The typical workflow is three steps: collect, inspect locally,
+                  then upload to the web analyzer for a full interactive report.
+                </P>
+
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {[
+                    {
+                      n: "1",
+                      icon: Terminal,
+                      title: "Collect",
+                      body: "Wrap your training script. The CLI captures GPU metrics, imports profiler artifacts, and generates a pre-analyzed bundle.",
+                    },
+                    {
+                      n: "2",
+                      icon: BarChart3,
+                      title: "Analyze locally",
+                      body: "Print the diagnosis to the terminal without uploading anything.",
+                    },
+                    {
+                      n: "3",
+                      icon: Zap,
+                      title: "Upload",
+                      body: "Drop the zip on the web analyzer for interactive charts, recommendation cards, and shareable links.",
+                    },
+                  ].map(({ n, icon: Icon, title, body }) => (
+                    <div
+                      key={n}
+                      className="rounded-xl border border-white/10 bg-white/[0.03] p-4"
+                    >
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-violet-500/20 text-xs font-bold text-violet-300">
+                          {n}
+                        </span>
+                        <Icon className="h-4 w-4 text-slate-400" />
+                        <span className="text-sm font-semibold text-slate-200">{title}</span>
+                      </div>
+                      <p className="text-xs leading-5 text-slate-500">{body}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <Pre>{`# 1. Collect
+frx collect -- python train.py
+
+# 2. Analyze locally (run-<id> is printed by collect)
+frx analyze runs/run-<id>
+
+# 3. Upload  →  drag runs/run-<id>.zip onto fournex.com/analyze`}</Pre>
+              </div>
+            </Section>
+
+            {/* collect */}
+            <Section id="collect">
+              <div className="flex items-center gap-3">
+                <H2>collect</H2>
+                <CommandBadge>frx collect</CommandBadge>
+              </div>
+
+              <P>
+                Runs a workload subprocess, samples GPU metrics in the background,
+                imports profiler artifacts, runs the analysis pipeline, and writes a
+                self-contained run bundle.
+              </P>
+
+              <Pre>{`frx collect [OPTIONS] -- COMMAND [ARGS...]
+
+Options:
+  --name NAME              Human-readable job name (default: frx-run)
+  --out DIR                Root output directory (default: runs)
+  --run-id ID              Override auto-generated run ID
+  --artifact-dir DIR       Import artifacts from DIR after the workload exits.
+                           May be repeated. Default: ./frx-job-run
+  --no-profiler-import     Skip importing profiler_trace.json from artifact dirs
+  --sample-interval-ms N   nvidia-smi polling interval in ms (default: 1000)
+  --config FILE            Optional run_config.yaml to merge into bundle config
+  --no-zip                 Skip creating the zip archive`}</Pre>
+
+              <H3>What it does</H3>
+              <ol className="ml-4 space-y-2 text-sm text-slate-400 list-decimal list-outside">
+                <li>Writes <Code>run_config.yaml</Code> and injects env vars into the workload process so the SDK auto-persists events to <Code>raw/trace.jsonl</Code>.</li>
+                <li>Starts a background thread that polls <Code>nvidia-smi</Code> at <Code>--sample-interval-ms</Code> into <Code>gpu_metrics.csv</Code>.</li>
+                <li>Runs the workload. Stdout and stderr are tee&apos;d to <Code>optional_logs.txt</Code>.</li>
+                <li>After the workload exits, copies artifacts from <Code>--artifact-dir</Code> into the bundle (marked <Code>[imported]</Code> in the summary).</li>
+                <li>Runs the analysis pipeline over <Code>raw/trace.jsonl</Code> (or the imported profiler bundle if no SDK trace exists) and writes <Code>derived/summary.json</Code>.</li>
+                <li>Writes <Code>metadata.json</Code>, <Code>manifest.json</Code>, and zips the bundle.</li>
+              </ol>
+
+              <H3>Environment variables injected into the workload</H3>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Variable</Th>
+                    <Th>Value</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["FRX_RUN_ID", "Generated run ID"],
+                    ["FRX_JOB_NAME", "--name value"],
+                    ["FRX_OUTPUT_DIR", "Absolute path to the run directory"],
+                    ["FRX_RAW_TRACE_PATH", "raw/trace.jsonl absolute path"],
+                    ["FRX_DERIVED_SUMMARY_PATH", "derived/summary.json absolute path"],
+                    ["FRX_AUTO_PERSIST", "1"],
+                    ["FRX_SAMPLE_INTERVAL_MS", "--sample-interval-ms value"],
+                  ].map(([k, v]) => (
+                    <tr key={k}>
+                      <Td mono>{k}</Td>
+                      <Td>{v}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <H3>Example output</H3>
+              <Pre>{`frx collect completed
+Run bundle: runs/run-a1b2c3d4e5f6
+Zip bundle: runs/run-a1b2c3d4e5f6.zip
+
+Captured (7 files):
+  metadata.json
+  manifest.json
+  run_config.yaml
+  gpu_metrics.csv
+  optional_logs.txt
+  raw/trace.jsonl
+  derived/summary.json
+  profiler/profiler_trace.json  [imported]`}</Pre>
+            </Section>
+
+            {/* analyze */}
+            <Section id="analyze">
+              <div className="flex items-center gap-3">
+                <H2>analyze</H2>
+                <CommandBadge>frx analyze</CommandBadge>
+              </div>
+
+              <P>
+                Loads a collected run bundle and prints a full diagnosis report to
+                stdout. No GPU or PyTorch required.
+              </P>
+
+              <Pre>{`frx analyze RUN_DIR [OPTIONS]
+
+Arguments:
+  RUN_DIR    Path to a run directory (e.g. runs/run-a1b2c3d4e5f6)
+             Must be a directory; zip analysis is not yet supported.
+
+Options:
+  --scope    run | steady_state | auto
+             Which analysis scope to display.
+             auto (default): prefers steady_state when available.
+  --json     Output the raw summary JSON instead of the formatted report.`}</Pre>
+
+              <H3>Data source priority</H3>
+              <P>
+                <Code>analyze</Code> picks the best available data source in this
+                order:
+              </P>
+              <ol className="ml-4 space-y-1 text-sm text-slate-400 list-decimal list-outside">
+                <li><Code>derived/summary.json</Code> — pre-analyzed, preferred</li>
+                <li><Code>raw/trace.jsonl</Code> — re-analyzed on the fly</li>
+                <li><Code>profiler/profiler_trace.json</Code> + <Code>gpu_metrics.csv</Code> — imported and analyzed</li>
+              </ol>
+
+              <H3>Example output</H3>
+              <Pre>{`--------------------------------------------------------
+  GPU Autopilot - Run Analysis
+  Run  : run-a1b2c3d4e5f6
+  Scope: steady_state  (28 steps)
+--------------------------------------------------------
+
+VERDICT
+  Primary Bottleneck : input_bound
+  Internal Signal    : underutilized_gpu (symptom)
+  Confidence         : high (0.88)
+  Reason             : input_bound leads the ranking and matches the dominant stall summary.
+
+EVIDENCE
+  - Average DataLoader wait fraction is 0.825.
+  - Run summary dominant stall type is input_bound.
+
+PERFORMANCE SNAPSHOT
+  Avg GPU Utilization : 1.3%
+  Avg Memory Util     : 12.0%
+  Peak Memory Pressure: 0.14
+  Avg Step Time       : 207.000 ms
+  Throughput          : 4.8 steps/sec
+  Dominant Stall      : input_bound
+
+TOP RECOMMENDATIONS (3 of 5)
+
+  1. [HIGH] Increase DataLoader num_workers
+     Effort: low  |  Risk: low  |  Score: 0.84
+     DataLoader wait is the dominant stall ...`}</Pre>
+
+              <P>
+                When <Code>underutilized_gpu</Code> is the internal top signal but a
+                stall type (e.g. <Code>input_bound</Code>) is also present, the
+                verdict displays the root cause. The raw internal signal is shown on
+                the <Code>Internal Signal</Code> line.
+              </P>
+            </Section>
+
+            {/* doctor */}
+            <Section id="doctor">
+              <div className="flex items-center gap-3">
+                <H2>doctor</H2>
+                <CommandBadge>frx doctor</CommandBadge>
+              </div>
+
+              <P>
+                Checks that all runtime dependencies are present and configured.
+                Exits with code 0 if all checks pass, 1 if any <Code>[FAIL]</Code>{" "}
+                lines appear.
+              </P>
+
+              <Pre>{`frx doctor`}</Pre>
+
+              <H3>Checks performed</H3>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Check</Th>
+                    <Th>What it verifies</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Python", "Python version (always passes)"],
+                    ["torch", "PyTorch importable; reports version"],
+                    ["CUDA available", "torch.cuda.is_available(), GPU name and count"],
+                    ["nvidia-smi", "nvidia-smi on PATH (required for gpu_metrics.csv)"],
+                    ["autopilot_telemetry.profiler", "SDK profiler module importable"],
+                    ["autopilot_telemetry.analysis", "Analysis pipeline importable"],
+                  ].map(([k, v]) => (
+                    <tr key={k}>
+                      <Td mono>{k}</Td>
+                      <Td>{v}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <Pre>{`frx doctor
+
+  [OK]    Python                               3.12.3
+  [OK]    torch                                2.3.0+cu121
+  [OK]    CUDA available                       NVIDIA A100 x1
+  [OK]    nvidia-smi                           /usr/bin/nvidia-smi
+  [OK]    autopilot_telemetry.profiler         importable
+  [OK]    autopilot_telemetry.analysis         importable
+
+All checks passed.`}</Pre>
+            </Section>
+
+            {/* smoke-test */}
+            <Section id="smoke-test">
+              <div className="flex items-center gap-3">
+                <H2>smoke-test</H2>
+                <CommandBadge>frx smoke-test</CommandBadge>
+              </div>
+
+              <P>
+                Writes a synthetic input-bound Chrome-format profiler trace, runs
+                the full collect + analysis pipeline end-to-end in a temp directory,
+                and verifies the bundle and diagnosis output. Useful for CI and
+                confirming the install is working.
+              </P>
+
+              <Pre>{`frx smoke-test`}</Pre>
+
+              <P>Checks performed:</P>
+              <ul className="ml-4 space-y-1 text-sm text-slate-400 list-disc list-outside">
+                <li>Run directory and subdirs exist (<Code>raw/</Code>, <Code>derived/</Code>, <Code>profiler/</Code>)</li>
+                <li><Code>derived/summary.json</Code> was generated</li>
+                <li><Code>manifest.json</Code> is present</li>
+                <li>Zip bundle was created</li>
+                <li>Diagnosis produced <Code>primary_bottleneck == input_bound</Code></li>
+                <li>At least one recommendation was generated</li>
+              </ul>
+
+              <Pre>{`frx smoke-test
+
+Running smoke test ...
+
+  [PASS]  create run directory
+  [PASS]  write synthetic profiler trace
+  [PASS]  generate derived/summary.json
+  [PASS]  manifest.json present
+  [PASS]  zip bundle created
+  [PASS]  primary_bottleneck == input_bound
+  [PASS]  recommendations present
+  [PASS]  no unexpected warnings
+
+All smoke-test checks passed.`}</Pre>
+            </Section>
+
+            {/* Bundle layout */}
+            <Section id="bundle-layout">
+              <div className="flex items-center gap-3">
+                <H2>Bundle layout</H2>
+                <FolderOpen className="h-5 w-5 text-slate-500" />
+              </div>
+
+              <P>
+                Each <Code>collect</Code> run produces one directory under{" "}
+                <Code>--out</Code> (default <Code>runs/</Code>) and a zip of it.
+              </P>
+
+              <Pre>{`runs/
+  run-<id>/
+    metadata.json            # Run metadata, artifact list, warnings
+    manifest.json            # Included files, limited-data flag
+    run_config.yaml          # Collector config + detected environment
+    gpu_metrics.csv          # nvidia-smi samples (util %, memory, clocks)
+    optional_logs.txt        # Combined workload stdout + stderr
+    raw/
+      trace.jsonl            # SDK event stream (one JSON object per line)
+    derived/
+      summary.json           # Pre-analyzed output — preferred by analyzer
+    profiler/
+      profiler_trace.json    # Chrome-format torch.profiler trace (imported)
+  run-<id>.zip               # All of the above, zipped for upload`}</Pre>
+
+              <H3>File roles</H3>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>File</Th>
+                    <Th>Source</Th>
+                    <Th>Required for analysis</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["derived/summary.json", "Generated by collect", "Preferred — fastest path"],
+                    ["raw/trace.jsonl", "SDK auto-persist", "Yes, if no derived summary"],
+                    ["profiler/profiler_trace.json", "Imported from --artifact-dir", "Fallback if no SDK trace"],
+                    ["gpu_metrics.csv", "nvidia-smi poller", "Enriches GPU util data"],
+                    ["metadata.json", "Generated by collect", "No (informational)"],
+                    ["run_config.yaml", "Generated by collect", "No (informational)"],
+                    ["optional_logs.txt", "Workload stdout/stderr", "No (debugging)"],
+                  ].map(([f, s, r]) => (
+                    <tr key={f}>
+                      <Td mono>{f}</Td>
+                      <Td>{s}</Td>
+                      <Td>{r}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <P>
+                The web analyzer scores bundle files when you upload multiple files
+                at once. <Code>derived/summary.json</Code> scores highest (120 pts)
+                and is used automatically when present.
+              </P>
+            </Section>
+
+            {/* Analysis pipeline */}
+            <Section id="analysis">
+              <div className="flex items-center gap-3">
+                <H2>Analysis pipeline</H2>
+                <BarChart3 className="h-5 w-5 text-slate-500" />
+              </div>
+
+              <P>
+                The analysis pipeline is pure Python with no GPU required. It
+                accepts the SDK event stream or events reconstructed from a
+                Chrome-format profiler trace, and produces a structured{" "}
+                <Code>summary</Code> dict.
+              </P>
+
+              <Pre>{`from autopilot_telemetry.analysis import summarize_run_with_steady_state
+
+summary = summarize_run_with_steady_state(events)
+# summary["steady_state"]["diagnosis"]["user_facing_bottleneck"]
+# → "input_bound"`}</Pre>
+
+              <H3>Summary shape</H3>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Key</Th>
+                    <Th>Description</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["event_count", "Total events in the input stream"],
+                    ["step_count", "Steps detected across the full run"],
+                    ["selector", "steady_state window policy (skip_first_n, last_k)"],
+                    ["run", "Scope object for all steps"],
+                    ["steady_state", "Scope object for warm-up-excluded steps"],
+                    ["scope_comparison", "Whether primary bottleneck changed between scopes"],
+                  ].map(([k, v]) => (
+                    <tr key={k}>
+                      <Td mono>{k}</Td>
+                      <Td>{v}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <P>
+                Each scope object contains <Code>per_step</Code> (timing breakdown
+                per step), <Code>run_summary</Code> (aggregated metrics),{" "}
+                <Code>bottlenecks</Code> (scored list), and <Code>diagnosis</Code>{" "}
+                (primary bottleneck + recommendations).
+              </P>
+
+              <H3>Symptom vs. root cause</H3>
+              <P>
+                <Code>underutilized_gpu</Code> often scores highest (the GPU is
+                idle) but it is a symptom, not a cause. When a stall-type bottleneck
+                (e.g. <Code>input_bound</Code>) is also present, the{" "}
+                <Code>diagnosis.user_facing_bottleneck</Code> field is set to that
+                root cause. The internal top signal is preserved in{" "}
+                <Code>diagnosis.primary_bottleneck</Code>.
+              </P>
+              <Pre>{`{
+  "primary_bottleneck":     "underutilized_gpu",   // internal top signal
+  "user_facing_bottleneck": "input_bound",          // shown to users
+  ...
+}`}</Pre>
+            </Section>
+
+            {/* Bottleneck labels */}
+            <Section id="bottlenecks">
+              <div className="flex items-center gap-3">
+                <H2>Bottleneck labels</H2>
+                <Cpu className="h-5 w-5 text-slate-500" />
+              </div>
+
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Label</Th>
+                    <Th>Display name</Th>
+                    <Th>Signal</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["input_bound", "Input Pipeline Starvation", "DataLoader wait ≥ 20% of step time"],
+                    ["copy_bound", "Host-to-Device Copy Overhead", "H2D copy time ≥ 15% of step time"],
+                    ["sync_bound", "Synchronization Overhead", "Sync wait ≥ 10% of step time"],
+                    ["underutilized_gpu", "GPU Under-utilization", "GPU utilization < 35% (symptom)"],
+                    ["memory_pressure", "Memory Pressure", "Peak memory ratio ≥ 90%"],
+                    ["shape_instability", "Shape Instability", "Shape volatility ratio ≥ 30%"],
+                    ["launch_bound", "Kernel Launch Overhead", "Low GPU util + profiler windows, no dominant stall"],
+                    ["insufficient_telemetry", "Insufficient Telemetry", "No timing data and no GPU util samples"],
+                  ].map(([label, display, signal]) => (
+                    <tr key={label}>
+                      <Td mono>{label}</Td>
+                      <Td>{display}</Td>
+                      <Td>{signal}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <P>
+                Labels are stable identifiers used in <Code>summary.json</Code>,
+                CLI output, and the web frontend. The recommendation engine maps
+                each label to a set of ranked fix cards.
+              </P>
+            </Section>
+
+            {/* SDK integration */}
+            <Section id="sdk">
+              <div className="flex items-center gap-3">
+                <H2>SDK integration</H2>
+                <Package className="h-5 w-5 text-slate-500" />
+              </div>
+
+              <P>
+                When <Code>collect</Code> wraps your training script, it sets{" "}
+                <Code>FRX_AUTO_PERSIST=1</Code> and injects the output
+                path. The SDK hooks emit events automatically if you use the
+                provided context managers or callbacks.
+              </P>
+
+              <H3>PyTorch training loop</H3>
+              <Pre>{`from autopilot_telemetry import AutopilotSession
+
+session = AutopilotSession.from_env()   # reads FRX_* env vars
+
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        with session.step(step_id=global_step, step_kind="train"):
+            with session.dataloader_span():
+                batch = next_batch()    # already inside dataloader loop
+            with session.forward_span():
+                loss = model(batch)
+            with session.backward_span():
+                loss.backward()
+            with session.optimizer_span():
+                optimizer.step()
+        global_step += 1
+
+session.flush()`}</Pre>
+
+              <P>
+                If you already use <Code>torch.profiler</Code>, you can skip the
+                SDK entirely and point <Code>--artifact-dir</Code> at the directory
+                where the profiler writes its Chrome-format trace. The CLI will
+                import and analyze it automatically.
+              </P>
+
+              <H3>Profiler-only workflow</H3>
+              <Pre>{`# In your training script, write the profiler trace to frx-job-run/
+profiler = torch.profiler.profile(
+    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+    on_trace_ready=torch.profiler.tensorboard_trace_handler("frx-job-run"),
+)
+
+# Then collect — the CLI imports profiler_trace.json automatically
+frx collect -- python train.py`}</Pre>
+
+              <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
+                <p className="text-sm font-semibold text-amber-300 mb-1">Note on data richness</p>
+                <p className="text-xs leading-5 text-slate-400">
+                  SDK instrumentation produces the richest data: exact step
+                  boundaries, DataLoader wait times, and H2D copy spans are
+                  recorded precisely. Profiler-only mode reconstructs these from
+                  Chrome trace heuristics and may have lower confidence on some
+                  bottleneck types.
+                </p>
+              </div>
+            </Section>
+
+            {/* Footer links */}
+            <div className="border-t border-white/10 pt-8 flex flex-wrap gap-4">
               <Link
                 href="/analyze"
-                className="inline-flex items-center justify-center rounded-2xl border border-white/12 bg-white/[0.03] px-6 py-4 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/[0.06]"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-5 py-3 text-sm font-semibold text-white transition hover:from-violet-500 hover:to-fuchsia-400"
               >
                 Open analyzer
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/how-it-works"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-5 py-3 text-sm font-semibold text-white transition hover:border-white/25 hover:bg-white/[0.06]"
+              >
+                How it works
               </Link>
             </div>
-          </div>
 
-          <div className="flex justify-center lg:justify-end">
-            <div className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-6 shadow-[0_35px_100px_rgba(3,6,18,0.45)] sm:p-8">
-              <ConstructionSVG className="h-auto w-full max-w-[24rem] sm:max-w-[28rem]" />
-            </div>
           </div>
         </div>
       </div>

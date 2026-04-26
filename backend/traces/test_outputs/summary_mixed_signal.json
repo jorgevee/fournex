@@ -70,6 +70,14 @@
     "primary_bottleneck": "underutilized_gpu",
     "recommendation_bundles": [
       {
+        "category": "copy",
+        "label": "Host-to-Device Transfer Optimization",
+        "recommendation_ids": [
+          "rec_copy_pinned_memory",
+          "rec_copy_overlap"
+        ]
+      },
+      {
         "category": "input_pipeline",
         "label": "Input Pipeline Optimization",
         "recommendation_ids": [
@@ -77,17 +85,56 @@
           "rec_input_pinned_memory",
           "rec_input_prefetch_factor"
         ]
-      },
-      {
-        "category": "copy",
-        "label": "Host-to-Device Transfer Optimization",
-        "recommendation_ids": [
-          "rec_copy_pinned_memory",
-          "rec_copy_overlap"
-        ]
       }
     ],
     "recommendations": [
+      {
+        "actions": [
+          "Set pin_memory=True in DataLoader.",
+          "Use tensor.pin_memory() for tensors created outside DataLoader."
+        ],
+        "category": "copy",
+        "confidence": 0.18,
+        "effort": "low",
+        "expected_impact": "high",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
+        "id": "rec_copy_pinned_memory",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
+        "priority": "medium",
+        "risk": "low",
+        "risks": [
+          "Available pinned memory is limited by the OS."
+        ],
+        "roi_components": {
+          "confidence": 0.18,
+          "cost_savings": 0.56,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.9,
+          "speedup": 0.7
+        },
+        "roi_score": 0.546,
+        "score": 0.546,
+        "tier": "advanced",
+        "title": "Enable pinned memory to speed up H2D transfers",
+        "triggered_by": "rule_copy_bound_moderate",
+        "validation": [
+          "H2D copy fraction should drop after enabling pin_memory."
+        ],
+        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput.",
+        "why_ranked": [
+          "High expected speedup",
+          "Low implementation effort",
+          "Low operational risk",
+          "Demoted because diagnostic confidence is low"
+        ]
+      },
       {
         "actions": [
           "Benchmark num_workers at 4, 8, and 16 (relative to available CPU cores).",
@@ -98,13 +145,32 @@
         "confidence": 0.26,
         "effort": "low",
         "expected_impact": "high",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_num_workers",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
         "priority": "medium",
+        "risk": "medium",
         "risks": [
           "Too many workers can cause CPU contention or excessive RAM pressure.",
           "On machines with few cores, gains plateau quickly."
         ],
-        "score": 0.554,
+        "roi_components": {
+          "confidence": 0.26,
+          "cost_savings": 0.56,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.55,
+          "speedup": 0.7
+        },
+        "roi_score": 0.5186,
+        "score": 0.5186,
+        "tier": "advanced",
         "title": "Increase DataLoader workers",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
@@ -112,29 +178,12 @@
           "DataLoader wait fraction should drop below 0.10.",
           "Step-time standard deviation should decrease."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
-      },
-      {
-        "actions": [
-          "Set pin_memory=True in DataLoader.",
-          "Use tensor.pin_memory() for tensors created outside DataLoader."
-        ],
-        "category": "copy",
-        "confidence": 0.18,
-        "effort": "low",
-        "expected_impact": "high",
-        "id": "rec_copy_pinned_memory",
-        "priority": "medium",
-        "risks": [
-          "Available pinned memory is limited by the OS."
-        ],
-        "score": 0.547,
-        "title": "Enable pinned memory to speed up H2D transfers",
-        "triggered_by": "rule_copy_bound_moderate",
-        "validation": [
-          "H2D copy fraction should drop after enabling pin_memory."
-        ],
-        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "High expected speedup",
+          "Low implementation effort",
+          "Demoted because diagnostic confidence is low"
+        ]
       },
       {
         "actions": [
@@ -145,19 +194,44 @@
         "confidence": 0.26,
         "effort": "low",
         "expected_impact": "medium",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_pinned_memory",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
         "priority": "low",
+        "risk": "low",
         "risks": [
           "Pinned memory is limited; too many workers with pin_memory can exhaust it."
         ],
-        "score": 0.499,
+        "roi_components": {
+          "confidence": 0.26,
+          "cost_savings": 0.41,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.9,
+          "speedup": 0.45
+        },
+        "roi_score": 0.4793,
+        "score": 0.4793,
+        "tier": "advanced",
         "title": "Enable pinned memory for DataLoader",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
           "H2D copy time should decrease after enabling pin_memory.",
           "GPU active fraction should improve slightly."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "Moderate expected speedup",
+          "Low implementation effort",
+          "Low operational risk",
+          "Demoted because diagnostic confidence is low"
+        ]
       },
       {
         "actions": [
@@ -168,19 +242,44 @@
         "confidence": 0.26,
         "effort": "low",
         "expected_impact": "medium",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_prefetch_factor",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
         "priority": "low",
+        "risk": "low",
         "risks": [
           "prefetch_factor requires num_workers >= 1."
         ],
-        "score": 0.499,
+        "roi_components": {
+          "confidence": 0.26,
+          "cost_savings": 0.41,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.9,
+          "speedup": 0.45
+        },
+        "roi_score": 0.4793,
+        "score": 0.4793,
+        "tier": "advanced",
         "title": "Increase DataLoader prefetch factor",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
           "Batch-ready gaps between steps should shrink.",
           "DataLoader wait fraction should decrease."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "Moderate expected speedup",
+          "Low implementation effort",
+          "Low operational risk",
+          "Demoted because diagnostic confidence is low"
+        ]
       },
       {
         "actions": [
@@ -192,19 +291,42 @@
         "confidence": 0.18,
         "effort": "medium",
         "expected_impact": "medium",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_copy_overlap",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
         "priority": "low",
+        "risk": "medium",
         "risks": [
           "non_blocking requires the tensor to be in pinned memory for true async behavior."
         ],
-        "score": 0.392,
+        "roi_components": {
+          "confidence": 0.18,
+          "cost_savings": 0.41,
+          "ease": 0.55,
+          "priority_boost": 0.1,
+          "safety": 0.55,
+          "speedup": 0.45
+        },
+        "roi_score": 0.3885,
+        "score": 0.3885,
+        "tier": "advanced",
         "title": "Overlap H2D copies with compute",
         "triggered_by": "rule_copy_bound_moderate",
         "validation": [
           "H2D copy time should no longer appear as a sequential stall.",
           "Step time should decrease as copy and compute overlap."
         ],
-        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput."
+        "why": "H2D copy time is elevated. Enabling pinned memory is the lowest-effort first step to improve transfer throughput.",
+        "why_ranked": [
+          "Moderate expected speedup",
+          "Demoted because diagnostic confidence is low"
+        ]
       }
     ],
     "secondary_bottlenecks": [

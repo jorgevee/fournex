@@ -7,6 +7,12 @@ name = "autopilot-telemetry"
 version = "0.1.0"
 description = "PyTorch telemetry SDK for GPU performance tracing."
 requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.scripts]
+frx = "autopilot_telemetry.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -54,13 +54,32 @@
         "confidence": 0.325,
         "effort": "low",
         "expected_impact": "high",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_num_workers",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
         "priority": "medium",
+        "risk": "medium",
         "risks": [
           "Too many workers can cause CPU contention or excessive RAM pressure.",
           "On machines with few cores, gains plateau quickly."
         ],
-        "score": 0.58,
+        "roi_components": {
+          "confidence": 0.325,
+          "cost_savings": 0.56,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.55,
+          "speedup": 0.7
+        },
+        "roi_score": 0.5284,
+        "score": 0.5284,
+        "tier": "advanced",
         "title": "Increase DataLoader workers",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
@@ -68,7 +87,12 @@
           "DataLoader wait fraction should drop below 0.10.",
           "Step-time standard deviation should decrease."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "High expected speedup",
+          "Low implementation effort",
+          "Demoted because diagnostic confidence is low"
+        ]
       },
       {
         "actions": [
@@ -79,19 +103,44 @@
         "confidence": 0.325,
         "effort": "low",
         "expected_impact": "medium",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_pinned_memory",
-        "priority": "medium",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
+        "priority": "low",
+        "risk": "low",
         "risks": [
           "Pinned memory is limited; too many workers with pin_memory can exhaust it."
         ],
-        "score": 0.525,
+        "roi_components": {
+          "confidence": 0.325,
+          "cost_savings": 0.41,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.9,
+          "speedup": 0.45
+        },
+        "roi_score": 0.489,
+        "score": 0.489,
+        "tier": "advanced",
         "title": "Enable pinned memory for DataLoader",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
           "H2D copy time should decrease after enabling pin_memory.",
           "GPU active fraction should improve slightly."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "Moderate expected speedup",
+          "Low implementation effort",
+          "Low operational risk",
+          "Demoted because diagnostic confidence is low"
+        ]
       },
       {
         "actions": [
@@ -102,19 +151,44 @@
         "confidence": 0.325,
         "effort": "low",
         "expected_impact": "medium",
+        "guardrails_applied": [
+          "low_confidence_demoted"
+        ],
         "id": "rec_input_prefetch_factor",
-        "priority": "medium",
+        "prerequisites": {
+          "framework": [
+            "pytorch"
+          ]
+        },
+        "priority": "low",
+        "risk": "low",
         "risks": [
           "prefetch_factor requires num_workers >= 1."
         ],
-        "score": 0.525,
+        "roi_components": {
+          "confidence": 0.325,
+          "cost_savings": 0.41,
+          "ease": 0.9,
+          "priority_boost": 0.1,
+          "safety": 0.9,
+          "speedup": 0.45
+        },
+        "roi_score": 0.489,
+        "score": 0.489,
+        "tier": "advanced",
         "title": "Increase DataLoader prefetch factor",
         "triggered_by": "rule_input_starvation_moderate",
         "validation": [
           "Batch-ready gaps between steps should shrink.",
           "DataLoader wait fraction should decrease."
         ],
-        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU."
+        "why": "DataLoader wait accounts for a significant fraction of step time, suggesting the input pipeline cannot keep pace with the GPU.",
+        "why_ranked": [
+          "Moderate expected speedup",
+          "Low implementation effort",
+          "Low operational risk",
+          "Demoted because diagnostic confidence is low"
+        ]
       }
     ],
     "secondary_bottlenecks": [],

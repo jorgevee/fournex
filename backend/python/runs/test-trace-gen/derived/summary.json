@@ -1,0 +1,111 @@
+{
+  "event_count": 4,
+  "run": {
+    "bottlenecks": [],
+    "diagnosis": {
+      "classifier_version": "0.2.0",
+      "confidence": {
+        "level": "low",
+        "reason": "No bottleneck cleared the current ruleset thresholds.",
+        "score": 0.0
+      },
+      "dominant_stall_type": "compute_bound",
+      "evidence": {},
+      "primary_bottleneck": null,
+      "recommendation_bundles": [],
+      "recommendations": [],
+      "secondary_bottlenecks": [],
+      "why": [],
+      "why_not_others": []
+    },
+    "event_count": 4,
+    "per_step": [
+      {
+        "backward_time_ns": 0,
+        "batch_size": 0,
+        "dataloader_wait_time_ns": 0,
+        "forward_time_ns": 7200,
+        "gpu_active_fraction_proxy": 0.2416,
+        "h2d_copy_time_ns": 0,
+        "optimizer_time_ns": 0,
+        "profiler_windows_exported": 0,
+        "sequence_length": null,
+        "shape_changed": false,
+        "shape_signature": null,
+        "status": "ok",
+        "step_id": 1,
+        "step_kind": "train",
+        "step_wall_time_ns": 29800,
+        "sync_wait_time_ns": 0
+      }
+    ],
+    "run_summary": {
+      "average_gpu_utilization_pct": 0.0,
+      "average_memory_utilization_pct": 0.0,
+      "dominant_stall_type": "compute_bound",
+      "memory_pressure_peak_ratio": 0.0,
+      "profiler_windows_exported": 0,
+      "shape_volatility_ratio": 0.0,
+      "step_time_avg_ns": 29800,
+      "step_time_max_ns": 29800,
+      "throughput_steps_per_sec": 33557.04697986577,
+      "utilization_instability_pct": 0.0
+    },
+    "scope": {
+      "name": "run",
+      "step_ids": [
+        1
+      ]
+    },
+    "step_count": 1
+  },
+  "scope_comparison": {
+    "diagnosis_changed": false,
+    "run_primary_bottleneck": null,
+    "steady_state_primary_bottleneck": null
+  },
+  "selector": {
+    "last_k": null,
+    "policy": "default",
+    "skip_first_n": 2
+  },
+  "steady_state": {
+    "bottlenecks": [],
+    "diagnosis": {
+      "classifier_version": "0.2.0",
+      "confidence": {
+        "level": "low",
+        "reason": "No bottleneck cleared the current ruleset thresholds.",
+        "score": 0.0
+      },
+      "dominant_stall_type": "unknown",
+      "evidence": {},
+      "primary_bottleneck": null,
+      "recommendation_bundles": [],
+      "recommendations": [],
+      "secondary_bottlenecks": [],
+      "why": [],
+      "why_not_others": []
+    },
+    "event_count": 4,
+    "per_step": [],
+    "run_summary": {
+      "average_gpu_utilization_pct": 0.0,
+      "average_memory_utilization_pct": 0.0,
+      "dominant_stall_type": "unknown",
+      "memory_pressure_peak_ratio": 0.0,
+      "profiler_windows_exported": 0,
+      "shape_volatility_ratio": 0.0,
+      "step_time_avg_ns": 0,
+      "step_time_max_ns": 0,
+      "throughput_steps_per_sec": 0.0,
+      "utilization_instability_pct": 0.0
+    },
+    "scope": {
+      "name": "steady_state",
+      "step_ids": []
+    },
+    "step_count": 0
+  },
+  "step_count": 1
+}

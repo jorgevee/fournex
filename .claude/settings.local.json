@@ -12,7 +12,11 @@
       "Bash(C:/Users/jorge/Documents/app_testing2/semiconductor_eda/backend/venv/Scripts/pip.exe install *)",
       "Bash(venv/Scripts/pip install *)",
       "Bash(cmd /c \"C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\venv\\\\Scripts\\\\pip.exe install fastapi uvicorn\")",
-      "PowerShell(& \"C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\venv\\\\Scripts\\\\pip.exe\" install fastapi uvicorn 2>&1 | Select-Object -Last 5)"
+      "PowerShell(& \"C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\venv\\\\Scripts\\\\pip.exe\" install fastapi uvicorn 2>&1 | Select-Object -Last 5)",
+      "Bash(python -m autopilot_telemetry doctor)",
+      "Bash(python -m autopilot_telemetry analyze \"../../traces/cli_test_runs/sdk-3caef15d/run-sdk\")",
+      "Bash(python *)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }

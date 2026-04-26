@@ -1,6 +1,8 @@
 venv/
 __pycache__/
 *.pyc
+traces/cli_test_runs/
+gpu-job-run/
 
 # Notes
 common_schema_plan.md

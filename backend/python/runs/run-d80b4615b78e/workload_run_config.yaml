@@ -1,0 +1,18 @@
+collector:
+  schema_version: "0.1.0"
+  command: "gpu-autopilot collect"
+  sample_interval_ms: 1000
+  output_dir: "C:\\Users\\jorge\\Documents\\app_testing2\\semiconductor_eda\\backend\\traces\\cli_test_runs\\sdk-afad0cbe\\run-sdk"
+run:
+  run_id: "run-sdk"
+  job_name: "gpu-autopilot-run"
+  workload_command:
+    - "C:\\Users\\jorge\\Documents\\app_testing2\\semiconductor_eda\\backend\\venv\\Scripts\\python.exe"
+    - "-c"
+    - "import sys; sys.path.insert(0, 'C:\\\\Users\\\\jorge\\\\Documents\\\\app_testing2\\\\semiconductor_eda\\\\backend\\\\python')\nimport autopilot_telemetry as at\nat.init()\nwith at.step_context(step=1):\n    with at.phase('forward', step=1):\n        pass\n"
+environment:
+  python_version: "3.14.3"
+  platform: "Windows-11-10.0.26200-SP0"
+  host: "JorgePC"
+  framework: "unknown"
+  framework_detection_error: "No module named 'torch'"

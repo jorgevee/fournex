@@ -1,0 +1,22 @@
+{
+  "diagnostic_ready": true,
+  "included_files": [
+    "derived/summary.json",
+    "gpu_metrics.csv",
+    "metadata.json",
+    "optional_logs.txt",
+    "profiler/profiler_trace.json",
+    "raw/workload_metadata.json",
+    "run_config.yaml",
+    "manifest.json"
+  ],
+  "limited": false,
+  "missing_recommended": [
+    "raw_trace"
+  ],
+  "missing_required": [],
+  "schema_version": "0.1.0",
+  "warnings": [
+    "Profiler trace captured; SDK raw trace was not captured. Profiler-based diagnosis is available."
+  ]
+}

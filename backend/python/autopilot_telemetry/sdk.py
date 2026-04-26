@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import os
 import threading
 import time
@@ -41,18 +42,27 @@ _runtime_config: dict[str, Any] = {
     "cupti_debug_mode": False,
 }
 _local_events: list[dict[str, Any]] = []
+_auto_persist_registered = False
+_auto_persist_done = False
 
 
 def init(**kwargs: Any) -> dict[str, Any]:
-    job_name = kwargs.get("job_name", "unknown-job")
-    output_dir = kwargs.get("output_dir", os.path.join(".", "traces"))
+    job_name = kwargs.get("job_name") or os.environ.get("FRX_JOB_NAME", "unknown-job")
+    output_dir = kwargs.get("output_dir") or os.environ.get("FRX_OUTPUT_DIR", os.path.join(".", "traces"))
     raw_output_dir = kwargs.get("raw_output_dir", os.path.join(output_dir, "raw"))
     derived_output_dir = kwargs.get("derived_output_dir", os.path.join(output_dir, "derived"))
-    sample_interval_ms = int(kwargs.get("sample_interval_ms", 1000))
-    run_id = kwargs.get("run_id", f"run-{uuid.uuid4().hex[:12]}")
-    raw_trace_path = kwargs.get("raw_trace_path", os.path.join(raw_output_dir, f"{run_id}.jsonl"))
+    sample_interval_ms = int(
+        kwargs.get("sample_interval_ms") or os.environ.get("FRX_SAMPLE_INTERVAL_MS", 1000)
+    )
+    run_id = kwargs.get("run_id") or os.environ.get("FRX_RUN_ID", f"run-{uuid.uuid4().hex[:12]}")
+    raw_trace_path = (
+        kwargs.get("raw_trace_path")
+        or os.environ.get("FRX_RAW_TRACE_PATH")
+        or os.path.join(raw_output_dir, f"{run_id}.jsonl")
+    )
     derived_summary_path = kwargs.get(
-        "derived_summary_path", os.path.join(derived_output_dir, f"{run_id}_summary.json")
+        "derived_summary_path",
+        os.environ.get("FRX_DERIVED_SUMMARY_PATH", os.path.join(derived_output_dir, f"{run_id}_summary.json")),
     )
     output_path = kwargs.get("output_path", raw_trace_path)
     enable_cupti = bool(kwargs.get("enable_cupti", False))
@@ -80,6 +90,9 @@ def init(**kwargs: Any) -> dict[str, Any]:
                     enable_cupti=enable_cupti, cupti_debug_mode=cupti_debug_mode)
     else:
         _local_events.clear()
+
+    if os.environ.get("FRX_AUTO_PERSIST") == "1":
+        _register_auto_persist()
 
     return dict(_runtime_config)
 
@@ -205,3 +218,25 @@ def clear_local_events() -> None:
 
 def get_runtime_config() -> dict[str, Any]:
     return dict(_runtime_config)
+
+
+def _register_auto_persist() -> None:
+    global _auto_persist_registered
+    if _auto_persist_registered:
+        return
+    atexit.register(_auto_persist_artifacts)
+    _auto_persist_registered = True
+
+
+def _auto_persist_artifacts() -> None:
+    global _auto_persist_done
+    if _auto_persist_done:
+        return
+    _auto_persist_done = True
+    try:
+        from .storage import persist_run_artifacts
+
+        persist_run_artifacts()
+    except Exception:
+        # Auto-persist must never mask the workload's exit status.
+        return

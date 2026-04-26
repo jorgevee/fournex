@@ -1,0 +1,18 @@
+collector:
+  schema_version: "0.1.0"
+  command: "gpu-autopilot collect"
+  sample_interval_ms: 1000
+  output_dir: "runs\\run-d80b4615b78e"
+run:
+  run_id: "run-d80b4615b78e"
+  job_name: "gpu-autopilot-run"
+  workload_command:
+    - "C:\\Users\\jorge\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe"
+    - "-c"
+    - "print('hello')"
+environment:
+  python_version: "3.14.3"
+  platform: "Windows-11-10.0.26200-SP0"
+  host: "JorgePC"
+  framework: "unknown"
+  framework_detection_error: "No module named 'torch'"

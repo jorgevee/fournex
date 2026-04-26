@@ -346,9 +346,12 @@ function SectionHeading({
   align?: "center" | "left";
 }) {
   const alignment = align === "center" ? "mx-auto text-center" : "text-left";
+  const eyebrowAlignment = align === "center" ? "self-center" : "self-start";
   return (
     <div className={`${alignment} flex w-full max-w-3xl flex-col gap-4`}>
-      <span className="inline-flex items-center gap-2 self-start text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300/80">
+      <span
+        className={`inline-flex items-center gap-2 ${eyebrowAlignment} text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300/80`}
+      >
         <span className="h-px w-8 bg-cyan-300/40" />
         {eyebrow}
       </span>
@@ -370,24 +373,19 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(148,163,184,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.05)_1px,transparent_1px)] bg-[size:120px_120px] [mask-image:radial-gradient(circle_at_top,black,transparent_80%)]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,_rgba(124,58,237,0.24),_transparent_58%)] blur-3xl" />
 
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[92rem] flex-col px-6 sm:px-8 lg:px-10 xl:px-12">
-
-        {/* ── Header ── */}
-
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[92rem] flex-col px-4 sm:px-8 lg:px-10 xl:px-12">
 
         {/* ── Hero ── */}
-        <section aria-label="Hero" className="relative border-b border-white/8">
           <Hero />
-        </section>
 
         {/* ── Trust band ── */}
-        <section className="py-8">
-          <div className="rounded-[1.75rem] border border-white/8 bg-white/[0.02] px-5 py-7 sm:px-8">
-            <p className="text-center text-sm font-medium text-violet-200/85">
+        <section className="py-6 sm:py-8">
+          <div className="rounded-[1.5rem] border border-white/8 bg-white/[0.02] px-4 py-6 sm:rounded-[1.75rem] sm:px-8 sm:py-7">
+            <p className="text-center text-sm font-medium leading-6 text-violet-200/85 sm:leading-normal">
               Trusted by teams shipping the world&apos;s most compute-intensive
               workloads
             </p>
-            <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 text-center text-xl font-semibold tracking-[-0.04em] text-slate-500 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-4 text-center text-base font-semibold tracking-[-0.03em] text-slate-500 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-5 sm:text-xl lg:grid-cols-6">
               {trustLogos.map((item) => (
                 <div key={item}>{item}</div>
               ))}
@@ -396,20 +394,20 @@ export default function Home() {
         </section>
 
         {/* ── Bottleneck showcase ── */}
-        <section id="bottlenecks" className="py-24 sm:py-28">
+        <section id="bottlenecks" className="py-16 sm:py-24 lg:py-28">
           <SectionHeading
             eyebrow="What we detect"
             title="Six GPU bottleneck families. Named, ranked, and fixable."
             description="We skip the raw profiler dumps and go straight to diagnosis. Every bottleneck maps to a concrete, explainable fix — not another dashboard to stare at."
           />
-          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
             {bottleneckPatterns.map((item) => {
               const tone = toneMap[item.tone];
               const Icon = item.icon;
               return (
                 <article
                   key={item.title}
-                  className="group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-white/20 hover:bg-white/[0.06]"
+                  className="group relative overflow-hidden rounded-[1.25rem] border border-white/8 bg-white/[0.04] p-5 transition hover:border-white/20 hover:bg-white/[0.06] sm:rounded-[1.5rem] sm:p-6"
                 >
                   <div
                     className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ring-1 ${tone.ring} ${tone.bg} ${tone.text}`}
@@ -439,8 +437,8 @@ export default function Home() {
         </section>
 
         {/* ── Ranked recommendations ── */}
-        <section id="how-it-works" className="py-24 sm:py-28">
-          <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-center">
+        <section id="how-it-works" className="py-16 sm:py-24 lg:py-28">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-center">
             <div>
               <SectionHeading
                 align="left"
@@ -463,17 +461,17 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <div className="mt-10 flex flex-wrap items-center gap-3">
+              <div className="mt-10 flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <a
                   href="#demo"
-                  className="inline-flex items-center gap-2 rounded-full bg-blue-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-400"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-blue-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-400 sm:w-auto"
                 >
                   <Play size={16} />
                   See a live report
                 </a>
                 <a
                   href="#roadmap"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white transition hover:border-white/20 hover:bg-white/10"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm text-white transition hover:border-white/20 hover:bg-white/10 sm:w-auto"
                 >
                   Product roadmap
                   <ArrowRight size={14} />
@@ -485,18 +483,18 @@ export default function Home() {
             <div className="relative">
               <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.14),transparent_60%)] blur-2xl" />
               <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.95),rgba(2,6,23,0.9))] shadow-[0_30px_100px_rgba(2,6,23,0.55)]">
-                <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex flex-col gap-3 border-b border-white/8 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                  <div className="flex min-w-0 items-center gap-2 text-xs text-slate-400">
                     <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-400/10 text-cyan-300">
                       <BarChart3 size={14} />
                     </div>
-                    <span className="font-mono">trace-14c2b / resnet50_train</span>
+                    <span className="min-w-0 break-all font-mono">trace-14c2b / resnet50_train</span>
                   </div>
                   <span className="rounded-full border border-blue-400/20 bg-blue-400/10 px-3 py-1 text-[0.65rem] font-medium uppercase tracking-[0.2em] text-blue-300">
                     Analyzed
                   </span>
                 </div>
-                <div className="grid grid-cols-3 divide-x divide-white/8 border-b border-white/8">
+                <div className="grid grid-cols-1 divide-y divide-white/8 border-b border-white/8 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
                   {[
                     { label: "GPU active", value: "42%" },
                     { label: "Potential uplift", value: "+68%" },
@@ -506,7 +504,7 @@ export default function Home() {
                       <div className="text-[0.65rem] uppercase tracking-[0.22em] text-slate-500">
                         {stat.label}
                       </div>
-                      <div className="mt-1 text-xl font-semibold tracking-[-0.03em] text-white">
+                      <div className="mt-1 text-lg font-semibold tracking-[-0.03em] text-white sm:text-xl">
                         {stat.value}
                       </div>
                     </div>
@@ -516,7 +514,7 @@ export default function Home() {
                   {rankedFixes.map((fix) => (
                     <li
                       key={fix.rank}
-                      className="flex items-center gap-4 p-5 transition hover:bg-white/[0.03]"
+                      className="flex flex-col items-start gap-4 p-4 transition hover:bg-white/[0.03] sm:flex-row sm:items-center sm:p-5"
                     >
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 font-mono text-xs text-slate-400">
                         {fix.rank}
@@ -531,7 +529,7 @@ export default function Home() {
                           <span>Risk · {fix.risk}</span>
                         </div>
                       </div>
-                      <div className="text-right">
+                      <div className="text-left sm:text-right">
                         <div className="text-sm font-semibold text-blue-300">
                           {fix.speedup}
                         </div>
@@ -542,12 +540,12 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <div className="flex items-center justify-between border-t border-white/8 bg-white/[0.02] px-5 py-3 text-xs text-slate-400">
+                <div className="flex flex-col gap-2 border-t border-white/8 bg-white/[0.02] px-4 py-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                   <span className="flex items-center gap-2">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
                     Live recommendation stream
                   </span>
-                  <span className="font-mono">report_7a1.json</span>
+                  <span className="break-all font-mono">report_7a1.json</span>
                 </div>
               </div>
             </div>
@@ -555,13 +553,13 @@ export default function Home() {
         </section>
 
         {/* ── Roadmap ── */}
-        <section id="roadmap" className="py-24 sm:py-28">
+        <section id="roadmap" className="py-16 sm:py-24 lg:py-28">
           <SectionHeading
             eyebrow="Product evolution"
             title="Profiler today. Autopilot tomorrow. Trust built in at every step."
             description="We don't ship blind automation. The product walks from diagnosis to optimization to full autopilot — each phase validated by real workload outcomes before the next one turns on."
           />
-          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-5 md:grid-cols-2 xl:grid-cols-4">
             {productPhases.map((phase, index) => {
               const Icon = phase.icon;
               const isLive = phase.status === "Shipping now";
@@ -569,7 +567,7 @@ export default function Home() {
               return (
                 <article
                   key={phase.phase}
-                  className="relative flex flex-col overflow-hidden rounded-[1.5rem] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.7))] p-6"
+                  className="relative flex flex-col overflow-hidden rounded-[1.25rem] border border-white/8 bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.7))] p-5 sm:rounded-[1.5rem] sm:p-6"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-cyan-300/80">
@@ -612,19 +610,19 @@ export default function Home() {
         </section>
 
         {/* ── Capabilities ── */}
-        <section id="capabilities" className="py-24 sm:py-28">
+        <section id="capabilities" className="py-16 sm:py-24 lg:py-28">
           <SectionHeading
             eyebrow="Capabilities"
             title="Built for platform engineers operating production GPU fleets."
             description="Telemetry fidelity, explainable ranking, and controlled rollout — the product surface is designed for technical teams, not executive dashboards."
           />
-          <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
             {capabilityCards.map((item) => {
               const Icon = item.icon;
               return (
                 <article
                   key={item.title}
-                  className="group rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-6 transition hover:border-cyan-400/20 hover:bg-white/[0.06]"
+                  className="group rounded-[1.25rem] border border-white/8 bg-white/[0.04] p-5 transition hover:border-cyan-400/20 hover:bg-white/[0.06] sm:rounded-[1.5rem] sm:p-6"
                 >
                   <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 to-white/[0.02] text-cyan-200">
                     <Icon size={20} />
@@ -642,8 +640,8 @@ export default function Home() {
         </section>
 
         {/* ── CLI integration ── */}
-        <section className="py-24 sm:py-28">
-          <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+        <section className="py-16 sm:py-24 lg:py-28">
+          <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
             <div>
               <SectionHeading
                 align="left"
@@ -651,7 +649,7 @@ export default function Home() {
                 title="One command. No hardware changes. No vendor lock-in."
                 description="Works as a CLI, a CI job, or a long-running agent. Bring your own cluster, keep your own training code. We just turn traces into ranked fixes."
               />
-              <div className="mt-8 grid gap-4 text-sm">
+              <div className="mt-8 grid gap-3 text-sm sm:gap-4">
                 {[
                   { label: "Install", value: "pip install fournex" },
                   { label: "Profile", value: "fournex analyze --pid $TRAIN_PID" },
@@ -659,12 +657,12 @@ export default function Home() {
                 ].map((step) => (
                   <div
                     key={step.label}
-                    className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3"
+                    className="flex flex-col items-start gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 sm:flex-row sm:items-center sm:gap-4"
                   >
                     <span className="text-[0.65rem] font-semibold uppercase tracking-[0.24em] text-cyan-300/80">
                       {step.label}
                     </span>
-                    <code className="font-mono text-sm text-slate-200">
+                    <code className="break-all font-mono text-sm text-slate-200">
                       {step.value}
                     </code>
                   </div>
@@ -675,7 +673,7 @@ export default function Home() {
             {/* Terminal */}
             <div className="relative">
               <div className="pointer-events-none absolute -inset-6 rounded-[2.25rem] bg-[radial-gradient(circle_at_bottom_left,rgba(99,102,241,0.18),transparent_60%)] blur-2xl" />
-              <div className="relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-slate-950/80 font-mono text-sm shadow-[0_30px_100px_rgba(2,6,23,0.55)] backdrop-blur-xl">
+              <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-950/80 font-mono text-xs shadow-[0_30px_100px_rgba(2,6,23,0.55)] backdrop-blur-xl sm:rounded-[1.75rem] sm:text-sm">
                 <div className="flex items-center border-b border-white/10 bg-white/5 px-4 py-3">
                   <div className="flex gap-2">
                     <div className="h-3 w-3 rounded-full bg-red-500/80" />
@@ -686,7 +684,7 @@ export default function Home() {
                     fournex ~ run.sh
                   </div>
                 </div>
-                <div className="space-y-3 p-6 leading-7">
+                <div className="space-y-3 p-4 leading-6 sm:p-6 sm:leading-7">
                   <div>
                     <span className="text-slate-500">$</span>{" "}
                     <span className="text-cyan-300">fournex</span>{" "}
@@ -734,7 +732,7 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="rounded-xl border border-blue-400/20 bg-blue-400/10 p-3 text-blue-100">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                       <span>Final validated speedup</span>
                       <span className="font-semibold">+61.2%</span>
                     </div>
@@ -749,21 +747,21 @@ export default function Home() {
         </section>
 
         {/* ── ROI ── */}
-        <section id="roi" className="py-24 sm:py-28">
-          <div className="rounded-[2rem] border border-white/8 bg-[linear-gradient(135deg,rgba(8,15,31,0.94),rgba(15,23,42,0.8))] p-8 sm:p-10 lg:p-14">
+        <section id="roi" className="py-16 sm:py-24 lg:py-28">
+          <div className="rounded-[1.5rem] border border-white/8 bg-[linear-gradient(135deg,rgba(8,15,31,0.94),rgba(15,23,42,0.8))] p-6 sm:rounded-[2rem] sm:p-10 lg:p-14">
             <SectionHeading
               eyebrow="ROI"
               title="Immediate infrastructure leverage. Not a long science project."
               description="Cut wasted GPU spend, increase throughput, and shrink the manual tuning backlog. No migrations. No new hardware. Just measurable deltas in production."
             />
-            <div className="mt-14 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-5 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((item) => (
                 <div
                   key={item.label}
                   className="group relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-black/30 p-6"
                 >
                   <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-cyan-400/10 blur-3xl transition group-hover:bg-cyan-400/20" />
-                  <div className="relative text-4xl font-semibold tracking-[-0.05em] text-white">
+                  <div className="relative text-3xl font-semibold tracking-[-0.05em] text-white sm:text-4xl">
                     {item.value}
                   </div>
                   <p className="relative mt-3 text-sm uppercase tracking-[0.2em] text-slate-400">
@@ -772,7 +770,7 @@ export default function Home() {
                 </div>
               ))}
             </div>
-            <div className="mt-10 flex flex-col items-start gap-4 rounded-[1.5rem] border border-blue-400/15 bg-blue-400/[0.06] p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-10 flex flex-col items-start gap-4 rounded-[1.25rem] border border-blue-400/15 bg-blue-400/[0.06] p-5 sm:rounded-[1.5rem] sm:p-6 sm:flex-row sm:items-center sm:justify-between">
               <div className="max-w-xl text-sm leading-7 text-blue-50/90">
                 A team running a $1.2M/yr GPU training budget typically recovers
                 <span className="font-semibold text-white">
@@ -793,8 +791,8 @@ export default function Home() {
         </section>
 
         {/* ── Moat ── */}
-        <section className="py-24 sm:py-28">
-          <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr]">
+        <section className="py-16 sm:py-24 lg:py-28">
+          <div className="grid gap-8 sm:gap-10 lg:grid-cols-[0.95fr_1.05fr]">
             <div>
               <SectionHeading
                 align="left"
@@ -802,7 +800,7 @@ export default function Home() {
                 title="A workload-performance dataset that compounds every week."
                 description="We're not another rules engine. Every analyzed workload expands the mapping from trace patterns to validated fixes — turning usage into defensibility."
               />
-              <div className="mt-8 grid gap-3 text-sm text-slate-300">
+              <div className="mt-8 grid gap-3 text-sm leading-6 text-slate-300">
                 {[
                   "Proprietary trace → fix → outcome dataset",
                   "Validated optimization deltas across hardware",
@@ -819,7 +817,7 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/8 bg-white/[0.04] p-7">
+            <div className="relative overflow-hidden rounded-[1.5rem] border border-white/8 bg-white/[0.04] p-5 sm:rounded-[2rem] sm:p-7">
               <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl" />
               <div className="relative grid gap-4">
                 {[
@@ -853,8 +851,8 @@ export default function Home() {
         </section>
 
         {/* ── CTA ── */}
-        <section id="demo" className="py-24 sm:py-28">
-          <div className="relative overflow-hidden rounded-[2rem] border border-cyan-400/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.18),rgba(14,165,233,0.08),rgba(15,23,42,0.92))] p-8 sm:p-10 lg:p-14">
+        <section id="demo" className="py-16 sm:py-24 lg:py-28">
+          <div className="relative overflow-hidden rounded-[1.5rem] border border-cyan-400/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.18),rgba(14,165,233,0.08),rgba(15,23,42,0.92))] p-6 sm:rounded-[2rem] sm:p-10 lg:p-14">
             <div className="pointer-events-none absolute -right-16 -top-16 h-72 w-72 rounded-full bg-blue-400/10 blur-3xl" />
             <div className="pointer-events-none absolute -left-24 bottom-0 h-72 w-72 rounded-full bg-indigo-400/10 blur-3xl" />
             <div className="relative grid gap-10 lg:grid-cols-[1fr_0.75fr] lg:items-end">
@@ -863,15 +861,15 @@ export default function Home() {
                   <Zap size={12} />
                   Early access · Open source
                 </span>
-                <h2 className="mt-5 text-4xl font-semibold tracking-[-0.05em] text-white sm:text-5xl lg:text-[3.2rem] lg:leading-[1.05]">
+                <h2 className="mt-5 text-3xl font-semibold tracking-[-0.05em] text-white sm:text-5xl lg:text-[3.2rem] lg:leading-[1.05]">
                   Turn wasted GPU compute into measurable performance gains.
                 </h2>
-                <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200">
+                <p className="mt-5 max-w-2xl text-base leading-7 text-slate-200 sm:text-lg sm:leading-8">
                   See where your GPU efficiency leaks today, what can be tuned
                   automatically, and how quickly those gains can land in
                   production. First report is free.
                 </p>
-                <div className="mt-8 flex flex-wrap items-center gap-6 text-sm text-slate-300">
+                <div className="mt-8 grid gap-3 text-sm text-slate-300 sm:flex sm:flex-wrap sm:items-center sm:gap-6">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 size={16} className="text-blue-300" />
                     No code changes to onboard
@@ -886,7 +884,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              <form className="rounded-[1.75rem] border border-white/10 bg-slate-950/80 p-6 backdrop-blur">
+              <form className="rounded-[1.5rem] border border-white/10 bg-slate-950/80 p-5 backdrop-blur sm:rounded-[1.75rem] sm:p-6">
                 <label className="block text-sm text-slate-300">
                   Work email
                   <input
@@ -935,7 +933,7 @@ export default function Home() {
 
         {/* ── Footer ── */}
         <footer className="mt-10 border-t border-white/8 py-12">
-          <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
+          <div className="grid gap-8 sm:gap-10 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
             <div>
               <Link href="/" className="flex items-center gap-3">
                 <FournexMark size={28} />
@@ -975,9 +973,9 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-white/8 pt-6 text-xs text-slate-500 sm:flex-row sm:items-center">
+          <div className="mt-10 flex flex-col items-start justify-between gap-3 border-t border-white/8 pt-6 text-xs leading-6 text-slate-500 sm:flex-row sm:items-center">
             <span>© {new Date().getFullYear()} Fournex. Open source under Apache 2.0.</span>
-            <div className="flex items-center gap-5">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
               <a href="#" className="transition hover:text-white">Privacy</a>
               <a href="#" className="transition hover:text-white">Terms</a>
               <a href="#" className="transition hover:text-white">Status</a>

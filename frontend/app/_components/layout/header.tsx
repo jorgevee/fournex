@@ -70,39 +70,46 @@ const navLinks = [
 
 export default function Header() {
   return (
-    <header className="sticky top-0 z-50 px-6 pt-5 sm:px-8 lg:px-10 xl:px-12">
-      <div className="mx-auto flex min-h-[4.75rem] w-full max-w-[92rem] items-center justify-between rounded-[1.35rem] border border-white/10 bg-black/35 px-4 backdrop-blur-xl sm:px-5 lg:px-6 xl:px-7">
-        <Link href="/" className="flex items-center gap-3 text-sm font-medium">
-          <FournexMark size={32} />
-          <span className="text-base font-semibold tracking-[-0.03em] text-white">
-            GPU Performance Autopilot
-          </span>
+   <header className="sticky top-0 z-50 w-full px-4 sm:px-6 lg:px-8 xl:px-10">
+  <div className="mx-auto flex min-h-[4.25rem] w-full max-w-[92rem] items-center justify-between rounded-[1.35rem] border border-white/[0.08] bg-black/30 px-4 py-2.5 backdrop-blur-2xl backdrop-saturate-150 shadow-[0_8px_32px_-6px_rgba(0,0,0,0.3)] sm:px-5 lg:px-6 xl:px-7">
+    <Link href="/" className="flex items-center gap-3 text-sm font-medium">
+      <FournexMark size={32} />
+      <span className="text-base font-semibold tracking-[-0.03em] text-white sm:text-lg">
+        GPU Performance Autopilot
+      </span>
+    </Link>
+
+    <nav className="hidden items-center gap-6 text-sm text-slate-300 lg:flex lg:gap-8">
+      {navLinks.map((item) => (
+        <Link
+          key={item.label}
+          href={item.href}
+          className="transition-colors duration-200 hover:text-white"
+        >
+          {item.label}
         </Link>
+      ))}
+    </nav>
 
-        <nav className="hidden items-center gap-8 text-sm text-slate-300 lg:flex">
-          {navLinks.map((item) => (
-            <Link key={item.label} href={item.href} className="transition hover:text-white">
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-3">
-          <Link
-            href="/signin"
-            className="hidden items-center gap-2 rounded-xl border border-white/12 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/25 hover:bg-white/[0.06] sm:inline-flex"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/analyze"
-            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2.5 text-sm font-medium text-white transition hover:from-violet-500 hover:to-fuchsia-400"
-          >
-            Try demo
-            <ArrowRight size={14} />
-          </Link>
-        </div>
-      </div>
-    </header>
+    <div className="flex items-center gap-3">
+      <Link
+        href="/signin"
+        className="hidden items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-white shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-white/20 hover:bg-white/[0.08] hover:shadow-md sm:inline-flex"
+      >
+        Sign in
+      </Link>
+      <Link
+        href="/analyze"
+        className="group relative inline-flex items-center gap-1.5 overflow-hidden rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-fuchsia-500/20 transition-all duration-300 hover:shadow-md hover:shadow-fuchsia-500/30"
+      >
+        <span className="absolute inset-0 bg-gradient-to-r from-violet-500 to-fuchsia-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <span className="relative z-10 flex items-center gap-1.5">
+          Try demo
+          <ArrowRight size={14} />
+        </span>
+      </Link>
+    </div>
+  </div>
+</header>
   );
 }
