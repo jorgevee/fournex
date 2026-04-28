@@ -1,123 +1,161 @@
 #include "writer.h"
 
-#include <fstream>
-#include <sstream>
+#include <charconv>
+#include <filesystem>
 
 namespace autopilot::telemetry {
 namespace {
 
-std::string EscapeJson(const std::string& value) {
-    std::string escaped;
-    escaped.reserve(value.size());
-    for (char ch : value) {
+// Appends s to buf with JSON escaping applied in-place — no temporary string.
+void AppendEscaped(std::string& buf, std::string_view s) {
+    for (const char ch : s) {
         switch (ch) {
-            case '\\':
-                escaped += "\\\\";
-                break;
-            case '"':
-                escaped += "\\\"";
-                break;
-            case '\n':
-                escaped += "\\n";
-                break;
-            case '\r':
-                escaped += "\\r";
-                break;
-            case '\t':
-                escaped += "\\t";
-                break;
-            default:
-                escaped += ch;
-                break;
+            case '\\': buf += "\\\\"; break;
+            case '"':  buf += "\\\""; break;
+            case '\n': buf += "\\n";  break;
+            case '\r': buf += "\\r";  break;
+            case '\t': buf += "\\t";  break;
+            default:   buf += ch;     break;
         }
     }
-    return escaped;
 }
 
-void WriteOptionalInt(std::ostringstream& stream, const char* key,
-                      const std::optional<int>& value) {
-    stream << ",\"" << key << "\":";
-    if (value.has_value()) {
-        stream << *value;
+void AppendQuotedEscaped(std::string& buf, std::string_view s) {
+    buf += '"';
+    AppendEscaped(buf, s);
+    buf += '"';
+}
+
+void AppendOptionalInt(std::string& buf, const char* key, const std::optional<int>& v) {
+    buf += ",\"";
+    buf += key;
+    buf += "\":";
+    if (v.has_value()) {
+        char digits[12];
+        const auto [end, _] = std::to_chars(digits, digits + sizeof(digits), *v);
+        buf.append(digits, end);
     } else {
-        stream << "null";
+        buf += "null";
     }
 }
 
-void WriteOptionalInt64(std::ostringstream& stream, const char* key,
-                        const std::optional<std::int64_t>& value) {
-    stream << ",\"" << key << "\":";
-    if (value.has_value()) {
-        stream << *value;
+void AppendOptionalInt64(std::string& buf, const char* key,
+                         const std::optional<std::int64_t>& v) {
+    buf += ",\"";
+    buf += key;
+    buf += "\":";
+    if (v.has_value()) {
+        char digits[20];
+        const auto [end, _] = std::to_chars(digits, digits + sizeof(digits), *v);
+        buf.append(digits, end);
     } else {
-        stream << "null";
+        buf += "null";
     }
 }
 
-void WriteOptionalString(std::ostringstream& stream, const char* key,
-                         const std::optional<std::string>& value) {
-    stream << ",\"" << key << "\":";
-    if (value.has_value()) {
-        stream << "\"" << EscapeJson(*value) << "\"";
+void AppendOptionalString(std::string& buf, const char* key,
+                          const std::optional<std::string>& v) {
+    buf += ",\"";
+    buf += key;
+    buf += "\":";
+    if (v.has_value()) {
+        AppendQuotedEscaped(buf, *v);
     } else {
-        stream << "null";
+        buf += "null";
     }
 }
 
-std::string SerializeEvent(const TelemetryEvent& event) {
-    std::ostringstream stream;
-    stream << "{";
-    stream << "\"schema_version\":\"" << EscapeJson(event.schema_version) << "\"";
-    stream << ",\"event_id\":\"" << EscapeJson(event.event_id) << "\"";
-    stream << ",\"timestamp_ns\":" << event.timestamp_ns;
-    stream << ",\"pid\":" << event.pid;
-    stream << ",\"tid\":" << event.tid;
-    stream << ",\"job_id\":\"" << EscapeJson(event.job_id) << "\"";
-    stream << ",\"run_id\":\"" << EscapeJson(event.run_id) << "\"";
-    stream << ",\"event_type\":\"" << EscapeJson(event.event_type) << "\"";
-    stream << ",\"event_source\":\"" << EscapeJson(event.event_source) << "\"";
-    WriteOptionalInt(stream, "gpu_id", event.gpu_id);
-    WriteOptionalInt(stream, "step_id", event.step_id);
-    WriteOptionalString(stream, "span_id", event.span_id);
-    WriteOptionalString(stream, "parent_span_id", event.parent_span_id);
-    WriteOptionalInt64(stream, "duration_ns", event.duration_ns);
-    stream << ",\"level\":\"" << EscapeJson(event.level) << "\"";
-    stream << ",\"payload\":{";
+// Serializes event into buf without any temporary string allocations.
+void SerializeEventInto(const TelemetryEvent& event, std::string& buf) {
+    buf.clear();
+    buf.reserve(256);
 
+    buf += "{\"schema_version\":";
+    AppendQuotedEscaped(buf, event.schema_version);
+
+    buf += ",\"event_id\":";
+    AppendQuotedEscaped(buf, event.event_id);
+
+    buf += ",\"timestamp_ns\":";
+    {
+        char digits[20];
+        const auto [end, _] = std::to_chars(digits, digits + sizeof(digits), event.timestamp_ns);
+        buf.append(digits, end);
+    }
+
+    buf += ",\"pid\":";
+    {
+        char digits[12];
+        const auto [end, _] = std::to_chars(digits, digits + sizeof(digits), event.pid);
+        buf.append(digits, end);
+    }
+
+    buf += ",\"tid\":";
+    {
+        char digits[12];
+        const auto [end, _] = std::to_chars(digits, digits + sizeof(digits), event.tid);
+        buf.append(digits, end);
+    }
+
+    buf += ",\"job_id\":";
+    AppendQuotedEscaped(buf, event.job_id);
+
+    buf += ",\"run_id\":";
+    AppendQuotedEscaped(buf, event.run_id);
+
+    buf += ",\"event_type\":";
+    AppendQuotedEscaped(buf, event.event_type);
+
+    buf += ",\"event_source\":";
+    AppendQuotedEscaped(buf, event.event_source);
+
+    AppendOptionalInt(buf, "gpu_id", event.gpu_id);
+    AppendOptionalInt(buf, "step_id", event.step_id);
+    AppendOptionalString(buf, "span_id", event.span_id);
+    AppendOptionalString(buf, "parent_span_id", event.parent_span_id);
+    AppendOptionalInt64(buf, "duration_ns", event.duration_ns);
+
+    buf += ",\"level\":";
+    AppendQuotedEscaped(buf, event.level);
+
+    buf += ",\"payload\":{";
     bool first = true;
     for (const auto& [key, value] : event.payload) {
-        if (!first) {
-            stream << ",";
-        }
+        if (!first) buf += ',';
         first = false;
-        stream << "\"" << EscapeJson(key) << "\":\"" << EscapeJson(value) << "\"";
+        AppendQuotedEscaped(buf, key);
+        buf += ':';
+        AppendQuotedEscaped(buf, value);
     }
-
-    stream << "}}";
-    return stream.str();
+    buf += "}}";
 }
 
 }  // namespace
 
 TraceWriter::TraceWriter(std::filesystem::path output_path)
-    : output_path_(std::move(output_path)) {}
-
-void TraceWriter::WriteBatch(const std::vector<TelemetryEvent>& events) {
-    if (events.empty()) {
-        return;
-    }
-
+    : output_path_(std::move(output_path)) {
     const auto parent = output_path_.parent_path();
     if (!parent.empty()) {
         std::filesystem::create_directories(parent);
     }
-    std::ofstream out(output_path_, std::ios::app);
-    for (const auto& event : events) {
-        out << SerializeEvent(event) << '\n';
-    }
+    out_.open(output_path_, std::ios::app);
+    // Install the 64 KB I/O buffer — amortises write syscalls across the batch.
+    out_.rdbuf()->pubsetbuf(io_buf_.data(), static_cast<std::streamsize>(kIoBufSize));
+    line_buf_.reserve(512);
 }
 
-void TraceWriter::Flush() {}
+void TraceWriter::WriteBatch(const std::pmr::vector<TelemetryEvent>& events) {
+    if (events.empty() || !out_.is_open()) return;
+    for (const auto& event : events) {
+        SerializeEventInto(event, line_buf_);
+        out_ << line_buf_ << '\n';
+    }
+    out_.flush();
+}
+
+void TraceWriter::Flush() {
+    if (out_.is_open()) out_.flush();
+}
 
 const std::filesystem::path& TraceWriter::output_path() const {
     return output_path_;

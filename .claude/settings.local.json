@@ -16,7 +16,8 @@
       "Bash(python -m autopilot_telemetry doctor)",
       "Bash(python -m autopilot_telemetry analyze \"../../traces/cli_test_runs/sdk-3caef15d/run-sdk\")",
       "Bash(python *)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(xargs wc *)"
     ]
   }
 }

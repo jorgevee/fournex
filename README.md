@@ -78,7 +78,7 @@ python -m pip install -e .
 Then run a workload from any folder:
 
 ```bash
-gpu-autopilot collect --name slow-input-test --out runs -- python train.py
+frx collect --name slow-input-test --out runs -- python train.py
 ```
 
 For local development without installing the console script, point Python at the package:

@@ -42,6 +42,12 @@ def main(argv: list[str] | None = None) -> int:
         return doctor(args)
     elif args.command == "smoke-test":
         return smoke_test(args)
+    elif args.command == "tune":
+        args.workload_command = _normalize_workload_command(args.workload_command)
+        args.workload_command = _resolve_workload_command(args.workload_command)
+        if not args.workload_command:
+            parser.error("tune requires a workload command after --")
+        return tune(args)
     else:
         parser.print_help()
         return 1
@@ -154,6 +160,33 @@ def collect(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def tune(args: argparse.Namespace) -> int:
+    from .autopilot.actions import PromotionThresholds
+    from .autopilot.report import format_report
+    from .autopilot.runner import ExperimentRunner
+
+    environment = _detect_environment()
+    thresholds = PromotionThresholds(min_speedup=args.min_speedup)
+
+    runner = ExperimentRunner(
+        workload_command=args.workload_command,
+        job_name=args.name,
+        out_dir=args.out,
+        max_trials=args.max_trials,
+        safe_only=args.safe,
+        time_budget_s=args.time_budget_s,
+        warmup_steps=args.warmup_steps,
+        measure_steps=args.measure_steps,
+        sample_interval_ms=args.sample_interval_ms,
+        thresholds=thresholds,
+        environment=environment,
+        verbose=True,
+    )
+    report = runner.run()
+    print(format_report(report))
+    return 0 if report.improved else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="frx")
     subparsers = parser.add_subparsers(dest="command")
@@ -193,6 +226,43 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("doctor", help="check environment for frx requirements")
 
     subparsers.add_parser("smoke-test", help="run a synthetic workload and verify end-to-end bundle generation")
+
+    tune_parser = subparsers.add_parser(
+        "tune",
+        help="run safe autopilot: sweep configs and recommend the fastest one",
+    )
+    tune_parser.add_argument("--name", default="frx-tune", help="job name")
+    tune_parser.add_argument("--out", default="runs", help="output directory")
+    tune_parser.add_argument(
+        "--max-trials", type=int, default=12,
+        help="maximum number of candidate configs to try (default: 12)",
+    )
+    tune_parser.add_argument(
+        "--safe", action="store_true", default=True,
+        help="only run Tier-0 safe actions (dataloader knobs); skip batch size and AMP (default)",
+    )
+    tune_parser.add_argument(
+        "--no-safe", dest="safe", action="store_false",
+        help="also run Tier-1 actions: batch size and mixed precision",
+    )
+    tune_parser.add_argument(
+        "--time-budget-s", type=int, default=60,
+        help="max seconds per trial before killing (default: 60)",
+    )
+    tune_parser.add_argument(
+        "--warmup-steps", type=int, default=5,
+        help="steps to skip before measuring throughput (default: 5)",
+    )
+    tune_parser.add_argument(
+        "--measure-steps", type=int, default=20,
+        help="steps to measure per trial (default: 20)",
+    )
+    tune_parser.add_argument(
+        "--min-speedup", type=float, default=0.08,
+        help="minimum throughput improvement to recommend a config (default: 0.08 = 8%%)",
+    )
+    tune_parser.add_argument("--sample-interval-ms", type=int, default=1000)
+    tune_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
     return parser
 
