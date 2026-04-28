@@ -10,6 +10,7 @@ import {
   Package,
   Cpu,
   Zap,
+  SlidersHorizontal,
 } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -125,7 +126,7 @@ export default function DocsPage() {
           </div>
           <p className="text-slate-400 text-sm max-w-2xl">
             Developer documentation for the <Code>frx</Code> CLI.
-            Covers installation, all four subcommands, bundle layout, and how
+            Covers installation, all CLI subcommands, bundle layout, and how
             the analysis pipeline works.
           </p>
         </div>
@@ -148,6 +149,7 @@ export default function DocsPage() {
               <ul className="space-y-0.5">
                 <NavItem href="#collect">collect</NavItem>
                 <NavItem href="#analyze">analyze</NavItem>
+                <NavItem href="#tune">tune</NavItem>
                 <NavItem href="#doctor">doctor</NavItem>
                 <NavItem href="#smoke-test">smoke-test</NavItem>
               </ul>
@@ -234,7 +236,10 @@ frx collect -- python train.py
 # 2. Analyze locally (run-<id> is printed by collect)
 frx analyze runs/run-<id>
 
-# 3. Upload  →  drag runs/run-<id>.zip onto fournex.com/analyze`}</Pre>
+# 3. Upload  →  drag runs/run-<id>.zip onto fournex.com/analyze
+
+# Optional: let autopilot sweep configs and find the fastest safe candidate
+frx tune --safe --max-trials 12 -- python train.py`}</Pre>
               </div>
             </Section>
 
@@ -482,6 +487,392 @@ Running smoke test ...
   [PASS]  no unexpected warnings
 
 All smoke-test checks passed.`}</Pre>
+            </Section>
+
+            {/* tune */}
+            <Section id="tune">
+              <div className="flex items-center gap-3">
+                <H2>tune</H2>
+                <CommandBadge>frx tune</CommandBadge>
+                <SlidersHorizontal className="h-4 w-4 text-emerald-400" />
+                <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[0.65rem] font-semibold text-emerald-300 uppercase tracking-wide">
+                  Autopilot
+                </span>
+              </div>
+
+              <P>
+                Runs the experiment runner: captures a baseline, focuses candidate
+                configs from a bottleneck diagnosis, validates safety before each
+                trial, measures an explicit benchmark window, rejects quality
+                regressions, and writes reproducible artifacts. The command remains
+                recommendation-only; it does not rewrite your training config.
+              </P>
+
+              <Pre>{`frx tune [OPTIONS] -- COMMAND [ARGS...]
+
+Options:
+  --name NAME              Job name for output directories (default: frx-tune)
+  --out DIR                Root output directory (default: runs)
+  --max-trials N           Max candidate configs to try (default: 12)
+  --safe                   Tier-0 only: dataloader knobs (default)
+  --no-safe                Also try Tier-1: batch size and mixed precision
+  --time-budget-s N        Kill trial after N seconds (default: 60)
+  --warmup-steps N         Steps to skip before measuring (default: 5)
+  --measure-steps N        Steps to include in measurement (default: 20)
+  --repeat-count N         Recorded for repeat-aware comparison (default: 1)
+  --bottleneck LABEL       Focus candidates manually
+  --min-speedup FLOAT      Minimum improvement to recommend (default: 0.08 = 8%)
+  --allow-risky-actions    Allow high-risk candidates
+  --no-quality-checks      Do not require quality checks for precision changes
+  --max-final-loss-regression FLOAT
+  --max-loss-divergence FLOAT
+  --output-abs-tolerance FLOAT
+  --allow-nonfinite-loss
+  --sample-interval-ms N   GPU sampling interval (default: 1000)`}</Pre>
+
+              <H3>Safety tiers</H3>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Tier</Th>
+                    <Th>Actions</Th>
+                    <Th>Flag</Th>
+                    <Th>Guardrails</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["0 — Safe", "num_workers, pin_memory, prefetch_factor, persistent_workers", "--safe (default)", "Exit code, step count, throughput not zero"],
+                    ["1 — Validated", "batch_size, AMP fp16/bf16", "--no-safe", "Same as Tier 0 + memory ratio < 90%, step time regression < 10%"],
+                    ["2 — Risky", "distributed tuning, custom kernels", "Not yet implemented", "Requires explicit user approval"],
+                  ].map(([tier, actions, flag, guards]) => (
+                    <tr key={tier}>
+                      <Td mono>{tier}</Td>
+                      <Td>{actions}</Td>
+                      <Td mono>{flag}</Td>
+                      <Td>{guards}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <P>
+                Current implementation adds allocator candidates in the safe tier
+                and runtime candidates such as <Code>torch.compile</Code> and CUDA
+                Graphs in the validated tier when their preconditions pass.
+              </P>
+
+              <H3>Staged search order</H3>
+              <P>
+                Candidates are generated in stages so the trial budget is spent
+                efficiently — no brute-force grid across all knob combinations.
+              </P>
+              <Pre>{`Stage 1  dataloader   num_workers × pin_memory grid + prefetch_factor variants
+Stage 2  batch size   1.25×, 1.5×, 2× baseline  (--no-safe required)
+Stage 3  precision    bf16 (Ampere+), fp16        (--no-safe required)`}</Pre>
+
+              <H3>Diagnosis-focused candidates</H3>
+              <P>
+                The runner now focuses candidates from the baseline diagnosis when
+                it can read one from <Code>derived/summary.json</Code>. Use{" "}
+                <Code>--bottleneck</Code> to override that focus manually.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Bottleneck</Th>
+                    <Th>Candidate family</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["input_bound", "DataLoader workers, pin_memory, prefetch_factor"],
+                    ["copy_bound", "Pinned-memory-focused DataLoader candidates"],
+                    ["launch_bound", "torch.compile and CUDA Graphs when --no-safe is enabled"],
+                    ["memory_pressure", "CUDA allocator settings, then mixed precision when --no-safe is enabled"],
+                    ["underutilized_gpu", "Batch size, mixed precision, then runtime candidates when --no-safe is enabled"],
+                  ].map(([label, family]) => (
+                    <tr key={label}>
+                      <Td mono>{label}</Td>
+                      <Td>{family}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <H3>Pre-run safety validation</H3>
+              <P>
+                Unsafe candidates are skipped before execution. They still get a
+                trial directory with <Code>config.yaml</Code>,{" "}
+                <Code>metrics.json</Code>, and <Code>stderr.log</Code> explaining
+                the rejection reason.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Check</Th>
+                    <Th>Rejects when</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Risk policy", "Candidate is high risk and --allow-risky-actions is not set"],
+                    ["Batch size", "Memory headroom is below the safe threshold"],
+                    ["Precision", "CUDA is unavailable, bf16 is unsupported, or quality checks are required"],
+                    ["CUDA Graphs", "Shapes appear dynamic or CUDA is unavailable"],
+                    ["torch.compile", "Compile is marked unsupported or dynamic behavior is incompatible"],
+                  ].map(([check, rejects]) => (
+                    <tr key={check}>
+                      <Td mono>{check}</Td>
+                      <Td>{rejects}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <H3>Benchmark window</H3>
+              <P>
+                Each trial writes an explicit <Code>benchmark_window.json</Code>.
+                Metrics prefer <Code>measurement_window</Code> when per-step data
+                is available, then fall back to <Code>steady_state</Code> and full
+                run metrics.
+              </P>
+              <Pre>{`benchmark_window.json
+{
+  "warmup_steps": 5,
+  "measurement_steps": 20,
+  "repeat_count": 1,
+  "timeout_s": 60
+}`}</Pre>
+
+              <H3>Env vars injected per trial</H3>
+              <P>
+                Each trial subprocess receives the standard{" "}
+                <Code>FRX_*</Code> collect vars plus these tune-specific ones.
+                The workload reads them to configure itself — see the SDK
+                integration section for how to wire them up.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Variable</Th>
+                    <Th>Set by</Th>
+                    <Th>Purpose</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["FRX_TUNE_WARMUP_STEPS", "tune runner", "Steps to skip before measurement; workload should exit early"],
+                    ["FRX_TUNE_MEASURE_STEPS", "tune runner", "Measurement steps requested"],
+                    ["FRX_TUNE_MAX_STEPS", "tune runner", "Total steps (warmup + measure); workload exits at this count"],
+                    ["FRX_TUNE_REPEAT_COUNT", "tune runner", "Repeat count recorded for comparison"],
+                    ["FRX_NUM_WORKERS", "dataloader tuner", "DataLoader num_workers value to use"],
+                    ["FRX_PIN_MEMORY", "dataloader tuner", "'true' or 'false'"],
+                    ["FRX_PREFETCH_FACTOR", "dataloader tuner", "DataLoader prefetch_factor value"],
+                    ["FRX_PERSISTENT_WORKERS", "dataloader tuner", "'true' or 'false'"],
+                    ["FRX_BATCH_SIZE", "batch size tuner", "Absolute batch size to use (Tier 1)"],
+                    ["FRX_AMP_DTYPE", "mixed precision tuner", "'bfloat16' or 'float16' (Tier 1)"],
+                    ["FRX_TORCH_COMPILE", "runtime tuner", "Enable torch.compile when supported"],
+                    ["FRX_TORCH_COMPILE_MODE", "runtime tuner", "Compile mode such as reduce-overhead"],
+                    ["FRX_CUDA_GRAPHS", "runtime tuner", "try_if_static_shapes"],
+                    ["PYTORCH_CUDA_ALLOC_CONF", "memory tuner", "CUDA allocator configuration"],
+                  ].map(([k, src, desc]) => (
+                    <tr key={k}>
+                      <Td mono>{k}</Td>
+                      <Td>{src}</Td>
+                      <Td>{desc}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <H3>Trial artifacts</H3>
+              <Pre>{`runs/
+  tune-<id>/
+    baseline/
+      config.yaml
+      benchmark_window.json
+      metrics.json
+      stdout.log
+      stderr.log
+      derived/summary.json
+      raw/trace.jsonl
+    <candidate-id>/
+      config.yaml
+      benchmark_window.json
+      metrics.json
+      stdout.log
+      stderr.log
+    autopilot_report.json
+    report.md`}</Pre>
+
+              <H3>Workload integration</H3>
+              <P>
+                The workload reads the injected env vars and applies them. The
+                minimal pattern for dataloader tuning:
+              </P>
+              <Pre>{`import os
+
+num_workers     = int(os.environ.get("FRX_NUM_WORKERS", "4"))
+pin_memory      = os.environ.get("FRX_PIN_MEMORY", "true") == "true"
+prefetch_factor = int(os.environ.get("FRX_PREFETCH_FACTOR", "2"))
+persistent      = os.environ.get("FRX_PERSISTENT_WORKERS", "true") == "true"
+max_steps       = int(os.environ.get("FRX_TUNE_MAX_STEPS", "0")) or None
+
+loader = DataLoader(
+    dataset,
+    batch_size=batch_size,
+    num_workers=num_workers,
+    pin_memory=pin_memory,
+    prefetch_factor=prefetch_factor if num_workers > 0 else None,
+    persistent_workers=persistent and num_workers > 0,
+)
+
+for step, batch in enumerate(loader):
+    if max_steps and step >= max_steps:
+        break
+    # ... training step ...`}</Pre>
+
+              <P>
+                For AMP and batch size (<Code>--no-safe</Code>):
+              </P>
+              <Pre>{`import torch, os
+
+amp_dtype_str = os.environ.get("FRX_AMP_DTYPE")          # "bfloat16" | "float16" | None
+amp_dtype     = getattr(torch, amp_dtype_str, None) if amp_dtype_str else None
+batch_size    = int(os.environ.get("FRX_BATCH_SIZE", "32"))
+
+with torch.autocast("cuda", dtype=amp_dtype, enabled=amp_dtype is not None):
+    loss = model(batch)`}</Pre>
+
+              <H3>Quality regression gates</H3>
+              <P>
+                A faster candidate is rejected if quality metrics regress. Loss is
+                read from <Code>step_end.payload.loss</Code> when the workload
+                emits it, and output drift checks are used when present in the
+                summary quality fields.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Gate</Th>
+                    <Th>Default</Th>
+                    <Th>Flag</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Final loss vs baseline", "Reject if worse by more than 5%", "--max-final-loss-regression"],
+                    ["Trial loss divergence", "Reject if final loss grows more than 50%", "--max-loss-divergence"],
+                    ["NaN/Inf loss", "Reject", "--allow-nonfinite-loss"],
+                    ["Output absolute drift", "Reject above 0.005 when reported", "--output-abs-tolerance"],
+                  ].map(([gate, def_, flag]) => (
+                    <tr key={gate}>
+                      <Td>{gate}</Td>
+                      <Td>{def_}</Td>
+                      <Td mono>{flag}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <H3>Example output</H3>
+              <Pre>{`frx autopilot — starting tune run tune-3f8a12b4
+Workload : python train.py
+Max trials: 12  |  Time budget: 60s/trial
+
+Running baseline...
+  Baseline: 4.8 steps/sec  (exit=0, steps=25)
+
+Generated 8 candidates
+
+  [1/8] dl:nw=0,pin=T ...
+  [    ]  dl:nw=0,pin=T                        +1.2%  (exit=0, steps=25)
+  [2/8] dl:nw=2,pin=T ...
+  [PASS]  dl:nw=2,pin=T                        +11.4% (exit=0, steps=25)
+  [3/8] dl:nw=4,pin=T ...
+  [PASS]  dl:nw=4,pin=T                        +19.3% (exit=0, steps=25)
+  [4/8] amp:fp16 ...
+  [FAIL]  amp:fp16                              +28.0% (exit=0, steps=25)
+       ! quality regression: final loss 1.2 exceeds baseline 1 by more than 5%
+  ...
+
+Report saved: runs/tune-3f8a12b4/autopilot_report.json
+Markdown report saved: runs/tune-3f8a12b4/report.md
+
+──────────────────────────────────────────────────────────
+  frx autopilot — Tune Report
+  Job    : frx-tune
+  Trials : 8 candidates + baseline
+──────────────────────────────────────────────────────────
+
+BASELINE
+  Throughput   : 4.80 steps/sec
+  Avg step     : 208.3 ms
+  GPU util     : 1.3%
+  Dominant stall: input_bound
+
+TRIAL RESULTS
+  dl:nw=4,pin=T                        +19.3% ✓
+  dl:nw=8,pin=T                        +18.1% ✓
+  dl:nw=2,pin=T                        +11.4% ✓
+  dl:nw=8,pin=T,pf=4                   +8.9%  ✓
+  dl:nw=0,pin=T                        +1.2%
+
+WINNER
+  Config       : dl:nw=4,pin=T
+  Throughput   : 5.73 steps/sec  (+19.3% vs baseline)
+  Avg step     : 174.5 ms
+  GPU util     : 4.1%
+
+ENV VARS TO APPLY
+  FRX_NUM_WORKERS=4
+  FRX_PIN_MEMORY=true
+  FRX_PERSISTENT_WORKERS=true
+  FRX_PREFETCH_FACTOR=2
+
+Applied: No — recommendation only
+To apply: set the env vars above before launching your workload.`}</Pre>
+
+              <H3>Promotion thresholds</H3>
+              <P>
+                A candidate is promoted only if it clears all of these. Noisy
+                sub-threshold improvements are not recommended.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Guard</Th>
+                    <Th>Default</Th>
+                    <Th>Flag</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Minimum throughput improvement", "≥ 8%", "--min-speedup"],
+                    ["Peak GPU memory ratio", "< 90%", "—"],
+                    ["Step time regression", "< 10% worse than baseline", "—"],
+                    ["Exit code", "0 (clean exit)", "—"],
+                    ["Minimum steps captured", "≥ 3", "—"],
+                    ["Quality gates", "Loss and numerics must pass", "quality flags above"],
+                  ].map(([guard, def_, flag]) => (
+                    <tr key={guard}>
+                      <Td>{guard}</Td>
+                      <Td mono>{def_}</Td>
+                      <Td mono>{flag}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-4">
+                <p className="text-sm font-semibold text-violet-300 mb-1">Current boundary</p>
+                <p className="text-xs leading-5 text-slate-400">
+                  <Code>repeat_count</Code> is validated, persisted, and exported
+                  to workloads, but repeat execution and noise-aware confidence
+                  labels are part of the next comparator phase.
+                </p>
+              </div>
             </Section>
 
             {/* Bundle layout */}

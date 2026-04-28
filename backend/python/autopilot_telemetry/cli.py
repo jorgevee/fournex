@@ -162,11 +162,31 @@ def collect(args: argparse.Namespace) -> int:
 
 def tune(args: argparse.Namespace) -> int:
     from .autopilot.actions import PromotionThresholds
+    from .autopilot.benchmark import BenchmarkWindow
+    from .autopilot.quality import QualityPolicy
     from .autopilot.report import format_report
     from .autopilot.runner import ExperimentRunner
+    from .autopilot.safety import SafetyPolicy
 
     environment = _detect_environment()
+    environment["require_quality_checks"] = args.require_quality_checks
     thresholds = PromotionThresholds(min_speedup=args.min_speedup)
+    safety_policy = SafetyPolicy(
+        allow_risky_actions=args.allow_risky_actions,
+        require_quality_checks_for_precision=args.require_quality_checks,
+    )
+    benchmark_window = BenchmarkWindow(
+        warmup_steps=args.warmup_steps,
+        measurement_steps=args.measure_steps,
+        repeat_count=args.repeat_count,
+        timeout_s=args.time_budget_s,
+    )
+    quality_policy = QualityPolicy(
+        max_final_loss_regression=args.max_final_loss_regression,
+        max_loss_divergence=args.max_loss_divergence,
+        output_abs_tolerance=args.output_abs_tolerance,
+        require_finite_loss=args.require_finite_loss,
+    )
 
     runner = ExperimentRunner(
         workload_command=args.workload_command,
@@ -174,12 +194,13 @@ def tune(args: argparse.Namespace) -> int:
         out_dir=args.out,
         max_trials=args.max_trials,
         safe_only=args.safe,
-        time_budget_s=args.time_budget_s,
-        warmup_steps=args.warmup_steps,
-        measure_steps=args.measure_steps,
+        benchmark_window=benchmark_window,
         sample_interval_ms=args.sample_interval_ms,
         thresholds=thresholds,
         environment=environment,
+        bottleneck_diagnosis=args.bottleneck,
+        safety_policy=safety_policy,
+        quality_policy=quality_policy,
         verbose=True,
     )
     report = runner.run()
@@ -258,8 +279,56 @@ def _build_parser() -> argparse.ArgumentParser:
         help="steps to measure per trial (default: 20)",
     )
     tune_parser.add_argument(
+        "--repeat-count",
+        type=int,
+        default=1,
+        help="benchmark repeats per candidate; currently recorded for Phase 4 and executed in Phase 6 (default: 1)",
+    )
+    tune_parser.add_argument(
         "--min-speedup", type=float, default=0.08,
         help="minimum throughput improvement to recommend a config (default: 0.08 = 8%%)",
+    )
+    tune_parser.add_argument(
+        "--bottleneck",
+        default=None,
+        help="optional bottleneck diagnosis to focus candidates, e.g. input_bound, copy_bound, launch_bound",
+    )
+    tune_parser.add_argument(
+        "--allow-risky-actions",
+        action="store_true",
+        help="allow high-risk candidates during pre-run safety validation",
+    )
+    tune_parser.add_argument(
+        "--no-quality-checks",
+        dest="require_quality_checks",
+        action="store_false",
+        default=True,
+        help="do not require quality checks for precision-changing candidates",
+    )
+    tune_parser.add_argument(
+        "--max-final-loss-regression",
+        type=float,
+        default=0.05,
+        help="reject trials whose final loss is worse than baseline by more than this fraction",
+    )
+    tune_parser.add_argument(
+        "--max-loss-divergence",
+        type=float,
+        default=0.50,
+        help="reject trials whose final loss grows from initial loss by more than this fraction",
+    )
+    tune_parser.add_argument(
+        "--output-abs-tolerance",
+        type=float,
+        default=0.005,
+        help="reject output drift checks above this absolute tolerance when reported",
+    )
+    tune_parser.add_argument(
+        "--allow-nonfinite-loss",
+        dest="require_finite_loss",
+        action="store_false",
+        default=True,
+        help="do not reject trials solely for NaN/Inf loss metrics",
     )
     tune_parser.add_argument("--sample-interval-ms", type=int, default=1000)
     tune_parser.add_argument("workload_command", nargs=argparse.REMAINDER)

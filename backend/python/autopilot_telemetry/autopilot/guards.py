@@ -50,7 +50,7 @@ def check_guards(
 
 def extract_metrics_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
     """Pull the metrics we care about from a derived/summary.json payload."""
-    scope = summary.get("steady_state") or summary.get("run") or summary
+    scope = summary.get("measurement_window") or summary.get("steady_state") or summary.get("run") or summary
     run_summary = scope.get("run_summary", {})
     step_ns = run_summary.get("step_time_avg_ns", 0) or 0
     return {

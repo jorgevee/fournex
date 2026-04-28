@@ -458,6 +458,7 @@ def _empty_step_metrics(step_id: int) -> dict[str, Any]:
         "batch_size": 0,
         "sequence_length": None,
         "profiler_windows_exported": 0,
+        "loss": None,
     }
 
 
@@ -613,6 +614,8 @@ def _accumulate_step_event(step: dict[str, Any], event: dict[str, Any]) -> None:
         step["status"] = payload.get("status", "unknown")
         step["step_kind"] = payload.get("step_kind", step["step_kind"])
         step["step_wall_time_ns"] = duration_ns
+        if "loss" in payload:
+            step["loss"] = payload.get("loss")
         _update_gpu_active_fraction(step)
         return
 

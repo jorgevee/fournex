@@ -2,6 +2,34 @@
 
 This is the point where your GPU optimization product becomes an **active optimizer**, not just a profiler or recommendation engine.
 
+## Implementation progress
+
+- [x] Phase 1: Manual local benchmark runner foundation.
+- [x] Add a stable `TrialConfig` abstraction.
+- [x] Add `LocalTrialExecutor` for isolated local trial execution.
+- [x] Persist per-trial `config.yaml`, `metrics.json`, `stdout.log`, and `stderr.log`.
+- [x] Persist experiment-level JSON and Markdown reports.
+- [x] Add focused regression tests for local trial artifacts and report persistence.
+- [x] Phase 2: Candidate generation from a bottleneck diagnosis.
+- [x] Add focused routing for `input_bound`, `copy_bound`, `launch_bound`, `memory_pressure`, and `underutilized_gpu`.
+- [x] Add `frx tune --bottleneck` override for manual candidate focus.
+- [x] Auto-detect candidate focus from the baseline summary diagnosis when present.
+- [x] Phase 3: Safety validation before running candidates.
+- [x] Reject unsafe candidates before execution and record skipped trial artifacts.
+- [x] Validate risky action policy, CUDA availability, dynamic-shape CUDA Graph usage, compile support, precision quality checks, and batch-size memory headroom.
+- [x] Phase 4: Explicit benchmark window controls beyond env injection.
+- [x] Add first-class benchmark window config with warmup, measurement, repeat count, and timeout fields.
+- [x] Persist `benchmark_window.json` per trial and include window policy in `config.yaml`.
+- [x] Prefer explicit `measurement_window` metrics when per-step data is available.
+- [x] Phase 5: Quality regression detection.
+- [x] Extract loss and quality metrics from measurement-window summaries.
+- [x] Reject trials with NaN/Inf loss, final-loss regression, loss divergence, or output drift beyond tolerance.
+- [x] Persist quality metrics in per-trial `metrics.json` and reports.
+- [ ] Phase 6: Noise-aware comparison.
+- [ ] Phase 7: SQLite persistence.
+- [ ] Phase 8: CI integration.
+- [ ] Phase 9: Cluster integration.
+
 The experiment runner should answer:
 
 > “Given this workload and bottleneck diagnosis, what safe configuration changes can we test, how do we compare them fairly, and when do we stop?”
@@ -1334,6 +1362,8 @@ Build it in this order.
 
 ## Phase 1: Manual local benchmark runner
 
+Status: **completed in MVP form**.
+
 Goal:
 
 ```text
@@ -1343,26 +1373,24 @@ Compare throughput and loss.
 
 Implement:
 
-```text
-TrialConfig
-TrialResult
-LocalTrialExecutor
-basic metrics.json
-basic report.md
-```
+- [x] TrialConfig
+- [x] TrialResult
+- [x] LocalTrialExecutor
+- [x] basic metrics.json
+- [x] basic report.md
 
 Support:
 
-```text
-num_workers
-pin_memory
-batch_size
-mixed_precision on/off
-```
+- [x] num_workers
+- [x] pin_memory
+- [x] batch_size candidate plumbing
+- [x] mixed_precision candidate plumbing
 
 ---
 
 ## Phase 2: Candidate generation
+
+Status: **completed in MVP form**.
 
 Goal:
 
@@ -1394,9 +1422,19 @@ Output:
 ]
 ```
 
+Implemented routing:
+
+- [x] `input_bound` / `input_pipeline_bound` -> dataloader worker, pin memory, prefetch candidates.
+- [x] `copy_bound` -> pinned-memory-focused dataloader candidates.
+- [x] `launch_bound` / `small_kernel_overhead` -> `torch.compile` and CUDA Graph candidates when validated actions are allowed.
+- [x] `memory_pressure` / `memory_bound` -> allocator candidates, then mixed precision when validated actions are allowed.
+- [x] `underutilized_gpu` -> batch size, mixed precision, and runtime candidates when validated actions are allowed.
+
 ---
 
 ## Phase 3: Safety validation
+
+Status: **completed in MVP form**.
 
 Goal:
 
@@ -1407,18 +1445,20 @@ Reject unsafe candidates before running them.
 Checks:
 
 ```text
-memory headroom
-GPU availability
-static vs dynamic shapes
-precision support
-known incompatible options
-max runtime
-user policy
+[x] memory headroom
+[x] GPU availability
+[x] static vs dynamic shapes
+[x] precision support
+[x] known incompatible options
+[ ] max runtime policy beyond per-trial timeout
+[x] user policy
 ```
 
 ---
 
 ## Phase 4: Benchmark windows
+
+Status: **completed in MVP form**.
 
 Goal:
 
@@ -1429,15 +1469,26 @@ Separate warmup from measurement.
 Add:
 
 ```text
-warmup_steps
-measurement_steps
-repeat_count
-timeout
+[x] warmup_steps
+[x] measurement_steps
+[x] repeat_count recorded in benchmark window
+[x] timeout
 ```
+
+Implemented:
+
+- [x] `BenchmarkWindow` validates warmup, measurement, repeat, and timeout settings.
+- [x] Runner and local executor share the same benchmark window object.
+- [x] Trial artifacts include `benchmark_window.json`.
+- [x] Derived summaries include a `measurement_window` scope when `per_step` data is present.
+- [x] Metric extraction prefers `measurement_window`, then `steady_state`, then full run.
+- [ ] Executing multiple repeats is deferred to Phase 6 noise-aware comparison.
 
 ---
 
 ## Phase 5: Regression detection
+
+Status: **completed in MVP form**.
 
 Goal:
 
@@ -1448,12 +1499,20 @@ Reject trials that improve speed but damage quality.
 Add:
 
 ```text
-loss comparison
-NaN/Inf checks
-output tolerance checks
-OOM detection
-stability checks
+[x] loss comparison
+[x] NaN/Inf checks
+[x] output tolerance checks
+[x] OOM detection via exit/guard failures
+[ ] broader stability checks beyond current step-time and memory guards
 ```
+
+Implemented:
+
+- [x] `step_end.payload.loss` is preserved in derived `per_step` summaries.
+- [x] `measurement_window.run_summary` includes loss summary fields when losses are present.
+- [x] `TrialResult.quality_metrics` stores extracted quality evidence.
+- [x] Quality gates reject final-loss regression, trial loss divergence, NaN/Inf losses, and reported output drift.
+- [x] CLI exposes `--max-final-loss-regression`, `--max-loss-divergence`, `--output-abs-tolerance`, and `--allow-nonfinite-loss`.
 
 ---
 

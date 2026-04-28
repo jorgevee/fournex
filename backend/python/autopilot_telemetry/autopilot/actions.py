@@ -37,6 +37,50 @@ class CandidateConfig:
 
 
 @dataclass
+class TrialConfig:
+    name: str
+    patch: dict[str, Any] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    risk_level: str = "low"
+    label: str | None = None
+
+    @property
+    def config_id(self) -> str:
+        return self.name
+
+    @property
+    def display_label(self) -> str:
+        return self.label or self.name
+
+    @classmethod
+    def from_candidate(cls, candidate: CandidateConfig) -> "TrialConfig":
+        patch = {
+            "actions": [
+                {
+                    "action_id": action.action_id,
+                    "type": action.type,
+                    "description": action.description,
+                    "risk": action.risk,
+                    "tier": action.tier,
+                }
+                for action in candidate.actions
+            ],
+        }
+        risk = "low"
+        if any(action.risk == "high" for action in candidate.actions):
+            risk = "high"
+        elif any(action.risk == "medium" for action in candidate.actions):
+            risk = "medium"
+        return cls(
+            name=candidate.config_id,
+            label=candidate.label,
+            patch=patch,
+            env=dict(candidate.env_vars),
+            risk_level=risk,
+        )
+
+
+@dataclass
 class TrialResult:
     config_id: str
     label: str
@@ -55,6 +99,9 @@ class TrialResult:
     throughput_delta: float = 0.0
     raw_summary: dict[str, Any] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
+    quality_metrics: dict[str, Any] = field(default_factory=dict)
+    artifacts_path: str = ""
+    artifact_paths: dict[str, str] = field(default_factory=dict)
 
     @property
     def is_viable(self) -> bool:
