@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
+import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from .actions import PromotionThresholds, TrialConfig, TrialResult
 from .benchmark import BenchmarkWindow
+from .comparison import aggregate_repeats, annotate_noise_comparison
 from .guards import check_guards
 from .local_executor import LocalTrialExecutor
 from .quality import QualityPolicy, check_quality_regression
@@ -81,7 +84,7 @@ class ExperimentRunner:
         self._log(f"Max trials: {self.max_trials}  |  Time budget: {self.time_budget_s}s/trial\n")
 
         self._log("Running baseline...")
-        baseline = self._run_trial(
+        baseline = self._run_repeated_trial(
             executor,
             TrialConfig(name="baseline", label="baseline", patch={"baseline": True}),
             tune_dir / "baseline",
@@ -113,7 +116,7 @@ class ExperimentRunner:
                 policy=self.safety_policy,
             )
             if validation.passed:
-                result = self._run_trial(executor, trial_config, tune_dir / trial_config.config_id)
+                result = self._run_repeated_trial(executor, trial_config, tune_dir / trial_config.config_id)
             else:
                 result = executor.record_skipped(
                     trial_config,
@@ -121,6 +124,7 @@ class ExperimentRunner:
                     validation.reasons,
                 )
             self._annotate_delta(result, baseline)
+            self._rewrite_result_metrics(result)
             tag = _result_tag(result, self.thresholds)
             self._log(
                 f"  {tag}  {result.label:<36} "
@@ -166,24 +170,64 @@ class ExperimentRunner:
     ) -> TrialResult:
         return executor.run(trial_config, trial_dir)
 
+    def _run_repeated_trial(
+        self,
+        executor: LocalTrialExecutor,
+        trial_config: TrialConfig,
+        trial_dir: Path,
+    ) -> TrialResult:
+        if self.repeat_count <= 1:
+            return self._run_trial(executor, trial_config, trial_dir)
+
+        trial_dir.mkdir(parents=True, exist_ok=True)
+        repeats: list[TrialResult] = []
+        for repeat_index in range(1, self.repeat_count + 1):
+            repeat_dir = trial_dir / f"repeat_{repeat_index:03d}"
+            repeats.append(self._run_trial(executor, trial_config, repeat_dir))
+
+        aggregate = aggregate_repeats(
+            config_id=trial_config.config_id,
+            label=trial_config.display_label,
+            repeats=repeats,
+            artifacts_path=str(trial_dir),
+            env_vars=trial_config.env,
+        )
+        self._write_aggregate_metrics(aggregate, trial_dir)
+        return aggregate
+
     def _annotate_delta(self, result: TrialResult, baseline: TrialResult) -> None:
-        if baseline.throughput_steps_per_sec > 0 and result.throughput_steps_per_sec > 0:
-            result.throughput_delta = (
-                (result.throughput_steps_per_sec - baseline.throughput_steps_per_sec)
-                / baseline.throughput_steps_per_sec
-            )
+        annotate_noise_comparison(baseline, result, self.thresholds)
         if result.exit_code == -3:
             return
+        existing_failures = list(result.guard_failures)
+        existing_passed = result.passed_guards
         passed, failures = check_guards(result, baseline, self.thresholds)
         quality_passed, quality_failures = check_quality_regression(
             baseline,
             result,
             self.quality_policy,
         )
-        passed = passed and quality_passed
-        failures.extend(quality_failures)
+        passed = existing_passed and passed and quality_passed and not existing_failures
+        failures = existing_failures + failures + quality_failures
         result.passed_guards = passed
         result.guard_failures = failures
+
+    @staticmethod
+    def _write_aggregate_metrics(result: TrialResult, trial_dir: Path) -> None:
+        payload = asdict(result)
+        payload.pop("raw_summary", None)
+        (trial_dir / "metrics.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _rewrite_result_metrics(result: TrialResult) -> None:
+        if not result.artifacts_path:
+            return
+        path = Path(result.artifacts_path) / "metrics.json"
+        if not path.parent.exists():
+            return
+        payload = asdict(result)
+        payload.pop("raw_summary", None)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _log(self, msg: str) -> None:
         if self.verbose:

@@ -25,7 +25,10 @@ This is the point where your GPU optimization product becomes an **active optimi
 - [x] Extract loss and quality metrics from measurement-window summaries.
 - [x] Reject trials with NaN/Inf loss, final-loss regression, loss divergence, or output drift beyond tolerance.
 - [x] Persist quality metrics in per-trial `metrics.json` and reports.
-- [ ] Phase 6: Noise-aware comparison.
+- [x] Phase 6: Noise-aware comparison.
+- [x] Execute repeated baseline and candidate trials when `repeat_count > 1`.
+- [x] Aggregate repeat medians, standard deviation, noise band, and confidence labels.
+- [x] Reject improvements that fall inside the measured noise band.
 - [ ] Phase 7: SQLite persistence.
 - [ ] Phase 8: CI integration.
 - [ ] Phase 9: Cluster integration.
@@ -1518,6 +1521,8 @@ Implemented:
 
 ## Phase 6: Noise-aware comparator
 
+Status: **completed in MVP form**.
+
 Goal:
 
 ```text
@@ -1527,21 +1532,29 @@ Stop declaring tiny noisy gains as wins.
 Add:
 
 ```text
-multiple repeats
-median comparison
-variance estimate
-minimum improvement threshold
-confidence labels
+[x] multiple repeats
+[x] median comparison
+[x] variance estimate
+[x] minimum improvement threshold
+[x] confidence labels
 ```
 
 Confidence levels:
 
 ```text
-high
-medium
-low
-inconclusive
+[x] high
+[x] medium
+[x] low
+[x] inconclusive
 ```
+
+Implemented:
+
+- [x] `repeat_count > 1` runs `baseline/repeat_###` and `<candidate>/repeat_###` directories.
+- [x] Candidate-level aggregate `metrics.json` records median throughput, repeat values, standard deviation, noise band, and confidence label.
+- [x] Comparator rejects positive deltas that are within the measured noise band.
+- [x] Reports include confidence and noise band for repeated trials.
+- [ ] Interleaved ordering such as baseline A -> trial -> baseline B is still future work.
 
 ---
 

@@ -100,6 +100,13 @@ class TrialResult:
     raw_summary: dict[str, Any] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
     quality_metrics: dict[str, Any] = field(default_factory=dict)
+    repeat_count: int = 1
+    throughput_values: list[float] = field(default_factory=list)
+    step_time_values_ms: list[float] = field(default_factory=list)
+    throughput_stddev: float = 0.0
+    noise_band: float = 0.0
+    confidence_label: str = "single_run"
+    comparison_notes: list[str] = field(default_factory=list)
     artifacts_path: str = ""
     artifact_paths: dict[str, str] = field(default_factory=dict)
 
@@ -116,3 +123,4 @@ class PromotionThresholds:
     max_step_time_regression: float = 0.10  # step time not worse by >10%
     require_clean_exit: bool = True
     require_sufficient_steps: int = 3  # at least 3 measured steps
+    require_above_noise_band: bool = True

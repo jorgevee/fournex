@@ -85,6 +85,8 @@ def format_report(report: TuneReport) -> str:
     lines.append(f"  Avg step     : {b.avg_step_time_ms:.1f} ms")
     lines.append(f"  GPU util     : {b.avg_gpu_utilization_pct:.1f}%")
     lines.append(f"  Dominant stall: {b.dominant_stall}")
+    if b.repeat_count > 1:
+        lines.append(f"  Repeats      : {b.repeat_count}")
 
     lines.append(f"\nTRIAL RESULTS")
     viable = [r for r in report.trials if r.is_viable]
@@ -93,7 +95,8 @@ def format_report(report: TuneReport) -> str:
     for r in sorted(viable, key=lambda x: x.throughput_delta, reverse=True):
         delta_str = f"{r.throughput_delta:+.1%}"
         marker = " ✓" if r.throughput_delta >= report.thresholds.min_speedup else ""
-        lines.append(f"  {r.label:<36} {delta_str}{marker}")
+        confidence = f"  confidence={r.confidence_label}" if r.repeat_count > 1 else ""
+        lines.append(f"  {r.label:<36} {delta_str}{marker}{confidence}")
 
     for r in failed:
         reasons = "; ".join(r.guard_failures[:2])
@@ -107,6 +110,9 @@ def format_report(report: TuneReport) -> str:
                      f"({w.throughput_delta:+.1%} vs baseline)")
         lines.append(f"  Avg step     : {w.avg_step_time_ms:.1f} ms")
         lines.append(f"  GPU util     : {w.avg_gpu_utilization_pct:.1f}%")
+        if w.repeat_count > 1:
+            lines.append(f"  Confidence   : {w.confidence_label}")
+            lines.append(f"  Noise band   : +/-{w.noise_band:.1%}")
         lines.append(f"\nENV VARS TO APPLY")
         for k, v in w.env_vars.items():
             lines.append(f"  {k}={v}")

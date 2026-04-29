@@ -519,7 +519,7 @@ Options:
   --time-budget-s N        Kill trial after N seconds (default: 60)
   --warmup-steps N         Steps to skip before measuring (default: 5)
   --measure-steps N        Steps to include in measurement (default: 20)
-  --repeat-count N         Recorded for repeat-aware comparison (default: 1)
+  --repeat-count N         Repeats per baseline and candidate (default: 1)
   --bottleneck LABEL       Focus candidates manually
   --min-speedup FLOAT      Minimum improvement to recommend (default: 0.08 = 8%)
   --allow-risky-actions    Allow high-risk candidates
@@ -665,7 +665,7 @@ Stage 3  precision    bf16 (Ampere+), fp16        (--no-safe required)`}</Pre>
                     ["FRX_TUNE_WARMUP_STEPS", "tune runner", "Steps to skip before measurement; workload should exit early"],
                     ["FRX_TUNE_MEASURE_STEPS", "tune runner", "Measurement steps requested"],
                     ["FRX_TUNE_MAX_STEPS", "tune runner", "Total steps (warmup + measure); workload exits at this count"],
-                    ["FRX_TUNE_REPEAT_COUNT", "tune runner", "Repeat count recorded for comparison"],
+                    ["FRX_TUNE_REPEAT_COUNT", "tune runner", "Repeat count used for noise-aware comparison"],
                     ["FRX_NUM_WORKERS", "dataloader tuner", "DataLoader num_workers value to use"],
                     ["FRX_PIN_MEMORY", "dataloader tuner", "'true' or 'false'"],
                     ["FRX_PREFETCH_FACTOR", "dataloader tuner", "DataLoader prefetch_factor value"],
@@ -868,9 +868,9 @@ To apply: set the env vars above before launching your workload.`}</Pre>
               <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-4">
                 <p className="text-sm font-semibold text-violet-300 mb-1">Current boundary</p>
                 <p className="text-xs leading-5 text-slate-400">
-                  <Code>repeat_count</Code> is validated, persisted, and exported
-                  to workloads, but repeat execution and noise-aware confidence
-                  labels are part of the next comparator phase.
+                  Repeated trials now use median throughput and a measured noise
+                  band. Interleaved ordering such as baseline A, trial, baseline B
+                  is still future comparator work.
                 </p>
               </div>
             </Section>

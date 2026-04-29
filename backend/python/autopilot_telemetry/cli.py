@@ -282,7 +282,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--repeat-count",
         type=int,
         default=1,
-        help="benchmark repeats per candidate; currently recorded for Phase 4 and executed in Phase 6 (default: 1)",
+        help="benchmark repeats per baseline and candidate for noise-aware comparison (default: 1)",
     )
     tune_parser.add_argument(
         "--min-speedup", type=float, default=0.08,

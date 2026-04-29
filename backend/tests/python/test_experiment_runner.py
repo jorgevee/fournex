@@ -61,6 +61,36 @@ summary_path.write_text(json.dumps({
 }), encoding="utf-8")
 """
 
+REPEAT_NOISE_WRITER = r"""
+import json
+import os
+from pathlib import Path
+
+out_dir = Path(os.environ["FRX_OUTPUT_DIR"])
+repeat_name = out_dir.name
+repeat_index = int(repeat_name.split("_")[-1]) if repeat_name.startswith("repeat_") else 1
+is_trial = os.environ.get("FRX_PIN_MEMORY") == "true"
+if is_trial:
+    throughput = 114.0 if repeat_index == 1 else 116.0
+else:
+    throughput = 100.0 if repeat_index == 1 else 120.0
+
+summary_path = Path(os.environ["FRX_DERIVED_SUMMARY_PATH"])
+summary_path.parent.mkdir(parents=True, exist_ok=True)
+summary_path.write_text(json.dumps({
+    "steady_state": {
+        "step_count": 5,
+        "run_summary": {
+            "throughput_steps_per_sec": throughput,
+            "average_gpu_utilization_pct": 51.0,
+            "step_time_avg_ns": int(1_000_000_000 / throughput),
+            "memory_pressure_peak_ratio": 0.25,
+            "dominant_stall_type": "none"
+        }
+    }
+}), encoding="utf-8")
+"""
+
 
 def _workspace_tmp(name: str) -> Path:
     path = ROOT / "traces" / "cli_test_runs" / "experiment_runner" / f"{name}-{uuid.uuid4().hex[:8]}"
@@ -180,3 +210,34 @@ def test_experiment_runner_rejects_faster_quality_regression():
     assert report.winner is None
     assert trial.quality_metrics["final_loss"] == 1.2
     assert any("quality regression" in reason for reason in trial.guard_failures)
+
+
+def test_experiment_runner_repeats_and_rejects_gain_inside_noise_band():
+    tmp_path = _workspace_tmp("runner-repeat-noise")
+    runner = ExperimentRunner(
+        workload_command=[sys.executable, "-c", REPEAT_NOISE_WRITER],
+        job_name="unit-runner-repeat-noise",
+        out_dir=str(tmp_path),
+        max_trials=1,
+        time_budget_s=5,
+        repeat_count=2,
+        thresholds=PromotionThresholds(min_speedup=0.01, require_sufficient_steps=3),
+        environment={"cpu_count": 2},
+        verbose=False,
+    )
+
+    report = runner.run()
+
+    tune_dir = next(tmp_path.glob("tune-*"))
+    trial = report.trials[0]
+    metrics = json.loads((tune_dir / "dl_nw0_pin1" / "metrics.json").read_text(encoding="utf-8"))
+    assert (tune_dir / "baseline" / "repeat_001" / "metrics.json").exists()
+    assert (tune_dir / "baseline" / "repeat_002" / "metrics.json").exists()
+    assert (tune_dir / "dl_nw0_pin1" / "repeat_001" / "metrics.json").exists()
+    assert (tune_dir / "dl_nw0_pin1" / "repeat_002" / "metrics.json").exists()
+    assert trial.repeat_count == 2
+    assert trial.confidence_label == "inconclusive"
+    assert not trial.is_viable
+    assert report.winner is None
+    assert any("noise-aware comparison" in reason for reason in trial.guard_failures)
+    assert metrics["confidence_label"] == "inconclusive"
