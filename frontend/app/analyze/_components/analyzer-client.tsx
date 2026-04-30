@@ -281,6 +281,23 @@ function durationMsFromSummary(summary: Summary) {
   return totalMs;
 }
 
+function isAnalysisIncomplete(summary: Summary) {
+  if (isExternalWorkflowSummary(summary)) return false;
+  const hasPrimary = Boolean(summary.diagnosis.primary_bottleneck || summary.diagnosis.user_facing_bottleneck);
+  const avgNs = numericValue(summary.run_summary.step_time_avg_ns) ?? 0;
+  return !hasPrimary && summary.bottlenecks.length === 0 && (summary.step_count === 0 || avgNs <= 0);
+}
+
+function incompleteAnalysisReason(summary: Summary) {
+  if (summary.event_count <= 0) {
+    return "The selected payload did not include trace events. Include derived/summary.json, raw/trace.jsonl, or profiler/profiler_trace.json from the collected run.";
+  }
+  if (summary.step_count <= 0) {
+    return "Trace events were present, but no completed training steps were detected. Add ProfilerStep#N events or wrap each iteration with a top-level record_function.";
+  }
+  return "The run has zero measured step time, so bottleneck scores would be misleading. Re-collect with timing events or import the profiler trace into the bundle.";
+}
+
 function topBottleneckScore(summary: Summary) {
   return summary.bottlenecks[0]?.score ?? summary.diagnosis.confidence.score ?? 0;
 }
@@ -302,31 +319,43 @@ function speedupRange(summary: Summary) {
   return [1.15, 1.45] as const;
 }
 
+function isLaunchBoundSummary(summary: Summary) {
+  const labels = [
+    summary.diagnosis.primary_bottleneck,
+    summary.diagnosis.user_facing_bottleneck,
+    ...summary.bottlenecks.map((item) => item.label),
+  ].map((value) => slugifyBottleneck(displayText(value)));
+  return labels.some((label) => label.includes("launch_bound") || label.includes("kernel_launch"));
+}
+
 function reportMetrics(summary: Summary) {
   const externalWorkflow = isExternalWorkflowSummary(summary);
+  const launchBound = isLaunchBoundSummary(summary);
   const gpuActive = numericValue(summary.run_summary.average_gpu_utilization_pct);
   const bottleneckScore = topBottleneckScore(summary);
   const hasInputWait = summary.diagnosis.primary_bottleneck === "input_bound" ||
     summary.run_summary.dominant_stall_type === "input_bound";
-  const gpuActiveUnreliable = hasInputWait && gpuActive !== null && gpuActive <= 1;
+  const gpuActiveUnreliable = (hasInputWait || launchBound) && gpuActive !== null && gpuActive <= 1;
   const healthScore = externalWorkflow
+    ? Math.round(Math.max(0, 100 - bottleneckScore * 100))
+    : launchBound
     ? Math.round(Math.max(0, 100 - bottleneckScore * 100))
     : gpuActive !== null && !gpuActiveUnreliable
     ? Math.round(gpuActive)
     : Math.round(Math.max(0, 100 - bottleneckScore * 100));
   const waitWaste = hasInputWait ? Math.round(bottleneckScore * 100) : 0;
-  const waste = gpuActive !== null && !hasInputWait && !gpuActiveUnreliable
+  const waste = gpuActive !== null && !hasInputWait && !launchBound && !gpuActiveUnreliable
     ? Math.max(0, 100 - gpuActive)
     : Math.max(waitWaste, Math.round(bottleneckScore * 100));
   const [speedupLow, speedupHigh] = speedupRange(summary);
   const currentMs = durationMsFromSummary(summary);
   const projectedHighMs = currentMs === null ? null : currentMs / speedupLow;
   const projectedLowMs = currentMs === null ? null : currentMs / speedupHigh;
-  const projectedUtilLow = gpuActive === null || gpuActiveUnreliable ? null : Math.max(
+  const projectedUtilLow = gpuActive === null || gpuActiveUnreliable || launchBound ? null : Math.max(
     Math.round(gpuActive),
     Math.min(100, Math.round(gpuActive * speedupLow)),
   );
-  const projectedUtilHigh = gpuActive === null || gpuActiveUnreliable ? null : Math.max(
+  const projectedUtilHigh = gpuActive === null || gpuActiveUnreliable || launchBound ? null : Math.max(
     projectedUtilLow ?? Math.round(gpuActive),
     Math.min(100, Math.round(gpuActive * speedupHigh)),
   );
@@ -346,6 +375,7 @@ function reportMetrics(summary: Summary) {
     gpuActive,
     gpuActiveUnreliable,
     hasInputWait,
+    launchBound,
     externalWorkflow,
   };
 }
@@ -462,16 +492,42 @@ function evidenceItems(summary: Summary) {
   const h2d = numericValue(primaryEvidence.avg_h2d_fraction);
   const sync = numericValue(primaryEvidence.avg_sync_fraction);
   const totalMs = numericValue(summary.run_summary.total_duration_ms);
+  const kernelCount = numericValue(primaryEvidence.kernel_count_per_step)
+    ?? numericValue(summary.run_summary.kernel_count_per_step);
+  const medianKernelUs = numericValue(primaryEvidence.median_cuda_kernel_duration_us)
+    ?? numericValue(summary.run_summary.median_cuda_kernel_duration_us);
+  const smallKernelFraction = numericValue(primaryEvidence.small_kernel_fraction)
+    ?? numericValue(summary.run_summary.small_kernel_fraction);
 
   if (metrics.gpuActive !== null) {
     items.push({
-      label: "GPU active",
-      value: metrics.gpuActiveUnreliable ? "Very low / unreliable" : pct(metrics.gpuActive),
-      action: metrics.gpuActiveUnreliable
+      label: metrics.launchBound ? "GPU activity" : "GPU active",
+      value: metrics.launchBound && metrics.gpuActiveUnreliable
+        ? "Bursty"
+        : metrics.gpuActiveUnreliable ? "Very low / unreliable" : pct(metrics.gpuActive),
+      action: metrics.launchBound && metrics.gpuActiveUnreliable
+        ? "Sampling reports near-zero because the kernels are too short and bursty, not because no GPU work ran."
+        : metrics.gpuActiveUnreliable
         ? "Profiler trace did not expose reliable CUDA busy time inside detected steps."
         : metrics.waste > 0
         ? `${pct(metrics.waste)} wait/idle time points to wasted accelerator spend.`
         : "GPU active estimate is saturated; trust the bottleneck-specific wait signal below.",
+    });
+  }
+  if (metrics.launchBound && kernelCount !== null && kernelCount > 0) {
+    items.push({
+      label: "Kernel launches",
+      value: `${Math.round(kernelCount)}/step`,
+      action: "High launch count per step points to CPU launch overhead and fragmented GPU work.",
+    });
+  }
+  if (metrics.launchBound && medianKernelUs !== null && medianKernelUs > 0) {
+    items.push({
+      label: "Short CUDA kernels",
+      value: `${medianKernelUs.toFixed(medianKernelUs >= 10 ? 1 : 2)}us median`,
+      action: smallKernelFraction !== null && smallKernelFraction > 0
+        ? `${pct(smallKernelFraction * 100)} of measured kernels are under 10us.`
+        : "Median kernel duration is very short, so launch overhead can dominate useful work.",
     });
   }
   if (dataWait !== null) {
@@ -1422,6 +1478,75 @@ function ReportBody({
   const traceBars = evidence.length > 0 ? evidence : [
     { label: "Trace", value: `${summary.event_count} events`, action: "Raw details are available below." },
   ];
+  const incomplete = isAnalysisIncomplete(summary);
+
+  if (incomplete) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-xl border border-yellow-400/25 bg-yellow-400/10 p-5">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="mt-1 shrink-0 text-yellow-200" />
+            <div className="min-w-0">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-yellow-200/80">
+                Analysis incomplete
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                Trace data is missing or not measurable
+              </h2>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-yellow-50/85">
+                {incompleteAnalysisReason(summary)}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+          <SectionHeader eyebrow="Required evidence" title="What to collect next" />
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <p className="text-sm font-medium text-slate-200">Profiler trace</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                Pass <code className="text-slate-300">--artifact-dir</code> for the workload directory that contains <code className="text-slate-300">profiler_trace.json</code>.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <p className="text-sm font-medium text-slate-200">Step timing</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                Keep the top-level <code className="text-slate-300">record_function</code> wrapper or <code className="text-slate-300">ProfilerStep#N</code> events in the trace.
+              </p>
+            </div>
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4">
+              <p className="text-sm font-medium text-slate-200">GPU samples</p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                Include <code className="text-slate-300">gpu_metrics.csv</code> so low utilization can be distinguished from missing telemetry.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-white/[0.03]">
+          <button
+            onClick={() => setShowRaw((value) => !value)}
+            className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+          >
+            <SectionHeader eyebrow="Raw details" title="Power-user data" />
+            {showRaw ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+          </button>
+          {showRaw && (
+            <div className="border-t border-white/10 px-5 py-4">
+              <pre className="max-h-80 overflow-auto rounded-lg bg-black/30 p-4 text-xs leading-5 text-slate-400">
+                {JSON.stringify({
+                  run_summary: summary.run_summary,
+                  bottlenecks: summary.bottlenecks,
+                  diagnosis: summary.diagnosis,
+                }, null, 2)}
+              </pre>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1454,8 +1579,8 @@ function ReportBody({
             />
             <VerdictStat
               icon={Target}
-              label={metrics.externalWorkflow ? "Latency waste" : "Wait waste"}
-              value={pct(metrics.waste)}
+              label={metrics.externalWorkflow ? "Latency waste" : metrics.launchBound ? "Launch overhead waste" : "Wait waste"}
+              value={metrics.launchBound ? "High" : pct(metrics.waste)}
               tone="text-red-300"
             />
             <VerdictStat icon={TrendingUp} label="Speedup" value={`+${metrics.speedupLow.toFixed(1)}x-${metrics.speedupHigh.toFixed(1)}x`} tone="text-emerald-300" />
@@ -1518,12 +1643,16 @@ function ReportBody({
           <ProjectionStat
             label={metrics.externalWorkflow
               ? "Workflow latency"
+              : metrics.launchBound ? "GPU utilization"
               : metrics.gpuActive !== null && !metrics.gpuActiveUnreliable ? "GPU utilization" : "GPU activity"}
             current={metrics.externalWorkflow
               ? "Baseline"
+              : metrics.launchBound ? "Bursty; not reliably sampled"
               : metrics.gpuActive !== null && !metrics.gpuActiveUnreliable ? pct(metrics.gpuActive) : "Not reliably measured"}
             projected={metrics.externalWorkflow
               ? "Expected to improve after top fixes"
+              : metrics.launchBound
+              ? "Fewer launches, lower step time"
               : metrics.projectedUtilLow !== null && metrics.projectedUtilHigh !== null
               ? `${metrics.projectedUtilLow}-${metrics.projectedUtilHigh}%`
               : "Expected to improve after reducing DataLoader wait"}
@@ -1544,9 +1673,14 @@ function ReportBody({
         <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
           <ComparisonRow
             metric={metrics.externalWorkflow ? "Workflow latency" : "GPU activity"}
-            runA={metrics.externalWorkflow ? "Baseline" : metrics.gpuActive !== null && !metrics.gpuActiveUnreliable ? pct(metrics.gpuActive) : "Not reliably measured"}
+            runA={metrics.externalWorkflow
+              ? "Baseline"
+              : metrics.launchBound ? "Bursty; not reliably sampled"
+              : metrics.gpuActive !== null && !metrics.gpuActiveUnreliable ? pct(metrics.gpuActive) : "Not reliably measured"}
             runB={metrics.externalWorkflow
               ? "Expected to improve"
+              : metrics.launchBound
+              ? "Fewer launches, lower step time"
               : metrics.projectedUtilLow !== null && metrics.projectedUtilHigh !== null ? `${metrics.projectedUtilLow}-${metrics.projectedUtilHigh}%` : "Expected to improve"}
           />
           <ComparisonRow metric="Step time" runA={formatDuration(metrics.currentMs)} runB={metrics.projectedLowMs !== null && metrics.projectedHighMs !== null ? `${formatDuration(metrics.projectedLowMs)}-${formatDuration(metrics.projectedHighMs)}` : "Re-run to confirm"} />
@@ -1889,7 +2023,7 @@ export function AnalyzerClient() {
           <div>
             <p className="text-sm font-semibold text-white">Analyzer workspace</p>
             <p className="mt-1 text-xs text-slate-500">
-              Upload a run bundle or paste JSON, then review the diagnosis and fixes.
+              Import a <code className="text-slate-400">summary.json</code> from your run, drop the full <code className="text-slate-400">frx collect</code> folder, or paste JSON directly.
             </p>
           </div>
           <div className="flex rounded-md border border-white/10 bg-white/[0.03] p-1 text-[0.65rem] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -1902,9 +2036,9 @@ export function AnalyzerClient() {
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-white">Run bundle</p>
+                  <p className="text-sm font-medium text-white">Import your run output</p>
                   <p className="mt-1 text-xs leading-5 text-slate-500">
-                    Upload the folder produced by <code className="text-slate-400">frx collect</code>. If <code className="text-slate-400">derived/summary.json</code> is present the report loads instantly.
+                    Upload the folder from <code className="text-slate-400">frx collect</code>. The analyzer auto-selects the best file — <code className="text-slate-400">summary.json</code> loads instantly with no extra steps.
                   </p>
                 </div>
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/30 hover:bg-white/10">
@@ -1920,6 +2054,35 @@ export function AnalyzerClient() {
                   />
                 </label>
               </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                {([
+                  { name: "summary.json",        desc: "Main diagnosis",          highlight: true  },
+                  { name: "metadata.json",        desc: "Run & hardware info",     highlight: false },
+                  { name: "profiler_trace.json",  desc: "Kernel-level timing",     highlight: false },
+                  { name: "gpu_metrics.csv",      desc: "Per-step GPU counters",   highlight: false },
+                  { name: "run_config.yaml",      desc: "Hyperparameters",         highlight: false },
+                  { name: "*.log",                desc: "Training logs (optional)",highlight: false },
+                ] as const).map(({ name, desc, highlight }) => (
+                  <div
+                    key={name}
+                    className={`flex items-start gap-2 rounded-md px-2.5 py-2 ${
+                      highlight
+                        ? "border border-cyan-400/20 bg-cyan-400/5"
+                        : "border border-white/5 bg-white/[0.02]"
+                    }`}
+                  >
+                    <span className={`mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full ${highlight ? "bg-cyan-400" : "bg-white/15"}`} />
+                    <div className="min-w-0">
+                      <code className={`block truncate text-[0.65rem] font-medium leading-tight ${highlight ? "text-cyan-200" : "text-slate-400"}`}>
+                        {name}
+                      </code>
+                      <span className="mt-0.5 block text-[0.6rem] leading-tight text-slate-600">{desc}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {bundleStatus && (
                 <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
                   <div className="flex flex-wrap gap-2 text-[0.65rem]">
@@ -1951,7 +2114,7 @@ export function AnalyzerClient() {
               <textarea
                 value={raw}
                 onChange={(e) => setRaw(e.target.value)}
-                placeholder='{ "events": [...] }  or paste a summarize_run() output'
+                placeholder='Paste the contents of summary.json, profiler_trace.json, or a raw event array — e.g. { "events": [...] }'
                 rows={16}
                 className="min-h-[22rem] w-full resize-y bg-transparent px-4 py-3 font-mono text-xs leading-5 text-slate-300 placeholder-slate-600 outline-none focus:bg-white/[0.02]"
               />
@@ -1963,7 +2126,7 @@ export function AnalyzerClient() {
             )}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-xs leading-5 text-slate-500">
-                Supports <code className="text-slate-400">frx collect</code> bundles (auto-loaded), raw event arrays, and profiler traces.
+                Accepts <code className="text-slate-400">summary.json</code>, <code className="text-slate-400">profiler_trace.json</code>, raw event arrays, and workflow run summaries.
               </div>
               <div className="flex flex-wrap gap-3">
                 <button

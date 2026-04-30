@@ -59,3 +59,8 @@ we used git bash in windows 11
 * A combined run-plus-steady-state artifact is more informative than forcing one diagnosis over the whole trace. Mixed runs can legitimately be ambiguous at full-run scope while the steady-state slice remains decisive, and the backend should preserve that distinction rather than collapsing it away.
 * The clean storage pattern is to keep the old single-summary persistence helper stable and add a separate persistence helper for the combined run-plus-steady-state artifact. That avoids breaking current callers while still making the richer Phase 8 report first-class.
 * Once a backend default steady-state policy exists, it should be reported explicitly in artifact metadata. Hiding the applied selector makes diagnostics harder to interpret and makes it impossible to tell whether a run/steady-state disagreement came from model behavior or from the selection policy itself.
+
+Date: 4/29/2
+* For tiny-kernel launch-overhead workloads, sampling-based GPU utilization can legitimately report near-zero even when many CUDA kernels ran. The product should describe this as bursty or unreliable GPU activity, not hard 0% active or 100% generic wait waste.
+* Launch-bound reports need kernel-specific evidence from profiler traces whenever possible: kernel count per step, median CUDA kernel duration, small-kernel fraction, and stable-shape context. Without those fields, the UI can sound like it inferred launch overhead only from low utilization.
+* For profiler-only bundles, `--artifact-dir` must point at the workload output directory that contains `profiler_trace.json`; otherwise the collector creates a syntactically valid but diagnostically incomplete run bundle.

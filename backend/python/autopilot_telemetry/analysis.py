@@ -142,6 +142,11 @@ def derive_run_summary(events: list[dict[str, Any]], per_step: list[dict[str, An
         "step_time_max_ns": max(step_wall_times) if step_wall_times else 0,
         "shape_volatility_ratio": _shape_volatility_ratio(per_step),
         "profiler_windows_exported": sum(step["profiler_windows_exported"] for step in per_step),
+        "kernel_count_per_step": _average_positive(step["kernel_count"] for step in completed_steps),
+        "median_cuda_kernel_duration_us": _median_positive(
+            step["median_cuda_kernel_duration_us"] for step in completed_steps
+        ),
+        "small_kernel_fraction": _average_positive(step["small_kernel_fraction"] for step in completed_steps),
         "dominant_stall_type": _dominant_stall_type(per_step),
     }
 
@@ -278,6 +283,12 @@ def classify_bottlenecks(
                 {
                     "profiler_windows_exported": run_summary["profiler_windows_exported"],
                     "average_gpu_utilization_pct": round(avg_gpu, 2),
+                    "kernel_count_per_step": round(run_summary.get("kernel_count_per_step", 0.0), 2),
+                    "median_cuda_kernel_duration_us": round(
+                        run_summary.get("median_cuda_kernel_duration_us", 0.0), 3
+                    ),
+                    "small_kernel_fraction": round(run_summary.get("small_kernel_fraction", 0.0), 4),
+                    "shapes_stable": run_summary.get("shape_volatility_ratio", 0.0) < 0.3,
                     "note": "Profiler windows were captured but dominant stalls were not input, copy, or sync heavy.",
                 },
                 worst_steps=_top_steps(
@@ -458,6 +469,9 @@ def _empty_step_metrics(step_id: int) -> dict[str, Any]:
         "batch_size": 0,
         "sequence_length": None,
         "profiler_windows_exported": 0,
+        "kernel_count": 0,
+        "median_cuda_kernel_duration_us": 0.0,
+        "small_kernel_fraction": 0.0,
         "loss": None,
     }
 
@@ -528,7 +542,15 @@ def _explanation_bullets(primary: dict[str, Any], run_summary: dict[str, Any]) -
     elif label == "shape_instability":
         bullets.append(f"Shape volatility ratio is {evidence.get('shape_volatility_ratio', 0):.3f}.")
     elif label == "launch_bound":
-        bullets.append(f"Profiler exported {evidence.get('profiler_windows_exported', 0)} windows while GPU utilization stayed low.")
+        kernel_count = evidence.get("kernel_count_per_step", 0)
+        median_kernel = evidence.get("median_cuda_kernel_duration_us", 0)
+        if kernel_count:
+            bullets.append(
+                f"Profiler saw about {kernel_count:.1f} CUDA kernels per step with median duration {median_kernel:.3f} us."
+            )
+        bullets.append("GPU utilization sampling stayed low, which is expected for bursty tiny-kernel workloads.")
+        if evidence.get("shapes_stable"):
+            bullets.append("Shapes were stable, so compile or CUDA graph mitigations are viable.")
     elif label == "insufficient_telemetry":
         bullets.append(f"No timing breakdowns were observed across {evidence.get('step_count', 0)} completed steps.")
         bullets.append("GPU utilization data is absent — no utilization samples were recorded.")
@@ -649,6 +671,13 @@ def _accumulate_step_event(step: dict[str, Any], event: dict[str, Any]) -> None:
 
     if event_type == "profiler_window" and payload.get("window_state") == "exported":
         step["profiler_windows_exported"] += 1
+        step["kernel_count"] += int(_to_float(payload.get("kernel_count")) or 0)
+        median_us = _to_float(payload.get("median_cuda_kernel_duration_us"))
+        if median_us is not None and median_us > 0:
+            step["median_cuda_kernel_duration_us"] = median_us
+        small_fraction = _to_float(payload.get("small_kernel_fraction"))
+        if small_fraction is not None:
+            step["small_kernel_fraction"] = max(0.0, min(1.0, small_fraction))
 
 
 def _update_gpu_active_fraction(step: dict[str, Any]) -> None:
@@ -676,6 +705,21 @@ def _average_numeric_payload(events: list[dict[str, Any]], field: str) -> float:
         if number is not None:
             values.append(number)
     return mean(values) if values else 0.0
+
+
+def _average_positive(values: Any) -> float:
+    positives = [float(value) for value in values if value and float(value) > 0]
+    return mean(positives) if positives else 0.0
+
+
+def _median_positive(values: Any) -> float:
+    positives = sorted(float(value) for value in values if value and float(value) > 0)
+    if not positives:
+        return 0.0
+    midpoint = len(positives) // 2
+    if len(positives) % 2:
+        return positives[midpoint]
+    return (positives[midpoint - 1] + positives[midpoint]) / 2.0
 
 
 def _peak_memory_ratio(gpu_samples: list[dict[str, Any]]) -> float:

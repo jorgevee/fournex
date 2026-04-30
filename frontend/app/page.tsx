@@ -398,7 +398,7 @@ export default function Home() {
           <SectionHeading
             eyebrow="What we detect"
             title="Six GPU bottleneck families. Named, ranked, and fixable."
-            description="We skip the raw profiler dumps and go straight to diagnosis. Every bottleneck maps to a concrete, explainable fix — not another dashboard to stare at."
+            description="We skip the raw profiler dumps and go straight to diagnosis. Every bottleneck maps to a concrete, explainable fix; not another dashboard to stare at."
           />
           <div className="mt-10 grid gap-4 sm:mt-14 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
             {bottleneckPatterns.map((item) => {

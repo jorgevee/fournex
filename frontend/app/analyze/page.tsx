@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 const stats = [
-  { label: "Accepted inputs", value: "Trace JSON", icon: Network },
+  { label: "Accepted inputs", value: "JSON · CSV · YAML", icon: Network },
   { label: "Output", value: "Diagnosis + fixes", icon: BarChart3 },
   { label: "Feedback", value: "Built in", icon: Gauge },
 ];
@@ -30,7 +30,7 @@ export default async function AnalyzePage() {
               Find the bottleneck and ship the next measured fix.
             </h1>
             <p className="mt-4 max-w-xl text-base leading-7 text-slate-300">
-              Paste a Fournex summary, raw event trace, or workflow timing JSON. The analyzer separates diagnosis from action so the next step is clear.
+              Import a <code className="rounded bg-white/5 px-1 py-0.5 text-sm text-slate-300">summary.json</code> from your run, drop the full <code className="rounded bg-white/5 px-1 py-0.5 text-sm text-slate-300">frx collect</code> folder, or paste a profiler trace. The analyzer names the bottleneck and ranks fixes by ROI.
             </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">

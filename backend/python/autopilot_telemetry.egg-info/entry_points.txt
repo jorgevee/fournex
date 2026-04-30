@@ -1,2 +1,2 @@
 [console_scripts]
-gpu-autopilot = autopilot_telemetry.cli:main
+frx = autopilot_telemetry.cli:main

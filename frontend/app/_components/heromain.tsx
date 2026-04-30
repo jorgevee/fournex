@@ -43,6 +43,31 @@ const heatmapRows = [
   [0.05, 0.12, 0.2, 0.3, 0.34, 0.32, 0.24, 0.14],
 ];
 
+function heatColor(v: number): string {
+  const stops = [
+    { t: 0.0, r: 30,  g: 27,  b: 150 },
+    { t: 0.3, r: 6,   g: 182, b: 212 },
+    { t: 0.6, r: 234, g: 179, b: 8   },
+    { t: 0.8, r: 249, g: 115, b: 22  },
+    { t: 1.0, r: 239, g: 68,  b: 68  },
+  ];
+  let i = 0;
+  while (i < stops.length - 2 && v > stops[i + 1].t) i++;
+  const lo = stops[i], hi = stops[i + 1];
+  const t = (v - lo.t) / (hi.t - lo.t);
+  const r = Math.round(lo.r + (hi.r - lo.r) * t);
+  const g = Math.round(lo.g + (hi.g - lo.g) * t);
+  const b = Math.round(lo.b + (hi.b - lo.b) * t);
+  return `rgba(${r},${g},${b},${(0.08 + v * 0.92).toFixed(2)})`;
+}
+
+function heatGlow(v: number): string {
+  if (v > 0.85) return "0 0 10px rgba(239,68,68,0.6), 0 0 4px rgba(249,115,22,0.4)";
+  if (v > 0.70) return "0 0 8px rgba(249,115,22,0.4)";
+  if (v > 0.55) return "0 0 5px rgba(234,179,8,0.25)";
+  return "none";
+}
+
 const chartPath =
   "M10 176 C22 166 34 156 46 148 C58 139 70 129 82 120 C94 111 106 103 118 96 C130 89 142 84 154 80 C166 76 178 74 190 69 C202 64 214 57 226 52 C238 47 250 45 262 39 C268 36 272 32 276 28";
 
@@ -339,47 +364,80 @@ export default function Hero() {
 
             <div className="mt-4 grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
               <div className="rounded-[1.5rem] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))] p-5">
-                <div className="text-sm font-medium text-white">
-                  Workload profiling
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium text-white">Workload profiling</div>
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-orange-400/25 bg-orange-400/10 px-2.5 py-1 text-[0.65rem] font-medium text-orange-300">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400" />
+                    Hotspot detected
+                  </div>
                 </div>
-                <div className="mt-4 grid gap-4 sm:grid-cols-[0.95fr_1.05fr] sm:items-center">
-                  <div className="space-y-3 text-sm">
+
+                <div className="mt-4 grid gap-4 sm:grid-cols-[0.95fr_1.05fr] sm:items-start">
+                  <div className="space-y-3">
                     {[
-                      ["SM utilization", "62%"],
-                      ["Memory BW", "78%"],
-                      ["DRAM stalls", "34%"],
-                      ["Kernel launches", "1.2M"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex items-center justify-between gap-3 text-slate-400">
-                        <span>{label}</span>
-                        <span className="font-medium text-white">{value}</span>
+                      { label: "SM utilization",  value: "62%",  fill: 62, color: "bg-cyan-400"    },
+                      { label: "Memory BW",        value: "78%",  fill: 78, color: "bg-violet-400"  },
+                      { label: "DRAM stalls",      value: "34%",  fill: 34, color: "bg-amber-400"   },
+                      { label: "Kernel launches",  value: "1.2M", fill: 88, color: "bg-emerald-400" },
+                    ].map(({ label, value, fill, color }) => (
+                      <div key={label} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400">{label}</span>
+                          <span className="font-medium text-white">{value}</span>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/8">
+                          <div className={`h-full rounded-full ${color}`} style={{ width: `${fill}%` }} />
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <div>
-                    <div className="rounded-[1rem] border border-white/8 bg-[#080b16] p-3">
-                      <div className="grid grid-cols-8 gap-1">
-                      {heatmapRows.flatMap((row, rowIndex) =>
-                        row.map((cell, cellIndex) => (
-                          <span
-                            key={`${rowIndex}-${cellIndex}`}
-                            className="aspect-square rounded-[4px]"
-                            style={{
-                              backgroundColor: `rgba(236,72,153,${cell})`,
-                              boxShadow:
-                                cell > 0.7
-                                  ? "0 0 18px rgba(249,115,22,0.25)"
-                                  : "none",
-                            }}
-                          />
-                        )),
-                      )}
+
+                  <div className="rounded-[1rem] border border-white/8 bg-[#080b16] p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-[0.6rem] uppercase tracking-[0.18em] text-slate-600">
+                        SM block × time step
+                      </span>
+                      <div className="inline-flex items-center gap-1 rounded-full border border-red-400/25 bg-red-400/10 px-2 py-0.5 text-[0.6rem] font-medium text-red-300">
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-red-400" />
+                        Peak 98%
                       </div>
-                      <div className="mt-3 flex items-center justify-between text-[0.65rem] uppercase tracking-[0.22em] text-slate-500">
-                        <span>Cold</span>
-                        <span className="mx-3 h-px flex-1 bg-gradient-to-r from-violet-400 via-fuchsia-500 to-orange-400" />
-                        <span>Hot</span>
+                    </div>
+
+                    <div className="flex flex-col gap-[3px]">
+                      {heatmapRows.map((row, rowIndex) => (
+                        <div key={rowIndex} className="flex items-center gap-[3px]">
+                          <span className="w-6 shrink-0 text-[0.5rem] leading-none text-slate-600">
+                            SM{rowIndex}
+                          </span>
+                          <div className="grid flex-1 grid-cols-8 gap-[3px]">
+                            {row.map((cell, cellIndex) => (
+                              <span
+                                key={`${rowIndex}-${cellIndex}`}
+                                className="aspect-square rounded-[3px]"
+                                style={{
+                                  backgroundColor: heatColor(cell),
+                                  boxShadow: heatGlow(cell),
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-1 flex items-center gap-[3px]">
+                      <div className="w-6 shrink-0" />
+                      <div className="grid flex-1 grid-cols-8 gap-[3px]">
+                        {["T1","T2","T3","T4","T5","T6","T7","T8"].map((t) => (
+                          <div key={t} className="text-center text-[0.5rem] text-slate-600">{t}</div>
+                        ))}
                       </div>
+                    </div>
+
+                    <div className="mt-2.5 flex items-center gap-2 text-[0.6rem] uppercase tracking-[0.18em] text-slate-500">
+                      <span>Cold</span>
+                      <span className="h-px flex-1 bg-gradient-to-r from-indigo-600 via-cyan-400 via-yellow-400 via-orange-400 to-red-500" />
+                      <span>Hot</span>
                     </div>
                   </div>
                 </div>

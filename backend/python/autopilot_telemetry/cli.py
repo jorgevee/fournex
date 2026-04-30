@@ -128,6 +128,8 @@ def collect(args: argparse.Namespace) -> int:
         warnings,
         import_profiler=not args.no_profiler_import,
     )
+    if imported:
+        warnings.append(f"Imported workload artifacts: {', '.join(imported)}")
     _generate_derived_summary_from_trace(run_dir, warnings)
     _generate_derived_summary_from_profiler_bundle(run_dir, warnings)
     artifacts = _discover_artifacts(run_dir)
@@ -902,6 +904,13 @@ def _profiler_trace_to_sdk_events(trace_path: Path, warnings: list[str]) -> list
             and float(e.get("ts", 0)) >= ts_start_us
             and float(e.get("ts", 0)) + float(e.get("dur", 0) or 0) <= ts_end_us + 1
         ]
+        kernel_durations_us = [
+            float(e.get("dur", 0) or 0)
+            for e in complete
+            if _is_cuda_kernel_evt(e)
+            and float(e.get("ts", 0)) >= ts_start_us
+            and float(e.get("ts", 0)) + float(e.get("dur", 0) or 0) <= ts_end_us + 1
+        ]
 
         dl_ns = _max_dur_ns(in_step, _is_dataloader_evt)
         h2d_ns = _sum_dur_ns(in_step, _is_h2d_evt)
@@ -909,8 +918,26 @@ def _profiler_trace_to_sdk_events(trace_path: Path, warnings: list[str]) -> list
         bwd_ns = _sum_dur_ns(in_step, _is_backward_evt)
         opt_ns = _sum_dur_ns(in_step, _is_optimizer_evt)
         wall_ns = int((ts_end_us - ts_start_us) * 1000)
+        kernel_count = len(kernel_durations_us)
+        small_kernel_count = sum(1 for duration in kernel_durations_us if duration < 10.0)
+        median_kernel_us = _median(kernel_durations_us)
 
         sdk_events.append({"event_type": "step_start", "step_id": step_num, "duration_ns": 0, "payload": {"step_kind": "train"}})
+        sdk_events.append(
+            {
+                "event_type": "profiler_window",
+                "step_id": step_num,
+                "duration_ns": wall_ns,
+                "payload": {
+                    "window_state": "exported",
+                    "trace_path": str(trace_path),
+                    "kernel_count": kernel_count,
+                    "kernel_count_per_step": kernel_count,
+                    "median_cuda_kernel_duration_us": median_kernel_us,
+                    "small_kernel_fraction": (small_kernel_count / kernel_count) if kernel_count else 0.0,
+                },
+            }
+        )
         if dl_ns > 0:
             sdk_events.append({"event_type": "dataloader_span", "step_id": step_num, "duration_ns": dl_ns, "payload": {"stage": "next"}})
         if h2d_ns > 0:
@@ -1003,6 +1030,22 @@ def _is_optimizer_evt(e: dict[str, Any]) -> bool:
     )
 
 
+def _is_cuda_kernel_evt(e: dict[str, Any]) -> bool:
+    cat = str(e.get("cat", "")).lower()
+    name = str(e.get("name", "")).lower()
+    return "kernel" in cat or "cuda_kernel" in cat or ("cuda" in cat and "kernel" in name)
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
 def _sum_dur_ns(events: list[dict[str, Any]], predicate) -> int:
     return sum(int(float(e.get("dur", 0) or 0) * 1000) for e in events if predicate(e))
 
@@ -1020,10 +1063,10 @@ def _gpu_metrics_csv_to_sdk_events(csv_path: Path) -> list[dict[str, Any]]:
         with csv_path.open(encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                util_gpu = _safe_float(row.get("utilization.gpu"))
-                util_mem = _safe_float(row.get("utilization.memory"))
-                mem_used = _safe_float(row.get("memory.used"))
-                mem_total = _safe_float(row.get("memory.total"))
+                util_gpu = _safe_float(row.get("utilization.gpu") or row.get("gpu_util"))
+                util_mem = _safe_float(row.get("utilization.memory") or row.get("memory_util"))
+                mem_used = _safe_float(row.get("memory.used") or row.get("memory_used"))
+                mem_total = _safe_float(row.get("memory.total") or row.get("memory_total"))
                 if util_gpu is None and mem_used is None:
                     continue
                 payload: dict[str, Any] = {}
@@ -1191,6 +1234,11 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
     primary = diagnosis.get("primary_bottleneck")
     user_facing = diagnosis.get("user_facing_bottleneck", primary)
     confidence = diagnosis.get("confidence", {})
+    step_count = scope_data.get("step_count", len(per_step))
+    step_avg_ns = run_summary.get("step_time_avg_ns", 0)
+    analysis_incomplete = not primary and not scope_data.get("bottlenecks") and (
+        step_count == 0 or not step_avg_ns
+    )
     print(f"\nVERDICT")
     if primary:
         display_label = user_facing if user_facing and user_facing != primary else primary
@@ -1199,6 +1247,9 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
             print(f"  Internal Signal    : {primary} (symptom)")
         print(f"  Confidence         : {confidence.get('level', 'unknown')} ({confidence.get('score', 0.0):.2f})")
         print(f"  Reason             : {confidence.get('reason', '')}")
+    elif analysis_incomplete:
+        print(f"  Analysis incomplete: missing or non-measurable trace data.")
+        print(f"  Reason             : import raw/trace.jsonl, derived/summary.json, or profiler/profiler_trace.json before trusting the diagnosis.")
     else:
         print(f"  No bottleneck detected above threshold.")
         print(f"  Confidence         : {confidence.get('level', 'low')}: {confidence.get('reason', '')}")
@@ -1218,7 +1269,6 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
     print(f"\nPERFORMANCE SNAPSHOT")
     avg_gpu = run_summary.get("average_gpu_utilization_pct", 0.0)
     avg_mem = run_summary.get("average_memory_utilization_pct", 0.0)
-    step_avg_ns = run_summary.get("step_time_avg_ns", 0)
     throughput = run_summary.get("throughput_steps_per_sec", 0.0)
     stall = run_summary.get("dominant_stall_type", "unknown")
     mem_pressure = run_summary.get("memory_pressure_peak_ratio", 0.0)

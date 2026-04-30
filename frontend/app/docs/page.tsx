@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Docs - GPU Autopilot",
+  title: "Docs - Fournex",
   description: "Developer reference for the frx CLI.",
 };
 
@@ -121,7 +121,7 @@ export default function DocsPage() {
           <div className="flex items-center gap-3 mb-3">
             <Terminal className="h-7 w-7 text-violet-400" />
             <h1 className="text-3xl font-semibold tracking-tight text-white">
-              GPU Autopilot — CLI Reference
+              Fournex — CLI Reference
             </h1>
           </div>
           <p className="text-slate-400 text-sm max-w-2xl">
@@ -176,7 +176,7 @@ export default function DocsPage() {
                 PyTorch is optional — the CLI works without it for bundle analysis;
                 it is only needed when the SDK instruments a live training run.
               </P>
-              <Pre>{`pip install -e backend/python`}</Pre>
+              <Pre>{`pip install fournex`}</Pre>
               <P>
                 This registers the <Code>frx</Code> entry point.
                 Verify with:
@@ -268,6 +268,24 @@ Options:
   --sample-interval-ms N   nvidia-smi polling interval in ms (default: 1000)
   --config FILE            Optional run_config.yaml to merge into bundle config
   --no-zip                 Skip creating the zip archive`}</Pre>
+
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
+                <p className="text-sm font-semibold text-amber-300 mb-1">Artifact directory gotcha</p>
+                <p className="text-xs leading-5 text-slate-400">
+                  If your workload writes <Code>profiler_trace.json</Code> somewhere
+                  other than <Code>frx-job-run/</Code>, pass that directory with{" "}
+                  <Code>--artifact-dir</Code>. Otherwise the trace exists on disk but
+                  will not be copied into the run bundle.
+                </p>
+              </div>
+
+              <Pre>{`# Workload writes gpu-job-run-tiny-kernels/profiler_trace.json
+frx collect \\
+  --name tiny-kernel-launch-overhead \\
+  --out runs \\
+  --sample-interval-ms 100 \\
+  --artifact-dir gpu-job-run-tiny-kernels \\
+  -- python tiny_kernel_launch_overhead.py --output-dir gpu-job-run-tiny-kernels`}</Pre>
 
               <H3>What it does</H3>
               <ol className="ml-4 space-y-2 text-sm text-slate-400 list-decimal list-outside">
@@ -393,6 +411,25 @@ TOP RECOMMENDATIONS (3 of 5)
                 verdict displays the root cause. The raw internal signal is shown on
                 the <Code>Internal Signal</Code> line.
               </P>
+
+              <H3>Launch-bound traces and near-zero GPU samples</H3>
+              <P>
+                For tiny-kernel workloads, <Code>nvidia-smi</Code> sampling can report
+                near-zero GPU utilization even when the profiler captured many CUDA
+                kernels. Treat that as bursty GPU activity rather than proof that no
+                GPU work ran. The launch-bound report uses profiler evidence such as{" "}
+                <Code>kernel_count_per_step</Code>,{" "}
+                <Code>median_cuda_kernel_duration_us</Code>,{" "}
+                <Code>small_kernel_fraction</Code>, and stable shapes when available.
+              </P>
+              <Pre>{`VERDICT
+  Primary Bottleneck : launch_bound
+  Confidence         : medium (0.65)
+
+EVIDENCE
+  - Profiler saw about 840.0 CUDA kernels per step with median duration 4.200 us.
+  - GPU utilization sampling stayed low, which is expected for bursty tiny-kernel workloads.
+  - Shapes were stable, so compile or CUDA graph mitigations are viable.`}</Pre>
             </Section>
 
             {/* doctor */}
@@ -1028,7 +1065,7 @@ summary = summarize_run_with_steady_state(events)
                     ["underutilized_gpu", "GPU Under-utilization", "GPU utilization < 35% (symptom)"],
                     ["memory_pressure", "Memory Pressure", "Peak memory ratio ≥ 90%"],
                     ["shape_instability", "Shape Instability", "Shape volatility ratio ≥ 30%"],
-                    ["launch_bound", "Kernel Launch Overhead", "Low GPU util + profiler windows, no dominant stall"],
+                    ["launch_bound", "Kernel Launch Overhead", "Profiler windows with many short kernels, stable shapes, low sampled util, and no dominant input/copy/sync stall"],
                     ["insufficient_telemetry", "Insufficient Telemetry", "No timing data and no GPU util samples"],
                   ].map(([label, display, signal]) => (
                     <tr key={label}>
@@ -1096,7 +1133,10 @@ profiler = torch.profiler.profile(
 )
 
 # Then collect — the CLI imports profiler_trace.json automatically
-frx collect -- python train.py`}</Pre>
+frx collect -- python train.py
+
+# If the trace is written somewhere else, pass that directory explicitly
+frx collect --artifact-dir gpu-job-run-tiny-kernels -- python train.py`}</Pre>
 
               <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
                 <p className="text-sm font-semibold text-amber-300 mb-1">Note on data richness</p>
