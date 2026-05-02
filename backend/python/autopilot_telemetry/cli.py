@@ -197,6 +197,10 @@ def tune(args: argparse.Namespace) -> int:
         max_trials=args.max_trials,
         safe_only=args.safe,
         benchmark_window=benchmark_window,
+        race_enabled=not args.no_race,
+        race_promote_count=args.race_promote_count,
+        race_warmup_steps=args.race_warmup_steps,
+        race_measure_steps=args.race_measure_steps,
         sample_interval_ms=args.sample_interval_ms,
         thresholds=thresholds,
         environment=environment,
@@ -285,6 +289,29 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="benchmark repeats per baseline and candidate for noise-aware comparison (default: 1)",
+    )
+    tune_parser.add_argument(
+        "--no-race",
+        action="store_true",
+        help="disable quick candidate screening and fully benchmark every candidate",
+    )
+    tune_parser.add_argument(
+        "--race-promote-count",
+        type=int,
+        default=3,
+        help="number of quick-screened candidates to promote to full benchmarking (default: 3)",
+    )
+    tune_parser.add_argument(
+        "--race-warmup-steps",
+        type=int,
+        default=1,
+        help="warmup steps for quick candidate screening (default: 1)",
+    )
+    tune_parser.add_argument(
+        "--race-measure-steps",
+        type=int,
+        default=5,
+        help="measurement steps for quick candidate screening (default: 5)",
     )
     tune_parser.add_argument(
         "--min-speedup", type=float, default=0.08,

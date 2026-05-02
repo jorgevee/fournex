@@ -23,6 +23,12 @@ import {
   Zap,
 } from "lucide-react";
 import Hero from "./_components/heromain";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Fournex | GPU performance profiler and autopilot",
+  description: "Fournex helps you optimize GPU performance with advanced profiling and autopilot features.",
+};
 
 // ── Fournex logo mark ──────────────────────────────────────────────────────
 function FournexMark({ size = 36 }: { size?: number }) {
@@ -200,15 +206,15 @@ const rankedFixes = [
   },
   {
     rank: "02",
-    title: "Enable bf16 mixed precision on forward pass",
+    title: "Increase batch size from inferred baseline if memory allows",
     effort: "Low",
     confidence: "High",
-    speedup: "+19%",
+    speedup: "+14%",
     risk: "Low",
   },
   {
     rank: "03",
-    title: 'Compile hot module with torch.compile (mode="reduce-overhead")',
+    title: 'Try torch.compile(mode="reduce-overhead") for launch overhead',
     effort: "Medium",
     confidence: "Medium",
     speedup: "+14%",
@@ -216,7 +222,7 @@ const rankedFixes = [
   },
   {
     rank: "04",
-    title: "Remove per-step .item() calls from training loop",
+    title: "Reduce .item() / host sync points in the training loop",
     effort: "Low",
     confidence: "High",
     speedup: "+6%",
@@ -243,7 +249,7 @@ const productPhases = [
     icon: ListChecks,
     bullets: [
       "Map bottlenecks to concrete fixes",
-      "Score by ROI, effort, and risk",
+      "Score by impact, effort, and risk",
       "Explainable, repeatable output",
     ],
   },
@@ -282,7 +288,7 @@ const capabilityCards = [
     icon: ListChecks,
     title: "Ranked fixes",
     description:
-      "Concrete, explainable recommendations — scored by expected ROI, effort, and risk.",
+      "Concrete, explainable recommendations — scored by impact, effort, and risk.",
   },
   {
     icon: FlaskConical,
@@ -444,14 +450,14 @@ export default function Home() {
                 align="left"
                 eyebrow="Ranked recommendations"
                 title="From trace to ranked fix list in under a minute."
-                description="Every finding comes with an estimated speedup, implementation effort, confidence level, and blast radius. No more guessing which fix matters first."
+                description="Every finding comes with expected impact, implementation effort, confidence level, and blast radius. Tune mode can then benchmark selected candidates before you trust the change."
               />
               <ul className="mt-8 grid gap-3 text-sm text-slate-300">
                 {[
                   "Explainable, rule-based classifier — no hallucinations",
-                  "ROI-weighted ranking using real workload outcomes",
-                  "Safe-to-apply set separated from numerics-changing set",
-                  "One-click repro: every fix ships with a benchmark harness",
+                  "Ranked by diagnosis strength, expected impact, effort, and risk",
+                  "Recommendations separated from benchmarked tune candidates",
+                  "Tune mode validates selected configs with guardrails",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-3">
                     <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-400/15 text-blue-300">
@@ -646,14 +652,14 @@ export default function Home() {
               <SectionHeading
                 align="left"
                 eyebrow="Drop in. Go."
-                title="One command. No hardware changes. No vendor lock-in."
-                description="Works as a CLI, a CI job, or a long-running agent. Bring your own cluster, keep your own training code. We just turn traces into ranked fixes."
+                title="Collect, diagnose, and race safe fixes from the CLI."
+                description="Works as a CLI, a CI job, or a long-running agent. Bring your own cluster, keep your own training code. The tuner screens cheap candidates first, then fully validates only the strongest ones."
               />
               <div className="mt-8 grid gap-3 text-sm sm:gap-4">
                 {[
-                  { label: "Install", value: "pip install fournex" },
-                  { label: "Profile", value: "fournex analyze --pid $TRAIN_PID" },
-                  { label: "Validate", value: "fournex bench --apply top-3" },
+                  { label: "Install", value: "pip install -e ./backend/python" },
+                  { label: "Collect", value: "frx collect -- python train.py" },
+                  { label: "Tune", value: "frx tune --no-safe --race-promote-count 3 -- python train.py" },
                 ].map((step) => (
                   <div
                     key={step.label}
@@ -681,63 +687,59 @@ export default function Home() {
                     <div className="h-3 w-3 rounded-full bg-green-500/80" />
                   </div>
                   <div className="mx-auto text-xs text-slate-400">
-                    fournex ~ run.sh
+                    frx ~ tune.sh
                   </div>
                 </div>
                 <div className="space-y-3 p-4 leading-6 sm:p-6 sm:leading-7">
                   <div>
                     <span className="text-slate-500">$</span>{" "}
-                    <span className="text-cyan-300">fournex</span>{" "}
-                    <span className="text-slate-200">analyze</span>{" "}
-                    <span className="text-amber-300">--pid</span>{" "}
-                    <span className="text-slate-400">4492</span>
+                    <span className="text-cyan-300">frx</span>{" "}
+                    <span className="text-slate-200">tune</span>{" "}
+                    <span className="text-amber-300">--no-safe</span>{" "}
+                    <span className="text-amber-300">--race-promote-count</span>{" "}
+                    <span className="text-slate-400">3</span>{" "}
+                    <span className="text-amber-300">--</span>{" "}
+                    <span className="text-slate-400">python train.py</span>
                   </div>
                   <div className="text-slate-400">
-                    <span className="text-blue-300">✓</span> trace captured in
-                    18.2s (low-overhead mode)
+                    <span className="text-blue-300">✓</span> baseline captured:
+                    4.80 steps/sec, batch_size=32
                   </div>
                   <div className="text-slate-400">
-                    <span className="text-blue-300">✓</span> classifier ran
-                    against 6 bottleneck families
+                    <span className="text-blue-300">✓</span> generated 8 focused
+                    candidates from input_bound diagnosis
                   </div>
                   <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-3 text-amber-200">
                     <div className="text-xs uppercase tracking-[0.2em] text-amber-300/80">
-                      Primary bottleneck
+                      Quick race stage
                     </div>
                     <div className="mt-1 text-slate-100">
-                      Dataloader starvation · GPU idle 58% of step time
+                      8 short trials screened down to 3 full benchmarks
                     </div>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">$</span>{" "}
-                    <span className="text-cyan-300">fournex</span>{" "}
-                    <span className="text-slate-200">bench</span>{" "}
-                    <span className="text-amber-300">--apply</span>{" "}
-                    <span className="text-slate-400">top-3</span>
                   </div>
                   <div className="space-y-1 text-slate-400">
                     <div>
-                      <span className="text-blue-300">✓</span> trial 1 ·
-                      workers=12, pin_memory=on{" "}
-                      <span className="text-blue-300">+28.4%</span>
+                      <span className="text-blue-300">✓</span> [RACE]
+                      dl:nw=8,pin=T{" "}
+                      <span className="text-blue-300">+18.1%</span> promoted
                     </div>
                     <div>
-                      <span className="text-blue-300">✓</span> trial 2 · bf16
-                      amp <span className="text-blue-300">+19.1%</span>
+                      <span className="text-blue-300">✓</span> [RACE] bs:40{" "}
+                      <span className="text-blue-300">+14.0%</span> promoted
                     </div>
                     <div>
-                      <span className="text-blue-300">✓</span> trial 3 ·
-                      torch.compile reduce-overhead{" "}
-                      <span className="text-blue-300">+14.6%</span>
+                      <span className="text-blue-300">✓</span> [FULL]
+                      dl:nw=8,pin=T,pf=4{" "}
+                      <span className="text-blue-300">+24.7%</span>
                     </div>
                   </div>
                   <div className="rounded-xl border border-blue-400/20 bg-blue-400/10 p-3 text-blue-100">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                      <span>Final validated speedup</span>
-                      <span className="font-semibold">+61.2%</span>
+                      <span>Winner from full benchmark</span>
+                      <span className="font-semibold">+24.7%</span>
                     </div>
                     <div className="mt-1 text-xs text-blue-200/70">
-                      no loss divergence · no OOM · reproducible across 3 seeds
+                      race results cannot promote directly · no loss divergence · no OOM
                     </div>
                   </div>
                 </div>

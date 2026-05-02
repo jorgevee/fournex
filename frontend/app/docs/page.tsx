@@ -557,6 +557,10 @@ Options:
   --warmup-steps N         Steps to skip before measuring (default: 5)
   --measure-steps N        Steps to include in measurement (default: 20)
   --repeat-count N         Repeats per baseline and candidate (default: 1)
+  --no-race                Disable quick candidate screening
+  --race-promote-count N   Candidates promoted from race to full benchmark (default: 3)
+  --race-warmup-steps N    Warmup steps for quick screening (default: 1)
+  --race-measure-steps N   Measurement steps for quick screening (default: 5)
   --bottleneck LABEL       Focus candidates manually
   --min-speedup FLOAT      Minimum improvement to recommend (default: 0.08 = 8%)
   --allow-risky-actions    Allow high-risk candidates
@@ -604,9 +608,47 @@ Options:
                 Candidates are generated in stages so the trial budget is spent
                 efficiently — no brute-force grid across all knob combinations.
               </P>
-              <Pre>{`Stage 1  dataloader   num_workers × pin_memory grid + prefetch_factor variants
+              <Pre>{`Screen   race pass    short benchmark all candidates, then promote top N
+Stage 1  dataloader   num_workers × pin_memory grid + prefetch_factor variants
 Stage 2  batch size   1.25×, 1.5×, 2× baseline  (--no-safe required)
 Stage 3  precision    bf16 (Ampere+), fp16        (--no-safe required)`}</Pre>
+
+              <P>
+                Race-stage trials are screening signals only. The final winner
+                must still come from a full benchmark and pass the normal guard,
+                quality, and noise checks.
+              </P>
+
+              <H3>Recommendations vs. tune trials</H3>
+              <P>
+                Recommendations are diagnosis-driven fix cards. They are ranked
+                by signal strength, expected impact, effort, and risk, but they
+                are not proof that a change already improved your workload.
+                Tune trials are executable config candidates that the runner
+                actually benchmarks.
+              </P>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Surface</Th>
+                    <Th>Source</Th>
+                    <Th>Use it for</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ["Recommendation", "Diagnosis + rule catalog", "Prioritizing what to inspect or test next"],
+                    ["Race trial", "Short benchmark window", "Screening candidates before full measurement"],
+                    ["Full tune trial", "Full benchmark window + guardrails", "Choosing the recommendation-only winner"],
+                  ].map(([surface, source, use]) => (
+                    <tr key={surface}>
+                      <Td mono>{surface}</Td>
+                      <Td>{source}</Td>
+                      <Td>{use}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
 
               <H3>Diagnosis-focused candidates</H3>
               <P>
@@ -734,6 +776,13 @@ Stage 3  precision    bf16 (Ampere+), fp16        (--no-safe required)`}</Pre>
       stderr.log
       derived/summary.json
       raw/trace.jsonl
+    race/
+      <candidate-id>/
+        config.yaml
+        benchmark_window.json
+        metrics.json
+        stdout.log
+        stderr.log
     <candidate-id>/
       config.yaml
       benchmark_window.json
@@ -823,16 +872,23 @@ Running baseline...
 
 Generated 8 candidates
 
-  [1/8] dl:nw=0,pin=T ...
-  [    ]  dl:nw=0,pin=T                        +1.2%  (exit=0, steps=25)
-  [2/8] dl:nw=2,pin=T ...
-  [PASS]  dl:nw=2,pin=T                        +11.4% (exit=0, steps=25)
-  [3/8] dl:nw=4,pin=T ...
+Running quick race stage (1 warmup + 5 measure steps)...
+  [1/8] race: dl:nw=0,pin=T ...
+  [RACE]  dl:nw=0,pin=T                        +1.2%  (exit=0, steps=6)
+  [2/8] race: dl:nw=2,pin=T ...
+  [RACE]  dl:nw=2,pin=T                        +11.4% (exit=0, steps=6)
+  [3/8] race: dl:nw=4,pin=T ...
+  [RACE]  dl:nw=4,pin=T                        +19.3% (exit=0, steps=6)
+  ...
+Quick race promoted 3 of 8 candidates
+
+  [1/3] full: dl:nw=4,pin=T ...
   [PASS]  dl:nw=4,pin=T                        +19.3% (exit=0, steps=25)
-  [4/8] amp:fp16 ...
+  [2/3] full: dl:nw=8,pin=T ...
+  [PASS]  dl:nw=8,pin=T                        +18.1% (exit=0, steps=25)
+  [3/3] full: amp:fp16 ...
   [FAIL]  amp:fp16                              +28.0% (exit=0, steps=25)
        ! quality regression: final loss 1.2 exceeds baseline 1 by more than 5%
-  ...
 
 Report saved: runs/tune-3f8a12b4/autopilot_report.json
 Markdown report saved: runs/tune-3f8a12b4/report.md
@@ -852,9 +908,10 @@ BASELINE
 TRIAL RESULTS
   dl:nw=4,pin=T                        +19.3% ✓
   dl:nw=8,pin=T                        +18.1% ✓
-  dl:nw=2,pin=T                        +11.4% ✓
-  dl:nw=8,pin=T,pf=4                   +8.9%  ✓
-  dl:nw=0,pin=T                        +1.2%
+  dl:nw=4,pin=T                        [RACE] +19.3%  promoted to full benchmark
+  dl:nw=8,pin=T                        [RACE] +18.1%  promoted to full benchmark
+  dl:nw=2,pin=T                        [RACE] +11.4%  screened out by quicker candidates
+  dl:nw=0,pin=T                        [RACE] +1.2%   screened out by quicker candidates
 
 WINNER
   Config       : dl:nw=4,pin=T

@@ -91,6 +91,74 @@ summary_path.write_text(json.dumps({
 }), encoding="utf-8")
 """
 
+BATCH_SIZE_TRACE_WRITER = r"""
+import json
+import os
+from pathlib import Path
+
+batch_size = int(os.environ.get("FRX_BATCH_SIZE", "32"))
+throughput = 14.0 if batch_size > 32 else 10.0
+step_ns = int(1_000_000_000 / throughput)
+summary_path = Path(os.environ["FRX_DERIVED_SUMMARY_PATH"])
+summary_path.parent.mkdir(parents=True, exist_ok=True)
+summary_path.write_text(json.dumps({
+    "steady_state": {
+        "step_count": 5,
+        "per_step": [
+            {
+                "step_id": i,
+                "status": "ok",
+                "step_wall_time_ns": step_ns,
+                "batch_size": batch_size,
+                "shape_changed": False,
+                "profiler_windows_exported": 0
+            }
+            for i in range(1, 6)
+        ],
+        "run_summary": {
+            "throughput_steps_per_sec": throughput,
+            "average_gpu_utilization_pct": 40.0,
+            "step_time_avg_ns": step_ns,
+            "memory_pressure_peak_ratio": 0.25,
+            "dominant_stall_type": "compute_bound"
+        }
+    }
+}), encoding="utf-8")
+"""
+
+RACE_WRITER = r"""
+import json
+import os
+from pathlib import Path
+
+nw = os.environ.get("FRX_NUM_WORKERS")
+pin = os.environ.get("FRX_PIN_MEMORY")
+key = (nw, pin)
+throughput_by_config = {
+    (None, None): 100.0,
+    ("0", "true"): 90.0,
+    ("2", "true"): 130.0,
+    ("2", "false"): 110.0,
+    ("4", "true"): 150.0,
+    ("4", "false"): 95.0,
+}
+throughput = throughput_by_config.get(key, 100.0)
+summary_path = Path(os.environ["FRX_DERIVED_SUMMARY_PATH"])
+summary_path.parent.mkdir(parents=True, exist_ok=True)
+summary_path.write_text(json.dumps({
+    "steady_state": {
+        "step_count": 5,
+        "run_summary": {
+            "throughput_steps_per_sec": throughput,
+            "average_gpu_utilization_pct": 55.0,
+            "step_time_avg_ns": int(1_000_000_000 / throughput),
+            "memory_pressure_peak_ratio": 0.25,
+            "dominant_stall_type": "input_bound"
+        }
+    }
+}), encoding="utf-8")
+"""
+
 
 def _workspace_tmp(name: str) -> Path:
     path = ROOT / "traces" / "cli_test_runs" / "experiment_runner" / f"{name}-{uuid.uuid4().hex[:8]}"
@@ -241,3 +309,56 @@ def test_experiment_runner_repeats_and_rejects_gain_inside_noise_band():
     assert report.winner is None
     assert any("noise-aware comparison" in reason for reason in trial.guard_failures)
     assert metrics["confidence_label"] == "inconclusive"
+
+
+def test_experiment_runner_infers_baseline_batch_size_from_trace():
+    tmp_path = _workspace_tmp("runner-batch-size")
+    runner = ExperimentRunner(
+        workload_command=[sys.executable, "-c", BATCH_SIZE_TRACE_WRITER],
+        job_name="unit-runner-batch-size",
+        out_dir=str(tmp_path),
+        max_trials=1,
+        safe_only=False,
+        time_budget_s=5,
+        warmup_steps=0,
+        measure_steps=5,
+        thresholds=PromotionThresholds(min_speedup=0.01, require_sufficient_steps=3),
+        bottleneck_diagnosis="underutilized_gpu",
+        environment={"cuda_available": True, "memory_headroom": 0.50},
+        verbose=False,
+    )
+
+    report = runner.run()
+
+    assert report.trials[0].config_id == "bs_40"
+    assert report.trials[0].env_vars["FRX_BATCH_SIZE"] == "40"
+    assert report.trials[0].throughput_delta > 0.3
+    assert report.winner is not None
+
+
+def test_experiment_runner_race_stage_only_full_benchmarks_top_candidates():
+    tmp_path = _workspace_tmp("runner-race")
+    runner = ExperimentRunner(
+        workload_command=[sys.executable, "-c", RACE_WRITER],
+        job_name="unit-runner-race",
+        out_dir=str(tmp_path),
+        max_trials=5,
+        time_budget_s=5,
+        race_promote_count=2,
+        thresholds=PromotionThresholds(min_speedup=0.01, require_sufficient_steps=3),
+        bottleneck_diagnosis="input_bound",
+        environment={"cpu_count": 4},
+        verbose=False,
+    )
+
+    report = runner.run()
+
+    race_trials = [trial for trial in report.trials if trial.benchmark_stage == "race"]
+    full_trials = [trial for trial in report.trials if trial.benchmark_stage == "full"]
+
+    assert len(race_trials) == 5
+    assert len(full_trials) == 2
+    assert all(not trial.eligible_for_promotion for trial in race_trials)
+    assert {trial.config_id for trial in full_trials} == {"dl_nw2_pin1", "dl_nw4_pin1"}
+    assert report.winner is not None
+    assert report.winner.config_id == "dl_nw4_pin1"

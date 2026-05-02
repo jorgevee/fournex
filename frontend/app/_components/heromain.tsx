@@ -113,7 +113,7 @@ export default function Hero() {
 
           <p className="mt-6 max-w-xl text-lg leading-8 text-slate-300 sm:text-[1.15rem]">
             Profile your training and inference jobs, get the bottleneck named
-            for you, and ship the highest-ROI fix - validated by safe
+            for you, and ship the highest-ROI fix; validated by safe
             experiments, not hope.
           </p>
 

@@ -109,10 +109,18 @@ class TrialResult:
     comparison_notes: list[str] = field(default_factory=list)
     artifacts_path: str = ""
     artifact_paths: dict[str, str] = field(default_factory=dict)
+    benchmark_stage: str = "full"
+    eligible_for_promotion: bool = True
+    screening_decision: str = ""
 
     @property
     def is_viable(self) -> bool:
-        return self.exit_code == 0 and self.passed_guards and self.throughput_steps_per_sec > 0
+        return (
+            self.eligible_for_promotion
+            and self.exit_code == 0
+            and self.passed_guards
+            and self.throughput_steps_per_sec > 0
+        )
 
 
 # Promotion thresholds — a candidate must clear all of these to be recommended.

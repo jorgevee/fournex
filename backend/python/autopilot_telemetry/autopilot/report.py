@@ -42,7 +42,7 @@ def select_winner(
     t = thresholds or PromotionThresholds()
     promoted = [
         r for r in trials
-        if r.is_viable and r.throughput_delta >= t.min_speedup
+        if r.eligible_for_promotion and r.is_viable and r.throughput_delta >= t.min_speedup
     ]
     if not promoted:
         return None, []
@@ -89,14 +89,20 @@ def format_report(report: TuneReport) -> str:
         lines.append(f"  Repeats      : {b.repeat_count}")
 
     lines.append(f"\nTRIAL RESULTS")
-    viable = [r for r in report.trials if r.is_viable]
-    failed = [r for r in report.trials if not r.is_viable]
+    screened = [r for r in report.trials if r.benchmark_stage == "race"]
+    viable = [r for r in report.trials if r.benchmark_stage != "race" and r.is_viable]
+    failed = [r for r in report.trials if r.benchmark_stage != "race" and not r.is_viable]
 
     for r in sorted(viable, key=lambda x: x.throughput_delta, reverse=True):
         delta_str = f"{r.throughput_delta:+.1%}"
         marker = " ✓" if r.throughput_delta >= report.thresholds.min_speedup else ""
         confidence = f"  confidence={r.confidence_label}" if r.repeat_count > 1 else ""
         lines.append(f"  {r.label:<36} {delta_str}{marker}{confidence}")
+
+    for r in sorted(screened, key=lambda x: x.throughput_delta, reverse=True):
+        delta_str = f"{r.throughput_delta:+.1%}"
+        decision = r.screening_decision or "quick race result"
+        lines.append(f"  {r.label:<36} [RACE] {delta_str}  {decision}")
 
     for r in failed:
         reasons = "; ".join(r.guard_failures[:2])

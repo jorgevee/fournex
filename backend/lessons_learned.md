@@ -64,3 +64,39 @@ Date: 4/29/2
 * For tiny-kernel launch-overhead workloads, sampling-based GPU utilization can legitimately report near-zero even when many CUDA kernels ran. The product should describe this as bursty or unreliable GPU activity, not hard 0% active or 100% generic wait waste.
 * Launch-bound reports need kernel-specific evidence from profiler traces whenever possible: kernel count per step, median CUDA kernel duration, small-kernel fraction, and stable-shape context. Without those fields, the UI can sound like it inferred launch overhead only from low utilization.
 * For profiler-only bundles, `--artifact-dir` must point at the workload output directory that contains `profiler_trace.json`; otherwise the collector creates a syntactically valid but diagnostically incomplete run bundle.
+
+Date: 5/1/2026
+
+## ML optimizer systems framing
+
+* The backend optimizer should be framed as solving a hard systems problem only when it does more than observe metrics. The core problem is safely searching the configuration and runtime space of ML workloads to improve throughput, cost, and stability without breaking training quality.
+* The strongest product framing is: the optimizer diagnoses bottlenecks, chooses safe interventions, and produces real speedups without degrading model quality. This is stronger than claiming improved GPU utilization, because utilization alone does not prove useful or safe optimization.
+* The search problem includes scheduling decisions: which experiment to run next, on which machine, with which config, and when to stop it. This is difficult because GPU benchmarks are noisy, jobs are expensive, and early-looking wins can hurt convergence later.
+* Initial scheduling/search surfaces should include batch size sweeps, dataloader worker tuning, mixed precision trials, `torch.compile` trials, CUDA graph eligibility checks, and distributed runtime settings.
+* Memory pressure should be treated as a first-class optimization domain. The backend should detect high reserved-vs-allocated memory, allocation spikes, OOM-prone configs, fragmentation signals, oversized batch sizes, and activation/checkpointing tradeoffs.
+* Memory-related recommendations can include smaller batch size, gradient accumulation, activation checkpointing, allocator configuration changes, and mixed precision. These need risk labels because a safe memory fix may trade throughput, convergence behavior, or numerical stability.
+* Distributed training is a later but high-value optimization area. The backend can eventually optimize all-reduce overhead, scaling efficiency, gradient bucket size, communication/computation overlap, DDP/FSDP settings, straggler GPUs, and network bottlenecks.
+* Kernel and runtime inefficiency should stay in scope. The tiny-kernel workload is a good example because it exposes short kernels, launch overhead, Python loop overhead, CPU-GPU sync points, small tensor ops, and poor fusion opportunities.
+* Runtime-efficiency recommendations should include `torch.compile`, CUDA graphs, batching operations, Triton/custom kernels, fewer Python-side launches, and removal or batching of host synchronization points.
+
+## ML optimizer benchmark strategy
+
+* Benchmarking should happen at three levels: diagnosis accuracy, recommendation quality, and end-to-end optimization impact.
+* Diagnosis accuracy asks whether the backend identified the right bottleneck. Synthetic workloads should have known labels such as launch-overhead bound, input-pipeline bound, memory-bandwidth bound, sync-bound, memory-pressure/OOM-risk, and communication-bound.
+* Diagnosis metrics should include classification accuracy, false positives, false negatives, and confidence calibration.
+* Recommendation quality asks whether the backend suggested the right fix for the diagnosed bottleneck. Expected mappings include launch overhead to compile/fusion/CUDA graphs, dataloader bottlenecks to workers/pinned memory/prefetch tuning, memory bandwidth to mixed precision/layout/fusion, sync-bound workloads to removing `.item()` or reducing host syncs, and distributed bottlenecks to bucket/overlap/sharding changes.
+* Recommendation metrics should include top-1 correctness, top-3 correctness, estimated ROI vs actual ROI, and risk score accuracy.
+* End-to-end impact asks whether the optimizer actually improves a workload under controlled conditions. Metrics should include throughput, latency, GPU activity, cost per training step, memory headroom, crash/OOM rate, convergence quality, final validation loss/accuracy, time-to-target-loss, numerical stability, and reproducibility across seeds.
+* For training workloads, faster is not sufficient. The optimized config must preserve model quality, so every optimization benchmark needs a quality gate instead of reporting speedup alone.
+* The MVP internal eval suite should include 6-8 controlled workloads: many tiny kernels, dataloader bottleneck, CPU-GPU sync bottleneck, memory pressure/fragmentation, memory-bandwidth-heavy model, small-batch underutilization, `torch.compile`-friendly model, and mixed-precision-sensitive model.
+* Each eval case should store the baseline trace, expected diagnosis, expected recommendation, optimized run, measured improvement, and quality check. This becomes the backend's replayable ML optimizer eval suite.
+
+Date: 5/1/2026
+
+## Autopilot scaling upgrades
+
+* Baseline batch size should be inferred from trace summaries when possible, not only supplied by the caller. The shape snapshot path already records per-step `batch_size`, so the runner can unlock batch-size candidates for underutilized workloads without requiring manual `environment["batch_size"]` wiring.
+* A quick race stage is a high-leverage scheduler primitive before full benchmarking. Running all candidates with a short window, then promoting only the best few to the full window, reduces wall-clock search cost without changing the final promotion standard.
+* Race-stage results must not be eligible for promotion. They are useful for screening and reporting, but the final winner should still come from the normal full benchmark with the existing guard, quality, and noise checks.
+* The clean contract is `benchmark_stage="race"` plus `eligible_for_promotion=False` for quick-screened trials. That keeps reports transparent while preventing short-window artifacts from being treated as production recommendations.
+* Racing should automatically disable itself when it is not useful, such as when the candidate count is already at or below the promotion count, repeat benchmarking is enabled, or the configured full measurement window is already as short as the race window.
