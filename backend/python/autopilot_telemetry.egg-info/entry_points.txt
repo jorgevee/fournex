@@ -1,2 +1,0 @@
-[console_scripts]
-frx = autopilot_telemetry.cli:main

@@ -5,7 +5,7 @@ The Common IR is the normalized in-memory representation produced by the analysi
 ## Entry point
 
 ```python
-from autopilot_telemetry.analysis import summarize_run_with_steady_state
+from fournex.analysis import summarize_run_with_steady_state
 
 summary = summarize_run_with_steady_state(events)
 ```

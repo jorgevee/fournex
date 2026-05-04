@@ -461,8 +461,8 @@ EVIDENCE
                     ["torch", "PyTorch importable; reports version"],
                     ["CUDA available", "torch.cuda.is_available(), GPU name and count"],
                     ["nvidia-smi", "nvidia-smi on PATH (required for gpu_metrics.csv)"],
-                    ["autopilot_telemetry.profiler", "SDK profiler module importable"],
-                    ["autopilot_telemetry.analysis", "Analysis pipeline importable"],
+                    ["fournex.profiler", "SDK profiler module importable"],
+                    ["fournex.analysis", "Analysis pipeline importable"],
                   ].map(([k, v]) => (
                     <tr key={k}>
                       <Td mono>{k}</Td>
@@ -478,8 +478,8 @@ EVIDENCE
   [OK]    torch                                2.3.0+cu121
   [OK]    CUDA available                       NVIDIA A100 x1
   [OK]    nvidia-smi                           /usr/bin/nvidia-smi
-  [OK]    autopilot_telemetry.profiler         importable
-  [OK]    autopilot_telemetry.analysis         importable
+  [OK]    fournex.profiler         importable
+  [OK]    fournex.analysis         importable
 
 All checks passed.`}</Pre>
             </Section>
@@ -1045,7 +1045,7 @@ To apply: set the env vars above before launching your workload.`}</Pre>
                 <Code>summary</Code> dict.
               </P>
 
-              <Pre>{`from autopilot_telemetry.analysis import summarize_run_with_steady_state
+              <Pre>{`from fournex.analysis import summarize_run_with_steady_state
 
 summary = summarize_run_with_steady_state(events)
 # summary["steady_state"]["diagnosis"]["user_facing_bottleneck"]
@@ -1156,7 +1156,7 @@ summary = summarize_run_with_steady_state(events)
               </P>
 
               <H3>PyTorch training loop</H3>
-              <Pre>{`from autopilot_telemetry import AutopilotSession
+              <Pre>{`from fournex import AutopilotSession
 
 session = AutopilotSession.from_env()   # reads FRX_* env vars
 

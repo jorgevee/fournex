@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.autopilot.actions import PromotionThresholds, TrialConfig
-from autopilot_telemetry.autopilot.local_executor import LocalTrialExecutor
-from autopilot_telemetry.autopilot.runner import ExperimentRunner
+from fournex.autopilot.actions import PromotionThresholds, TrialConfig
+from fournex.autopilot.local_executor import LocalTrialExecutor
+from fournex.autopilot.runner import ExperimentRunner
 
 
 SUMMARY_WRITER = r"""

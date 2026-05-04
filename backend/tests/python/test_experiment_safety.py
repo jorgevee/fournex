@@ -4,15 +4,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.autopilot.actions import (
+from fournex.autopilot.actions import (
     AutopilotAction,
     CandidateConfig,
     TIER_RISKY,
     TIER_VALIDATED,
     TrialResult,
 )
-from autopilot_telemetry.autopilot.safety import SafetyPolicy, validate_candidate
-from autopilot_telemetry.autopilot.tuners import generate_all_candidates
+from fournex.autopilot.safety import SafetyPolicy, validate_candidate
+from fournex.autopilot.tuners import generate_all_candidates
 
 
 def _baseline(memory_ratio=0.50):

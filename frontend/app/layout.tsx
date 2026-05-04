@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { GoogleAnalytics } from '@next/third-parties/google'
 import { Geist, Geist_Mono } from "next/font/google";
 import Header from "./_components/layout/header";
 import "./globals.css";
@@ -25,6 +26,8 @@ export const metadata: Metadata = {
   },
 };
 
+const googleAnalyticsId = process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -38,6 +41,7 @@ export default function RootLayout({
       <body className="flex min-h-full flex-col">
         <Header />
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        {googleAnalyticsId && <GoogleAnalytics gaId={googleAnalyticsId} />}
       </body>
     </html>
   );

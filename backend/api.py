@@ -13,9 +13,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from autopilot_telemetry.analysis import derive_step_metrics, summarize_step_scope
+from fournex.analysis import derive_step_metrics, summarize_step_scope
 
-app = FastAPI(title="Fournex Autopilot API", version="0.1.0")
+app = FastAPI(title="Fournex API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,

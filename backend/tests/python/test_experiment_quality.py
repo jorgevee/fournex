@@ -4,8 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.autopilot.actions import TrialResult
-from autopilot_telemetry.autopilot.quality import (
+from fournex.autopilot.actions import TrialResult
+from fournex.autopilot.quality import (
     check_quality_regression,
     extract_quality_metrics,
 )

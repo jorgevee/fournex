@@ -33,7 +33,7 @@ def build_extensions() -> list[Extension]:
 
     return [
         Extension(
-            "autopilot_telemetry._autopilot_telemetry_native",
+            "fournex._fournex_native",
             sources=[str(source) for source in sources],
             include_dirs=[str(native_include), pybind11.get_include()],
             language="c++",

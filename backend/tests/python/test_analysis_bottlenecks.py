@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-import autopilot_telemetry as at
+import fournex as at
 
 from analysis_bottleneck_golden_cases import (
     COPY_BOUND_EVENTS,

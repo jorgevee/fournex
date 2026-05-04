@@ -3,16 +3,16 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autopilot-telemetry"
+name = "fournex"
 version = "0.1.0"
-description = "PyTorch telemetry SDK for GPU performance tracing."
+description = "Open-source GPU performance profiler and bottleneck analyzer for PyTorch."
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
 ]
 
 [project.scripts]
-frx = "autopilot_telemetry.cli:main"
+frx = "fournex.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

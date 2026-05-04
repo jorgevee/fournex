@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.autopilot.tuners import generate_all_candidates
+from fournex.autopilot.tuners import generate_all_candidates
 
 
 def _ids(candidates):

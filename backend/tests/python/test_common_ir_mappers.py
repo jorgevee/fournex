@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-import autopilot_telemetry as at
+import fournex as at
 
 from common_ir_golden_cases import (
     DATA_PIPELINE_GOLDEN,

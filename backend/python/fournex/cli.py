@@ -42,12 +42,6 @@ def main(argv: list[str] | None = None) -> int:
         return doctor(args)
     elif args.command == "smoke-test":
         return smoke_test(args)
-    elif args.command == "tune":
-        args.workload_command = _normalize_workload_command(args.workload_command)
-        args.workload_command = _resolve_workload_command(args.workload_command)
-        if not args.workload_command:
-            parser.error("tune requires a workload command after --")
-        return tune(args)
     else:
         parser.print_help()
         return 1
@@ -162,57 +156,6 @@ def collect(args: argparse.Namespace) -> int:
     return exit_code
 
 
-def tune(args: argparse.Namespace) -> int:
-    from .autopilot.actions import PromotionThresholds
-    from .autopilot.benchmark import BenchmarkWindow
-    from .autopilot.quality import QualityPolicy
-    from .autopilot.report import format_report
-    from .autopilot.runner import ExperimentRunner
-    from .autopilot.safety import SafetyPolicy
-
-    environment = _detect_environment()
-    environment["require_quality_checks"] = args.require_quality_checks
-    thresholds = PromotionThresholds(min_speedup=args.min_speedup)
-    safety_policy = SafetyPolicy(
-        allow_risky_actions=args.allow_risky_actions,
-        require_quality_checks_for_precision=args.require_quality_checks,
-    )
-    benchmark_window = BenchmarkWindow(
-        warmup_steps=args.warmup_steps,
-        measurement_steps=args.measure_steps,
-        repeat_count=args.repeat_count,
-        timeout_s=args.time_budget_s,
-    )
-    quality_policy = QualityPolicy(
-        max_final_loss_regression=args.max_final_loss_regression,
-        max_loss_divergence=args.max_loss_divergence,
-        output_abs_tolerance=args.output_abs_tolerance,
-        require_finite_loss=args.require_finite_loss,
-    )
-
-    runner = ExperimentRunner(
-        workload_command=args.workload_command,
-        job_name=args.name,
-        out_dir=args.out,
-        max_trials=args.max_trials,
-        safe_only=args.safe,
-        benchmark_window=benchmark_window,
-        race_enabled=not args.no_race,
-        race_promote_count=args.race_promote_count,
-        race_warmup_steps=args.race_warmup_steps,
-        race_measure_steps=args.race_measure_steps,
-        sample_interval_ms=args.sample_interval_ms,
-        thresholds=thresholds,
-        environment=environment,
-        bottleneck_diagnosis=args.bottleneck,
-        safety_policy=safety_policy,
-        quality_policy=quality_policy,
-        verbose=True,
-    )
-    report = runner.run()
-    print(format_report(report))
-    return 0 if report.improved else 1
-
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="frx")
@@ -253,114 +196,6 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("doctor", help="check environment for frx requirements")
 
     subparsers.add_parser("smoke-test", help="run a synthetic workload and verify end-to-end bundle generation")
-
-    tune_parser = subparsers.add_parser(
-        "tune",
-        help="run safe autopilot: sweep configs and recommend the fastest one",
-    )
-    tune_parser.add_argument("--name", default="frx-tune", help="job name")
-    tune_parser.add_argument("--out", default="runs", help="output directory")
-    tune_parser.add_argument(
-        "--max-trials", type=int, default=12,
-        help="maximum number of candidate configs to try (default: 12)",
-    )
-    tune_parser.add_argument(
-        "--safe", action="store_true", default=True,
-        help="only run Tier-0 safe actions (dataloader knobs); skip batch size and AMP (default)",
-    )
-    tune_parser.add_argument(
-        "--no-safe", dest="safe", action="store_false",
-        help="also run Tier-1 actions: batch size and mixed precision",
-    )
-    tune_parser.add_argument(
-        "--time-budget-s", type=int, default=60,
-        help="max seconds per trial before killing (default: 60)",
-    )
-    tune_parser.add_argument(
-        "--warmup-steps", type=int, default=5,
-        help="steps to skip before measuring throughput (default: 5)",
-    )
-    tune_parser.add_argument(
-        "--measure-steps", type=int, default=20,
-        help="steps to measure per trial (default: 20)",
-    )
-    tune_parser.add_argument(
-        "--repeat-count",
-        type=int,
-        default=1,
-        help="benchmark repeats per baseline and candidate for noise-aware comparison (default: 1)",
-    )
-    tune_parser.add_argument(
-        "--no-race",
-        action="store_true",
-        help="disable quick candidate screening and fully benchmark every candidate",
-    )
-    tune_parser.add_argument(
-        "--race-promote-count",
-        type=int,
-        default=3,
-        help="number of quick-screened candidates to promote to full benchmarking (default: 3)",
-    )
-    tune_parser.add_argument(
-        "--race-warmup-steps",
-        type=int,
-        default=1,
-        help="warmup steps for quick candidate screening (default: 1)",
-    )
-    tune_parser.add_argument(
-        "--race-measure-steps",
-        type=int,
-        default=5,
-        help="measurement steps for quick candidate screening (default: 5)",
-    )
-    tune_parser.add_argument(
-        "--min-speedup", type=float, default=0.08,
-        help="minimum throughput improvement to recommend a config (default: 0.08 = 8%%)",
-    )
-    tune_parser.add_argument(
-        "--bottleneck",
-        default=None,
-        help="optional bottleneck diagnosis to focus candidates, e.g. input_bound, copy_bound, launch_bound",
-    )
-    tune_parser.add_argument(
-        "--allow-risky-actions",
-        action="store_true",
-        help="allow high-risk candidates during pre-run safety validation",
-    )
-    tune_parser.add_argument(
-        "--no-quality-checks",
-        dest="require_quality_checks",
-        action="store_false",
-        default=True,
-        help="do not require quality checks for precision-changing candidates",
-    )
-    tune_parser.add_argument(
-        "--max-final-loss-regression",
-        type=float,
-        default=0.05,
-        help="reject trials whose final loss is worse than baseline by more than this fraction",
-    )
-    tune_parser.add_argument(
-        "--max-loss-divergence",
-        type=float,
-        default=0.50,
-        help="reject trials whose final loss grows from initial loss by more than this fraction",
-    )
-    tune_parser.add_argument(
-        "--output-abs-tolerance",
-        type=float,
-        default=0.005,
-        help="reject output drift checks above this absolute tolerance when reported",
-    )
-    tune_parser.add_argument(
-        "--allow-nonfinite-loss",
-        dest="require_finite_loss",
-        action="store_false",
-        default=True,
-        help="do not reject trials solely for NaN/Inf loss metrics",
-    )
-    tune_parser.add_argument("--sample-interval-ms", type=int, default=1000)
-    tune_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
     return parser
 
@@ -537,7 +372,7 @@ def _append_limited_bundle_warnings(artifacts: dict[str, str], warnings: list[st
     if not has_raw_trace and not has_profiler_trace:
         warnings.append(
             "No SDK trace or profiler trace was captured; this bundle supports limited diagnosis only. "
-            "Instrument the workload with autopilot_telemetry or export a PyTorch profiler trace for richer results."
+            "Instrument the workload with fournex or export a PyTorch profiler trace for richer results."
         )
     elif has_profiler_trace and not has_raw_trace:
         warnings.append(
@@ -646,7 +481,7 @@ def _print_collection_summary(
         print("\nLimited data detected.")
         if missing:
             print(f"Missing recommended artifacts: {missing}")
-        print("Instrument the workload with autopilot_telemetry or pass --artifact-dir for richer results.")
+        print("Instrument the workload with fournex or pass --artifact-dir for richer results.")
     elif manifest.get("missing_recommended"):
         missing = ", ".join(manifest.get("missing_recommended", []))
         print(f"\nMissing optional artifacts: {missing}")
@@ -765,15 +600,15 @@ def doctor(args: argparse.Namespace) -> int:
 
     try:
         from . import profiler as _profiler  # noqa: F401
-        checks.append(("autopilot_telemetry.profiler", "ok", "importable"))
+        checks.append(("fournex.profiler", "ok", "importable"))
     except Exception as exc:
-        checks.append(("autopilot_telemetry.profiler", "fail", str(exc)))
+        checks.append(("fournex.profiler", "fail", str(exc)))
 
     try:
         from .analysis import summarize_run_with_steady_state as _fn  # noqa: F401
-        checks.append(("autopilot_telemetry.analysis", "ok", "importable"))
+        checks.append(("fournex.analysis", "ok", "importable"))
     except Exception as exc:
-        checks.append(("autopilot_telemetry.analysis", "fail", str(exc)))
+        checks.append(("fournex.analysis", "fail", str(exc)))
 
     status_labels = {"ok": "[OK]  ", "warn": "[WARN]", "fail": "[FAIL]", "skip": "[SKIP]"}
     print("\nfrx doctor\n")
@@ -1334,7 +1169,7 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
     else:
         print(f"\nNo recommendations generated.")
         if not primary:
-            print("  Instrument the workload with autopilot_telemetry for richer trace data.")
+            print("  Instrument the workload with fournex for richer trace data.")
 
     event_count = summary.get("event_count", scope_data.get("event_count", 0))
     print(f"\n  ({event_count} trace events analyzed)\n")

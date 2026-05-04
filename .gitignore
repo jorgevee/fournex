@@ -1,0 +1,75 @@
+# ── Claude Code / AI tool config ──────────────────────────────────────────────
+.claude/
+**/CLAUDE.md
+**/AGENTS.md
+
+# ── Internal strategy & planning docs ─────────────────────────────────────────
+OPEN_SOURCE_PLAN.md
+V0_RELEASE_CHECKLIST.md
+backend/overall_product_biz.md
+backend/common_schema_plan.md
+backend/tel_plan.md
+backend/safe_autopilot_actions.md
+backend/experiment_runner.md
+backend/roi_rank_sys.md
+backend/rule_based_rec.md
+backend/lessons_learned.md
+backend/bottleneck_classifier_plan.md
+backend/debugging_system.md
+**/plan.md
+
+# ── GPU run artifacts & traces ────────────────────────────────────────────────
+frx-job-run/
+**/gpu-job-run/
+backend/traces/
+**/traces/
+
+# ── Notebooks ─────────────────────────────────────────────────────────────────
+**/notebooks/
+**/*.ipynb
+
+# ── Proprietary modules (not open-sourced) ────────────────────────────────────
+backend/python/fournex/autopilot/
+backend/python/fournex/recommendations/engine.py
+backend/python/fournex/recommendations/signals.py
+
+# ── Python ────────────────────────────────────────────────────────────────────
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/venv/
+**/.venv/
+**/*.egg-info/
+**/dist/
+**/build/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.so
+**/*.pyd
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+**/node_modules/
+**/.next/
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/tsconfig.tsbuildinfo
+
+# ── C++ build artifacts ───────────────────────────────────────────────────────
+**/CMakeCache.txt
+**/CMakeFiles/
+**/Makefile
+**/cmake_install.cmake
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

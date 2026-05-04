@@ -6,7 +6,7 @@
 
 ```
 workload process
-    └── autopilot_telemetry SDK (Python)
+    └── fournex SDK (Python)
             └── raw/trace.jsonl  (SDK events, JSONL)
 
 frx collect (host process)
@@ -18,7 +18,7 @@ frx collect (host process)
 
 ## Components
 
-### CLI (`autopilot_telemetry/cli.py`)
+### CLI (`fournex/cli.py`)
 
 Four subcommands:
 
@@ -29,11 +29,11 @@ Four subcommands:
 | `doctor` | Check that all runtime dependencies are present |
 | `smoke-test` | Write a synthetic trace and verify the end-to-end pipeline |
 
-### SDK (`autopilot_telemetry/sdk.py`, `profiler.py`)
+### SDK (`fournex/sdk.py`, `profiler.py`)
 
 Instruments a running PyTorch workload. Emits structured events to `raw/trace.jsonl` via env-var path injection (`FRX_RAW_TRACE_PATH`). Events cover step boundaries, DataLoader waits, H2D copies, phase spans (forward/backward/optimizer), sync waits, and shape snapshots.
 
-### Analysis pipeline (`autopilot_telemetry/analysis.py`)
+### Analysis pipeline (`fournex/analysis.py`)
 
 Pure-Python, no GPU required. Accepts the SDK event stream or a reconstructed event list from a Chrome-format profiler trace. Produces a `summary` dict with:
 
@@ -61,9 +61,9 @@ Scores these bottleneck types from the step timing data:
 
 `build_diagnosis_result` emits both `primary_bottleneck` (internal top signal) and `user_facing_bottleneck` (root-cause label, substituted when the internal top signal is a symptom like `underutilized_gpu`).
 
-### Recommendation engine (`recommendations/engine.py`)
+### Recommendation engine (`recommendations/`)
 
-Rule + catalog system. Rules (YAML) match bottleneck labels and signal values; the catalog (YAML) defines actionable recommendations with effort, risk, and speedup estimates. ROI scores rank recommendations.
+Rule + catalog system. Rules (`rules.yaml`) match bottleneck labels to recommendation IDs; the catalog (`catalog.yaml`) defines each recommendation with title, effort, risk, and speedup estimates. Matched recommendations are sorted by impact and effort.
 
 ### Profiler trace importer (`cli.py:_events_from_profiler_bundle`)
 

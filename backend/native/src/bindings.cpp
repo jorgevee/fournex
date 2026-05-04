@@ -136,7 +136,7 @@ void EndSpan(const py::dict& event) {
 }  // namespace
 }  // namespace autopilot::telemetry
 
-PYBIND11_MODULE(_autopilot_telemetry_native, module) {
+PYBIND11_MODULE(_fournex_native, module) {
     module.doc() = "Native telemetry engine bindings";
     module.attr("SCHEMA_VERSION") = autopilot::telemetry::kSchemaVersion;
     module.def("init", &autopilot::telemetry::InitEngine, py::arg("job_name"),

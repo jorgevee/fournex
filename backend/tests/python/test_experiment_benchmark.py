@@ -5,8 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.autopilot.benchmark import BenchmarkWindow, apply_benchmark_window
-from autopilot_telemetry.autopilot.guards import extract_metrics_from_summary
+from fournex.autopilot.benchmark import BenchmarkWindow, apply_benchmark_window
+from fournex.autopilot.guards import extract_metrics_from_summary
 
 
 def _summary_with_steps():

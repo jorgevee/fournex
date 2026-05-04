@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from autopilot_telemetry.cli import main, _resolve_workload_command
+from fournex.cli import main, _resolve_workload_command
 
 
 def _test_out_dir(name: str) -> Path:
@@ -94,7 +94,7 @@ def test_collect_auto_persists_sdk_artifacts() -> None:
     out_dir = _test_out_dir("sdk")
     code = (
         f"import sys; sys.path.insert(0, {str(ROOT / 'python')!r})\n"
-        "import autopilot_telemetry as at\n"
+        "import fournex as at\n"
         "at.init()\n"
         "with at.step_context(step=1):\n"
         "    with at.phase('forward', step=1):\n"
