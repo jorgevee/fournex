@@ -222,6 +222,21 @@ def test_underutilized_mixed_precision_already_enabled_suppresses_amp_rec() -> N
     assert "rec_util_mixed_precision" not in ids
 
 
+def test_underutilized_does_not_fire_when_input_pipeline_stalled() -> None:
+    # When input pipeline is the real cause, underutilized_gpu rules are suppressed
+    events = (
+        _make_step_events(1, dataloader_ns=45, step_wall_ns=100, gpu_util=30.0) +
+        _make_step_events(2, dataloader_ns=42, step_wall_ns=100, gpu_util=28.0)
+    )
+    summary = at.summarize_run(events)
+    ids = _rec_ids(summary)
+
+    # Underutilized GPU rules are suppressed when input_pipeline_stalled is true
+    assert "rec_util_mixed_precision" not in ids
+    assert "rec_util_increase_batch" not in ids
+    # But input pipeline recs should still appear
+    assert "rec_input_num_workers" in ids
+
 
 # ── Case 5: Launch bound ──────────────────────────────────────────────────────
 
@@ -234,6 +249,23 @@ def test_launch_bound_stable_shapes_recommends_compile_and_cuda_graphs() -> None
     assert "rec_launch_cuda_graphs" in ids
     assert "rec_launch_fuse_ops" in ids
 
+
+
+def test_launch_bound_unstable_shapes_suppresses_cuda_graphs() -> None:
+    # Profiler data + shape instability → CUDA Graphs unsafe, different rule fires
+    events = (
+        _make_step_events(1, profiler_exported=True, step_wall_ns=100, gpu_util=30.0,
+                          shapes={"batch_size": 16, "sequence_length": 128, "shapes": {"x": [16, 128]}}) +
+        _make_step_events(2, profiler_exported=True, step_wall_ns=100, gpu_util=32.0,
+                          shapes={"batch_size": 16, "sequence_length": 256, "shapes": {"x": [16, 256]}}) +
+        _make_step_events(3, profiler_exported=True, step_wall_ns=100, gpu_util=28.0,
+                          shapes={"batch_size": 16, "sequence_length": 128, "shapes": {"x": [16, 128]}})
+    )
+    summary = at.summarize_run(events)
+    ids = _rec_ids(summary)
+
+    assert "rec_launch_torch_compile" in ids
+    assert "rec_launch_cuda_graphs" not in ids
 
 
 def test_launch_bound_no_profiler_data_recommends_inspect_first() -> None:
@@ -359,6 +391,15 @@ def test_recommendation_score_aliases_roi_score() -> None:
     for rec in summary["diagnosis"]["recommendations"]:
         assert rec["score"] == rec["roi_score"]
 
+
+
+def test_roi_components_are_normalized() -> None:
+    summary = at.summarize_run(INPUT_BOUND_EVENTS)
+    required_components = {"speedup", "confidence", "cost_savings", "ease", "safety", "priority_boost"}
+    for rec in summary["diagnosis"]["recommendations"]:
+        assert set(rec["roi_components"]) == required_components
+        for value in rec["roi_components"].values():
+            assert 0.0 <= value <= 1.0
 
 
 def test_recommendation_tier_consistent_with_score_and_practicality() -> None:

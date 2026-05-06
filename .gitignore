@@ -1,3 +1,6 @@
+# ── Hosted product (not part of OSS engine) ───────────────────────────────────
+frontend/
+
 # ── Claude Code / AI tool config ──────────────────────────────────────────────
 .claude/
 **/CLAUDE.md
@@ -27,11 +30,6 @@ backend/traces/
 # ── Notebooks ─────────────────────────────────────────────────────────────────
 **/notebooks/
 **/*.ipynb
-
-# ── Proprietary modules (not open-sourced) ────────────────────────────────────
-backend/python/fournex/autopilot/
-backend/python/fournex/recommendations/engine.py
-backend/python/fournex/recommendations/signals.py
 
 # ── Python ────────────────────────────────────────────────────────────────────
 **/__pycache__/
