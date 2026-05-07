@@ -214,7 +214,10 @@ def tune(args: argparse.Namespace) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="frx")
+    import sys
+    _stem = Path(sys.argv[0]).stem.lower().replace(".exe", "")
+    prog = "fournex" if "fournex" in _stem else "frx"
+    parser = argparse.ArgumentParser(prog=prog)
     subparsers = parser.add_subparsers(dest="command")
 
     collect_parser = subparsers.add_parser("collect", help="run a workload and package a run bundle")

@@ -6,13 +6,42 @@ build-backend = "setuptools.build_meta"
 name = "fournex"
 version = "0.1.0"
 description = "Open-source GPU performance profiler and bottleneck analyzer for PyTorch."
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Fournex", email = "hello@fournex.com" },
+]
+keywords = [
+    "pytorch", "gpu", "profiling", "cuda", "performance",
+    "mlops", "bottleneck", "optimization", "training",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Monitoring",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
 dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://fournex.com"
+Repository = "https://github.com/fournex/fournex"
+Documentation = "https://fournex.com/docs"
+"Bug Tracker" = "https://github.com/fournex/fournex/issues"
+
 [project.scripts]
 frx = "fournex.cli:main"
+fournex = "fournex.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
