@@ -2,7 +2,7 @@
 
 **Open-source GPU performance profiler and bottleneck analyzer for PyTorch.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/fournex/fournex/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/jorgevee/fournex/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
 Fournex wraps your training script, collects GPU telemetry, and tells you exactly what is slowing it down — with ranked, actionable recommendations.
@@ -60,6 +60,6 @@ frx tune --resume runs/tune-<id> -- python train.py
 
 ## Links
 
-- [GitHub](https://github.com/fournex/fournex)
+- [GitHub](https://github.com/jorgevee/fournex)
 - [Documentation](https://fournex.com/docs)
 - [Website](https://fournex.com)

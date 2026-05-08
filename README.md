@@ -171,7 +171,7 @@ frx collect --name prof-run -- python train.py
 ## Development setup
 
 ```bash
-git clone https://github.com/fournex/fournex.git
+git clone https://github.com/jorgevee/fournex.git
 cd fournex
 pip install -e backend/python
 frx doctor
