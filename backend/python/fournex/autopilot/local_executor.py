@@ -25,6 +25,7 @@ class LocalTrialExecutor:
         benchmark_window: BenchmarkWindow | None = None,
         sample_interval_ms: int = 1000,
         thresholds: PromotionThresholds | None = None,
+        reuse_context: dict[str, Any] | None = None,
         verbose: bool = True,
     ) -> None:
         self.workload_command = workload_command
@@ -41,6 +42,7 @@ class LocalTrialExecutor:
         self.repeat_count = self.benchmark_window.repeat_count
         self.sample_interval_ms = sample_interval_ms
         self.thresholds = thresholds or PromotionThresholds()
+        self.reuse_context = reuse_context or {}
         self.verbose = verbose
 
     def run(self, trial_config: TrialConfig, trial_dir: Path) -> TrialResult:
@@ -251,6 +253,9 @@ class LocalTrialExecutor:
         return summary
 
     def _write_config(self, trial_config: TrialConfig, path: Path) -> None:
+        path.write_text(self.config_text(trial_config), encoding="utf-8")
+
+    def config_text(self, trial_config: TrialConfig) -> str:
         payload = {
             "name": trial_config.name,
             "label": trial_config.display_label,
@@ -259,8 +264,11 @@ class LocalTrialExecutor:
             "env": trial_config.env,
             "workload_command": self.workload_command,
             "benchmark_window": self.benchmark_window.to_dict(),
+            "sample_interval_ms": self.sample_interval_ms,
+            "thresholds": asdict(self.thresholds),
+            "reuse_context": self.reuse_context,
         }
-        path.write_text(_simple_yaml(payload), encoding="utf-8")
+        return _simple_yaml(payload)
 
     def _write_benchmark_window(self, path: Path) -> None:
         path.write_text(json.dumps(self.benchmark_window.to_dict(), indent=2), encoding="utf-8")

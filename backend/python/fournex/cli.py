@@ -206,6 +206,7 @@ def tune(args: argparse.Namespace) -> int:
         bottleneck_diagnosis=args.bottleneck,
         safety_policy=safety_policy,
         quality_policy=quality_policy,
+        resume_dir=args.resume,
         verbose=True,
     )
     report = runner.run()
@@ -262,6 +263,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tune_parser.add_argument("--name", default="frx-tune", help="job name")
     tune_parser.add_argument("--out", default="runs", help="output directory")
+    tune_parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="TUNE_DIR",
+        help="resume a tune directory and reuse matching trial artifacts",
+    )
     tune_parser.add_argument("--max-trials", type=int, default=12, help="maximum candidate configs to try (default: 12)")
     tune_parser.add_argument("--safe", action="store_true", default=True, help="only Tier-0 safe actions (default)")
     tune_parser.add_argument("--no-safe", dest="safe", action="store_false", help="also run Tier-1 actions: batch size and AMP")

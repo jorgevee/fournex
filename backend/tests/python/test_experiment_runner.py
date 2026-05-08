@@ -159,6 +159,33 @@ summary_path.write_text(json.dumps({
 }), encoding="utf-8")
 """
 
+COUNTER_WRITER = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+counter_path = Path(sys.argv[1])
+count = int(counter_path.read_text(encoding="utf-8")) if counter_path.exists() else 0
+counter_path.write_text(str(count + 1), encoding="utf-8")
+is_trial = os.environ.get("FRX_PIN_MEMORY") == "true"
+throughput = 15.0 if is_trial else 10.0
+summary_path = Path(os.environ["FRX_DERIVED_SUMMARY_PATH"])
+summary_path.parent.mkdir(parents=True, exist_ok=True)
+summary_path.write_text(json.dumps({
+    "steady_state": {
+        "step_count": 5,
+        "run_summary": {
+            "throughput_steps_per_sec": throughput,
+            "average_gpu_utilization_pct": 51.0,
+            "step_time_avg_ns": int(1_000_000_000 / throughput),
+            "memory_pressure_peak_ratio": 0.25,
+            "dominant_stall_type": "none"
+        }
+    }
+}), encoding="utf-8")
+"""
+
 
 def _workspace_tmp(name: str) -> Path:
     path = ROOT / "traces" / "cli_test_runs" / "experiment_runner" / f"{name}-{uuid.uuid4().hex[:8]}"
@@ -229,6 +256,43 @@ def test_experiment_runner_persists_json_and_markdown_reports():
     assert (tune_dir / "autopilot_report.json").exists()
     assert (tune_dir / "report.md").exists()
     assert report.total_trials == 1
+
+
+def test_experiment_runner_resume_reuses_matching_artifacts():
+    tmp_path = _workspace_tmp("runner-resume")
+    counter_path = tmp_path / "execution_count.txt"
+    command = [sys.executable, "-c", COUNTER_WRITER, str(counter_path)]
+
+    runner = ExperimentRunner(
+        workload_command=command,
+        job_name="unit-runner-resume",
+        out_dir=str(tmp_path),
+        max_trials=1,
+        time_budget_s=5,
+        thresholds=PromotionThresholds(min_speedup=0.01, require_sufficient_steps=3),
+        environment={"cpu_count": 2},
+        verbose=False,
+    )
+    first_report = runner.run()
+    tune_dir = next(tmp_path.glob("tune-*"))
+
+    resumed = ExperimentRunner(
+        workload_command=command,
+        job_name="unit-runner-resume",
+        out_dir=str(tmp_path),
+        max_trials=1,
+        time_budget_s=5,
+        thresholds=PromotionThresholds(min_speedup=0.01, require_sufficient_steps=3),
+        environment={"cpu_count": 2},
+        resume_dir=str(tune_dir),
+        verbose=False,
+    )
+    second_report = resumed.run()
+
+    assert counter_path.read_text(encoding="utf-8") == "2"
+    assert first_report.baseline.throughput_steps_per_sec == second_report.baseline.throughput_steps_per_sec
+    assert first_report.trials[0].throughput_steps_per_sec == second_report.trials[0].throughput_steps_per_sec
+    assert second_report.winner is not None
 
 
 def test_experiment_runner_records_unsafe_candidate_without_executing_it():

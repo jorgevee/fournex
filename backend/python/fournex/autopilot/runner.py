@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,7 @@ class ExperimentRunner:
         bottleneck_diagnosis: str | dict[str, Any] | None = None,
         safety_policy: SafetyPolicy | None = None,
         quality_policy: QualityPolicy | None = None,
+        resume_dir: str | None = None,
         verbose: bool = True,
     ) -> None:
         self.workload_command = workload_command
@@ -79,24 +80,33 @@ class ExperimentRunner:
         self.bottleneck_diagnosis = bottleneck_diagnosis
         self.safety_policy = safety_policy or SafetyPolicy()
         self.quality_policy = quality_policy or QualityPolicy()
+        self.resume_dir = Path(resume_dir) if resume_dir else None
+        self.reuse_artifacts = self.resume_dir is not None
         self.verbose = verbose
 
     def run(self) -> TuneReport:
-        tune_id = f"tune-{uuid.uuid4().hex[:8]}"
-        tune_dir = self.out_dir / tune_id
+        if self.resume_dir is not None:
+            tune_dir = self.resume_dir
+            tune_id = tune_dir.name
+        else:
+            tune_id = f"tune-{uuid.uuid4().hex[:8]}"
+            tune_dir = self.out_dir / tune_id
         tune_dir.mkdir(parents=True, exist_ok=True)
         executor = self._build_executor()
 
-        self._log(f"\nfrx autopilot - starting tune run {tune_id}")
+        action = "resuming" if self.reuse_artifacts else "starting"
+        self._log(f"\nfrx autopilot - {action} tune run {tune_id}")
         self._log(f"Workload : {' '.join(self.workload_command)}")
         self._log(f"Max trials: {self.max_trials}  |  Time budget: {self.time_budget_s}s/trial\n")
 
         self._log("Running baseline...")
-        baseline = self._run_repeated_trial(
+        baseline, baseline_reused = self._run_repeated_trial(
             executor,
             TrialConfig(name="baseline", label="baseline", patch={"baseline": True}),
             tune_dir / "baseline",
         )
+        if baseline_reused:
+            self._log("  Baseline: reused existing artifacts")
         self._log(
             f"  Baseline: {baseline.throughput_steps_per_sec:.2f} steps/sec  "
             f"(exit={baseline.exit_code}, steps={baseline.step_count})\n"
@@ -161,6 +171,7 @@ class ExperimentRunner:
             benchmark_window=self.benchmark_window,
             sample_interval_ms=self.sample_interval_ms,
             thresholds=self.thresholds,
+            reuse_context=self._reuse_context(),
             verbose=self.verbose,
         )
 
@@ -172,8 +183,15 @@ class ExperimentRunner:
             benchmark_window=window,
             sample_interval_ms=self.sample_interval_ms,
             thresholds=self.thresholds,
+            reuse_context=self._reuse_context(),
             verbose=self.verbose,
         )
+
+    def _reuse_context(self) -> dict[str, Any]:
+        return {
+            "environment": self.environment,
+            "quality_policy": asdict(self.quality_policy),
+        }
 
     def _race_window(self) -> BenchmarkWindow:
         warmup_steps = min(self.benchmark_window.warmup_steps, max(0, self.race_warmup_steps))
@@ -279,13 +297,17 @@ class ExperimentRunner:
             policy=self.safety_policy,
         )
         if validation.passed:
-            result = self._run_repeated_trial(executor, trial_config, trial_dir)
+            result, reused = self._run_repeated_trial(executor, trial_config, trial_dir)
         else:
             result = executor.record_skipped(
                 trial_config,
                 trial_dir,
                 validation.reasons,
             )
+            reused = False
+        if reused:
+            self._log("       reused existing artifacts")
+            self._reset_cached_comparison_state(result)
         self._annotate_delta(result, baseline)
         result.benchmark_stage = stage
         result.eligible_for_promotion = stage == "full"
@@ -306,23 +328,33 @@ class ExperimentRunner:
         executor: LocalTrialExecutor,
         trial_config: TrialConfig,
         trial_dir: Path,
-    ) -> TrialResult:
-        return executor.run(trial_config, trial_dir)
+    ) -> tuple[TrialResult, bool]:
+        cached = self._load_reusable_result(executor, trial_config, trial_dir)
+        if cached is not None:
+            return cached, True
+        return executor.run(trial_config, trial_dir), False
 
     def _run_repeated_trial(
         self,
         executor: LocalTrialExecutor,
         trial_config: TrialConfig,
         trial_dir: Path,
-    ) -> TrialResult:
+    ) -> tuple[TrialResult, bool]:
+        cached = self._load_reusable_result(executor, trial_config, trial_dir)
+        if cached is not None:
+            return cached, True
+
         if self.repeat_count <= 1:
             return self._run_trial(executor, trial_config, trial_dir)
 
         trial_dir.mkdir(parents=True, exist_ok=True)
         repeats: list[TrialResult] = []
+        reused_repeats = 0
         for repeat_index in range(1, self.repeat_count + 1):
             repeat_dir = trial_dir / f"repeat_{repeat_index:03d}"
-            repeats.append(self._run_trial(executor, trial_config, repeat_dir))
+            repeat_result, reused = self._run_trial(executor, trial_config, repeat_dir)
+            repeats.append(repeat_result)
+            reused_repeats += int(reused)
 
         aggregate = aggregate_repeats(
             config_id=trial_config.config_id,
@@ -332,7 +364,7 @@ class ExperimentRunner:
             env_vars=trial_config.env,
         )
         self._write_aggregate_metrics(aggregate, trial_dir)
-        return aggregate
+        return aggregate, reused_repeats == self.repeat_count
 
     def _annotate_delta(self, result: TrialResult, baseline: TrialResult) -> None:
         annotate_noise_comparison(baseline, result, self.thresholds)
@@ -368,6 +400,51 @@ class ExperimentRunner:
         payload.pop("raw_summary", None)
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    def _load_reusable_result(
+        self,
+        executor: LocalTrialExecutor,
+        trial_config: TrialConfig,
+        trial_dir: Path,
+    ) -> TrialResult | None:
+        if not self.reuse_artifacts:
+            return None
+
+        config_path = trial_dir / "config.yaml"
+        benchmark_path = trial_dir / "benchmark_window.json"
+        metrics_path = trial_dir / "metrics.json"
+        if not config_path.exists() or not benchmark_path.exists() or not metrics_path.exists():
+            return None
+
+        try:
+            if config_path.read_text(encoding="utf-8") != executor.config_text(trial_config):
+                return None
+            benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+            if benchmark != executor.benchmark_window.to_dict():
+                return None
+            payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+            if payload.get("exit_code") == -3:
+                return None
+        except Exception:
+            return None
+
+        result = _trial_result_from_payload(payload)
+        result.artifacts_path = str(trial_dir)
+        result.artifact_paths = executor._artifact_paths(trial_dir)
+        summary_path = trial_dir / "derived" / "summary.json"
+        if summary_path.exists():
+            try:
+                result.raw_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                result.raw_summary = {}
+        return result
+
+    @staticmethod
+    def _reset_cached_comparison_state(result: TrialResult) -> None:
+        result.passed_guards = True
+        result.guard_failures = []
+        result.comparison_notes = []
+        result.throughput_delta = 0.0
+
     def _log(self, msg: str) -> None:
         if self.verbose:
             print(msg)
@@ -383,6 +460,12 @@ def _result_tag(result: TrialResult, thresholds: PromotionThresholds) -> str:
     if result.throughput_delta >= thresholds.min_speedup:
         return "[PASS]"
     return "[    ]"
+
+
+def _trial_result_from_payload(payload: dict[str, Any]) -> TrialResult:
+    names = {field.name for field in fields(TrialResult)}
+    values = {name: payload[name] for name in names if name in payload}
+    return TrialResult(**values)
 
 
 def _diagnosis_from_summary(summary: dict[str, Any]) -> dict[str, Any] | None:

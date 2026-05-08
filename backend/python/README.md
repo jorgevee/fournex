@@ -50,6 +50,14 @@ frx tune --safe --max-trials 12 -- python train.py
 
 Fournex sweeps DataLoader and runtime configs, benchmarks each one, and recommends the fastest safe candidate — without changing your code.
 
+Interrupted or repeated tune runs can reuse completed trial artifacts:
+
+```bash
+frx tune --resume runs/tune-<id> -- python train.py
+```
+
+`--resume` reuses a trial only when the saved `config.yaml`, `benchmark_window.json`, and `metrics.json` match the current workload command and benchmark settings.
+
 ## Links
 
 - [GitHub](https://github.com/fournex/fournex)
