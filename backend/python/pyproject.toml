@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fournex"
-version = "0.1.1"
+version = "0.1.2"
 description = "Open-source GPU performance profiler and bottleneck analyzer for PyTorch."
 readme = "README.md"
 requires-python = ">=3.10"
