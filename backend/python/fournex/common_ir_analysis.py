@@ -5,6 +5,7 @@ from statistics import mean
 from typing import Any
 
 from .common_ir import AnnotationRecord, EventRecord, MetricRecord, RunRecord
+from .kernel_inspector import summarize_kernel_launches
 
 
 def summarize_ir_run(run: RunRecord) -> dict[str, Any]:
@@ -66,6 +67,7 @@ def derive_ir_run_summary(
         "communication_time_ns": sum(step["communication_time_ns"] for step in per_step),
         "data_pipeline_time_ns": sum(step["data_pipeline_time_ns"] for step in per_step),
         "compute_time_ns": sum(step["compute_time_ns"] for step in per_step),
+        "kernel_launch_summary": summarize_kernel_launches(events),
     }
 
 

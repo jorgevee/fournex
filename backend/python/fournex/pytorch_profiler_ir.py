@@ -153,6 +153,7 @@ def _canonical_attrs(record: PytorchProfilerTraceEvent) -> dict[str, Any]:
     if _canonical_event_family(record) == "kernel":
         attrs["kernel_name_raw"] = record.name
         attrs["kernel_class_canonical"] = _kernel_class(record.name)
+        attrs.update(_kernel_launch_attrs(record.args))
     if _canonical_event_family(record) == "distributed":
         attrs["collective_op"] = _collective_op(record.name)
     if _canonical_event_family(record) == "memory" and "memcpy" in record.name.lower():
@@ -173,6 +174,30 @@ def _kernel_class(name: str) -> str:
     if "copy" in lowered or "memcpy" in lowered:
         return "memcpy"
     return "unknown"
+
+
+def _kernel_launch_attrs(args: dict[str, Any]) -> dict[str, Any]:
+    attrs: dict[str, Any] = {}
+    mappings = {
+        "registers_per_thread": ("registers_per_thread", "Registers Per Thread", "regs_per_thread"),
+        "shared_memory_per_block_bytes": (
+            "shared_memory_per_block_bytes",
+            "Shared Memory Per Block",
+            "shared_mem_per_block",
+        ),
+        "threads_per_block": ("threads_per_block", "Threads Per Block", "block_size"),
+        "block_x": ("block_x", "Block X", "blockDim.x"),
+        "block_y": ("block_y", "Block Y", "blockDim.y"),
+        "block_z": ("block_z", "Block Z", "blockDim.z"),
+        "grid_x": ("grid_x", "Grid X", "gridDim.x"),
+        "grid_y": ("grid_y", "Grid Y", "gridDim.y"),
+        "grid_z": ("grid_z", "Grid Z", "gridDim.z"),
+    }
+    for target, aliases in mappings.items():
+        value = _first_present(args, aliases)
+        if value is not None:
+            attrs[target] = value
+    return attrs
 
 
 def _collective_op(name: str) -> str:
@@ -254,3 +279,11 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _first_present(args: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = args.get(key)
+        if value not in (None, ""):
+            return value
+    return None

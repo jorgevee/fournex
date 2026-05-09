@@ -100,7 +100,7 @@ runs/
 
 ## Data flow: analyze
 
-1. `analyze <run-dir>` calls `_load_or_generate_summary`, which checks in order:
+1. `analyze <run-dir-or-zip>` extracts zip bundles to a temporary directory when needed, then calls `_load_or_generate_summary`, which checks in order:
    - `derived/summary.json` (pre-analyzed, preferred)
    - `raw/trace.jsonl` (re-analyzes on the fly)
    - `profiler/profiler_trace.json` + `gpu_metrics.csv` (imports and analyzes)

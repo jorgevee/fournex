@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import zipfile
@@ -645,25 +646,37 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 def analyze(args: argparse.Namespace) -> int:
     run_path = Path(args.run_path)
 
-    if run_path.is_file() and run_path.suffix == ".zip":
-        print("Error: zip analysis not yet supported. Unzip the bundle first.", file=sys.stderr)
-        return 1
+    temp_context = None
+    if run_path.is_file() and run_path.suffix.lower() == ".zip":
+        temp_context = tempfile.TemporaryDirectory(prefix="frx_analyze_")
+        try:
+            run_path = _extract_zip_run_bundle(run_path, Path(temp_context.name))
+        except ValueError as exc:
+            temp_context.cleanup()
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     if not run_path.is_dir():
+        if temp_context is not None:
+            temp_context.cleanup()
         print(f"Error: run directory not found: {run_path}", file=sys.stderr)
         return 1
 
-    summary = _load_or_generate_summary(run_path)
-    if summary is None:
-        print("No trace data found in bundle. Cannot generate analysis.", file=sys.stderr)
-        print(f"Expected: {run_path / 'raw' / 'trace.jsonl'} or {run_path / 'derived' / 'summary.json'}", file=sys.stderr)
-        return 1
+    try:
+        summary = _load_or_generate_summary(run_path)
+        if summary is None:
+            print("No trace data found in bundle. Cannot generate analysis.", file=sys.stderr)
+            print(f"Expected: {run_path / 'raw' / 'trace.jsonl'} or {run_path / 'derived' / 'summary.json'}", file=sys.stderr)
+            return 1
 
-    if args.output_json:
-        print(json.dumps(summary, indent=2))
+        if args.output_json:
+            print(json.dumps(summary, indent=2))
+            return 0
+
+        _print_analysis_report(run_path, summary, scope=args.scope)
         return 0
-
-    _print_analysis_report(run_path, summary, scope=args.scope)
-    return 0
+    finally:
+        if temp_context is not None:
+            temp_context.cleanup()
 
 
 def doctor(args: argparse.Namespace) -> int:
@@ -719,6 +732,53 @@ def doctor(args: argparse.Namespace) -> int:
     else:
         print("\nSome checks failed. See [FAIL] lines above.\n")
         return 1
+
+
+def _extract_zip_run_bundle(zip_path: Path, destination: Path) -> Path:
+    destination.mkdir(parents=True, exist_ok=True)
+    destination_root = destination.resolve()
+
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            for member in archive.infolist():
+                _validate_zip_member_path(member.filename, destination_root)
+            archive.extractall(destination)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(f"invalid zip bundle: {zip_path}") from exc
+
+    if _looks_like_run_dir(destination):
+        return destination
+
+    top_level_dirs = [path for path in destination.iterdir() if path.is_dir()]
+    run_dirs = [path for path in top_level_dirs if _looks_like_run_dir(path)]
+    if len(run_dirs) == 1:
+        return run_dirs[0]
+
+    raise ValueError(
+        "zip bundle does not contain a recognizable run directory "
+        "(expected derived/summary.json, raw/trace.jsonl, or profiler artifacts)"
+    )
+
+
+def _validate_zip_member_path(member_name: str, destination_root: Path) -> None:
+    normalized = member_name.replace("\\", "/")
+    target = (destination_root / normalized).resolve()
+    parts = Path(normalized).parts
+
+    if not normalized or Path(normalized).is_absolute() or ".." in parts:
+        raise ValueError(f"unsafe zip member path: {member_name}")
+    if target != destination_root and destination_root not in target.parents:
+        raise ValueError(f"unsafe zip member path: {member_name}")
+
+
+def _looks_like_run_dir(path: Path) -> bool:
+    return (
+        (path / "derived" / "summary.json").is_file()
+        or (path / "raw" / "trace.jsonl").is_file()
+        or any((path / "profiler").glob("*.json"))
+        or (path / "metadata.json").is_file()
+        or (path / "manifest.json").is_file()
+    )
 
 
 def _load_or_generate_summary(run_dir: Path) -> dict[str, Any] | None:

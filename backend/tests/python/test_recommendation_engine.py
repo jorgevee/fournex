@@ -11,6 +11,8 @@ builds minimal inline events for cases that need specific signal combinations.
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
@@ -22,7 +24,9 @@ from analysis_bottleneck_golden_cases import (
     COPY_BOUND_EVENTS,
     INPUT_BOUND_EVENTS,
     LAUNCH_BOUND_EVENTS,
+    LAUNCH_BOUND_TINY_KERNEL_EVENTS,
     MEMORY_PRESSURE_EVENTS,
+    MIXED_SIGNAL_EVENTS,
     SHAPE_INSTABILITY_EVENTS,
     SPARSE_TELEMETRY_EVENTS,
     SYNC_BOUND_EVENTS,
@@ -42,6 +46,64 @@ def _top_rec_id(summary: dict) -> str:
 
 def _rec_by_id(summary: dict, rec_id: str) -> dict | None:
     return next((r for r in summary["diagnosis"]["recommendations"] if r["id"] == rec_id), None)
+
+
+GOLDEN_RECOMMENDATION_CASES = [
+    (
+        "input_bound",
+        INPUT_BOUND_EVENTS,
+        {"rec_input_num_workers", "rec_input_pinned_memory", "rec_input_prefetch_factor"},
+        {"rec_launch_torch_compile", "rec_sync_remove_item", "rec_mem_reduce_batch"},
+    ),
+    (
+        "copy_bound",
+        COPY_BOUND_EVENTS,
+        {"rec_copy_pinned_memory", "rec_copy_overlap"},
+        {"rec_input_num_workers", "rec_sync_remove_item", "rec_mem_reduce_batch"},
+    ),
+    (
+        "sync_bound",
+        SYNC_BOUND_EVENTS,
+        {"rec_sync_remove_item", "rec_sync_batch_logging"},
+        {"rec_input_num_workers", "rec_copy_pinned_memory", "rec_launch_cuda_graphs"},
+    ),
+    (
+        "small_batch_underutilized",
+        UNDERUTILIZED_GPU_EVENTS,
+        {"rec_util_mixed_precision", "rec_util_increase_batch"},
+        {"rec_input_num_workers", "rec_copy_pinned_memory", "rec_sync_remove_item"},
+    ),
+    (
+        "launch_bound",
+        LAUNCH_BOUND_EVENTS,
+        {"rec_launch_torch_compile", "rec_launch_cuda_graphs", "rec_launch_fuse_ops"},
+        {"rec_input_num_workers", "rec_copy_pinned_memory", "rec_sync_remove_item"},
+    ),
+    (
+        "launch_bound_tiny_kernel",
+        LAUNCH_BOUND_TINY_KERNEL_EVENTS,
+        {"rec_launch_torch_compile", "rec_launch_cuda_graphs", "rec_launch_fuse_ops"},
+        {"rec_input_num_workers", "rec_copy_pinned_memory", "rec_sync_remove_item"},
+    ),
+    (
+        "memory_pressure",
+        MEMORY_PRESSURE_EVENTS,
+        {"rec_mem_reduce_batch", "rec_mem_gradient_checkpointing", "rec_util_mixed_precision"},
+        {"rec_util_increase_batch", "rec_input_num_workers", "rec_launch_cuda_graphs"},
+    ),
+    (
+        "shape_instability",
+        SHAPE_INSTABILITY_EVENTS,
+        {"rec_shape_bucket_inputs", "rec_shape_disable_dynamic"},
+        {"rec_launch_cuda_graphs", "rec_input_num_workers", "rec_copy_pinned_memory"},
+    ),
+    (
+        "sparse_telemetry",
+        SPARSE_TELEMETRY_EVENTS,
+        {"rec_telemetry_check_hooks", "rec_telemetry_enable_profiler"},
+        {"rec_input_num_workers", "rec_util_increase_batch", "rec_launch_torch_compile"},
+    ),
+]
 
 
 def _make_step_events(
@@ -86,6 +148,24 @@ def _make_step_events(
         {"event_type": "step_end", "step_id": step_id, "duration_ns": step_wall_ns, "payload": {"step_kind": "train", "status": "ok"}},
     ]
     return events
+
+
+@pytest.mark.parametrize(
+    "case_name,events,expected_ids,excluded_ids",
+    GOLDEN_RECOMMENDATION_CASES,
+    ids=[case[0] for case in GOLDEN_RECOMMENDATION_CASES],
+)
+def test_golden_cases_include_expected_and_exclude_unrelated_recommendations(
+    case_name: str,
+    events: list[dict],
+    expected_ids: set[str],
+    excluded_ids: set[str],
+) -> None:
+    summary = at.summarize_run(events)
+    ids = set(_rec_ids(summary))
+
+    assert expected_ids <= ids, f"{case_name} missing expected recommendations"
+    assert ids.isdisjoint(excluded_ids), f"{case_name} emitted unrelated recommendations"
 
 
 # ── Case 1: Input pipeline starvation ────────────────────────────────────────
@@ -372,8 +452,18 @@ def test_all_recommendations_have_required_fields() -> None:
                 "roi_score", "tier", "risk", "why_ranked", "roi_components",
                 "guardrails_applied", "prerequisites"}
 
-    for events in [INPUT_BOUND_EVENTS, COPY_BOUND_EVENTS, SYNC_BOUND_EVENTS,
-                   MEMORY_PRESSURE_EVENTS, SHAPE_INSTABILITY_EVENTS, UNDERUTILIZED_GPU_EVENTS]:
+    for events in [
+        INPUT_BOUND_EVENTS,
+        COPY_BOUND_EVENTS,
+        SYNC_BOUND_EVENTS,
+        LAUNCH_BOUND_EVENTS,
+        LAUNCH_BOUND_TINY_KERNEL_EVENTS,
+        MEMORY_PRESSURE_EVENTS,
+        SHAPE_INSTABILITY_EVENTS,
+        UNDERUTILIZED_GPU_EVENTS,
+        MIXED_SIGNAL_EVENTS,
+        SPARSE_TELEMETRY_EVENTS,
+    ]:
         summary = at.summarize_run(events)
         for rec in summary["diagnosis"]["recommendations"]:
             missing = required - rec.keys()
@@ -455,8 +545,18 @@ def test_recommendation_priority_consistent_with_score() -> None:
 
 
 def test_no_duplicate_recommendation_ids() -> None:
-    for events in [INPUT_BOUND_EVENTS, COPY_BOUND_EVENTS, SYNC_BOUND_EVENTS,
-                   MEMORY_PRESSURE_EVENTS, SHAPE_INSTABILITY_EVENTS]:
+    for events in [
+        INPUT_BOUND_EVENTS,
+        COPY_BOUND_EVENTS,
+        SYNC_BOUND_EVENTS,
+        LAUNCH_BOUND_EVENTS,
+        LAUNCH_BOUND_TINY_KERNEL_EVENTS,
+        MEMORY_PRESSURE_EVENTS,
+        SHAPE_INSTABILITY_EVENTS,
+        UNDERUTILIZED_GPU_EVENTS,
+        MIXED_SIGNAL_EVENTS,
+        SPARSE_TELEMETRY_EVENTS,
+    ]:
         summary = at.summarize_run(events)
         ids = _rec_ids(summary)
         assert len(ids) == len(set(ids)), f"Duplicate rec IDs found: {ids}"

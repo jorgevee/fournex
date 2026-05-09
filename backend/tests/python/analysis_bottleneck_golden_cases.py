@@ -83,6 +83,27 @@ LAUNCH_BOUND_EVENTS = [
     {"event_type": "step_end", "step_id": 2, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
 ]
 
+# LAUNCH_BOUND_TINY_KERNEL
+# Intended primary: underutilized_gpu, with launch_bound as the actionable secondary.
+# Profiler windows include many short kernels so evals can assert that kernel-level
+# evidence survives summarization.
+LAUNCH_BOUND_TINY_KERNEL_EVENTS = [
+    {"event_type": "gpu_sample", "payload": {"utilization_gpu_pct": 20, "utilization_mem_pct": 20, "memory_used_bytes": 30, "memory_total_bytes": 100}},
+    {"event_type": "gpu_sample", "payload": {"utilization_gpu_pct": 24, "utilization_mem_pct": 22, "memory_used_bytes": 31, "memory_total_bytes": 100}},
+    {"event_type": "step_start", "step_id": 1, "payload": {"step_kind": "train"}},
+    {"event_type": "profiler_window", "step_id": 1, "payload": {"window_state": "exported", "kernel_count": 180, "median_cuda_kernel_duration_us": 8.0, "small_kernel_fraction": 0.82}},
+    {"event_type": "phase_span", "step_id": 1, "duration_ns": 18, "payload": {"phase_name": "forward"}},
+    {"event_type": "phase_span", "step_id": 1, "duration_ns": 14, "payload": {"phase_name": "backward"}},
+    {"event_type": "phase_span", "step_id": 1, "duration_ns": 4, "payload": {"phase_name": "optimizer"}},
+    {"event_type": "step_end", "step_id": 1, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+    {"event_type": "step_start", "step_id": 2, "payload": {"step_kind": "train"}},
+    {"event_type": "profiler_window", "step_id": 2, "payload": {"window_state": "exported", "kernel_count": 220, "median_cuda_kernel_duration_us": 7.0, "small_kernel_fraction": 0.86}},
+    {"event_type": "phase_span", "step_id": 2, "duration_ns": 16, "payload": {"phase_name": "forward"}},
+    {"event_type": "phase_span", "step_id": 2, "duration_ns": 15, "payload": {"phase_name": "backward"}},
+    {"event_type": "phase_span", "step_id": 2, "duration_ns": 4, "payload": {"phase_name": "optimizer"}},
+    {"event_type": "step_end", "step_id": 2, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+]
+
 # MEMORY_PRESSURE
 # Intended primary: memory_pressure (peak ratio = 0.95, above 0.90 threshold).
 # GPU utilization is 70-72% — healthy, no underutilization. No input/copy/sync stalls.

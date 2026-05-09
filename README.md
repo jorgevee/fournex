@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
-Fournex wraps your training script, collects GPU telemetry, and tells you exactly what is slowing it down — dataloader starvation, H2D copy overhead, kernel launch bottlenecks, memory pressure, and more — with ranked, actionable recommendations.
+Fournex wraps your training script, collects GPU telemetry, and tells you exactly what is slowing it down, dataloader starvation, H2D copy overhead, kernel launch bottlenecks, memory pressure, and more, with ranked, actionable recommendations.
 
 ---
 

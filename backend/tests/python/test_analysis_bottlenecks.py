@@ -11,6 +11,7 @@ from analysis_bottleneck_golden_cases import (
     COPY_BOUND_EVENTS,
     INPUT_BOUND_EVENTS,
     LAUNCH_BOUND_EVENTS,
+    LAUNCH_BOUND_TINY_KERNEL_EVENTS,
     MEMORY_PRESSURE_EVENTS,
     MIXED_SIGNAL_EVENTS,
     SHAPE_INSTABILITY_EVENTS,
@@ -18,6 +19,125 @@ from analysis_bottleneck_golden_cases import (
     SYNC_BOUND_EVENTS,
     UNDERUTILIZED_GPU_EVENTS,
 )
+
+
+GOLDEN_EVENT_FIXTURES = {
+    "input_bound": INPUT_BOUND_EVENTS,
+    "copy_bound": COPY_BOUND_EVENTS,
+    "sync_bound": SYNC_BOUND_EVENTS,
+    "launch_bound": LAUNCH_BOUND_EVENTS,
+    "launch_bound_tiny_kernel": LAUNCH_BOUND_TINY_KERNEL_EVENTS,
+    "memory_pressure": MEMORY_PRESSURE_EVENTS,
+    "shape_instability": SHAPE_INSTABILITY_EVENTS,
+    "mixed_signal": MIXED_SIGNAL_EVENTS,
+    "sparse_telemetry": SPARSE_TELEMETRY_EVENTS,
+    "underutilized_gpu": UNDERUTILIZED_GPU_EVENTS,
+}
+
+
+def test_golden_fixtures_have_multiple_complete_steps() -> None:
+    for name, events in GOLDEN_EVENT_FIXTURES.items():
+        started = {
+            event["step_id"]
+            for event in events
+            if event.get("event_type") == "step_start"
+        }
+        completed = {
+            event["step_id"]
+            for event in events
+            if event.get("event_type") == "step_end"
+        }
+
+        assert len(completed) >= 2, f"{name} must cover averaging across multiple steps"
+        assert completed == started, f"{name} has mismatched step_start/step_end boundaries"
+
+
+def _single_signal_steps(
+    signal: str,
+    duration_ns: int,
+    *,
+    steps: int = 2,
+    step_wall_ns: int = 1000,
+) -> list[dict]:
+    events: list[dict] = [
+        {"event_type": "gpu_sample", "payload": {"utilization_gpu_pct": 60, "utilization_mem_pct": 35, "memory_used_bytes": 40, "memory_total_bytes": 100}},
+    ]
+    for step_id in range(1, steps + 1):
+        events.append({"event_type": "step_start", "step_id": step_id, "payload": {"step_kind": "train"}})
+        if signal == "input":
+            events.append({"event_type": "dataloader_span", "step_id": step_id, "duration_ns": duration_ns, "payload": {"stage": "next"}})
+        elif signal == "copy":
+            events.append({"event_type": "memcpy_span", "step_id": step_id, "duration_ns": duration_ns, "payload": {"copy_kind": "h2d"}})
+        elif signal == "sync":
+            events.append({"event_type": "sync_wait", "step_id": step_id, "duration_ns": duration_ns, "payload": {"wait_kind": "device_sync"}})
+        events += [
+            {"event_type": "phase_span", "step_id": step_id, "duration_ns": 300, "payload": {"phase_name": "forward"}},
+            {"event_type": "phase_span", "step_id": step_id, "duration_ns": 250, "payload": {"phase_name": "backward"}},
+            {"event_type": "step_end", "step_id": step_id, "duration_ns": step_wall_ns, "payload": {"step_kind": "train", "status": "ok"}},
+        ]
+    return events
+
+
+def _memory_pressure_steps(used_bytes: int, total_bytes: int = 100) -> list[dict]:
+    return [
+        {"event_type": "gpu_sample", "payload": {"utilization_gpu_pct": 65, "utilization_mem_pct": 80, "memory_used_bytes": used_bytes, "memory_total_bytes": total_bytes}},
+        {"event_type": "step_start", "step_id": 1, "payload": {"step_kind": "train"}},
+        {"event_type": "phase_span", "step_id": 1, "duration_ns": 50, "payload": {"phase_name": "forward"}},
+        {"event_type": "step_end", "step_id": 1, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+        {"event_type": "step_start", "step_id": 2, "payload": {"step_kind": "train"}},
+        {"event_type": "phase_span", "step_id": 2, "duration_ns": 50, "payload": {"phase_name": "forward"}},
+        {"event_type": "step_end", "step_id": 2, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+    ]
+
+
+def _shape_sequence_steps(sequence_lengths: list[int]) -> list[dict]:
+    events = [
+        {"event_type": "gpu_sample", "payload": {"utilization_gpu_pct": 65, "utilization_mem_pct": 40, "memory_used_bytes": 40, "memory_total_bytes": 100}},
+    ]
+    for step_id, sequence_length in enumerate(sequence_lengths, start=1):
+        events += [
+            {"event_type": "step_start", "step_id": step_id, "payload": {"step_kind": "train"}},
+            {"event_type": "shape_snapshot", "step_id": step_id, "payload": {"batch_size": 16, "sequence_length": sequence_length, "shapes": {"x": [16, sequence_length]}}},
+            {"event_type": "phase_span", "step_id": step_id, "duration_ns": 50, "payload": {"phase_name": "forward"}},
+            {"event_type": "step_end", "step_id": step_id, "duration_ns": 100, "payload": {"step_kind": "train", "status": "ok"}},
+        ]
+    return events
+
+
+def _labels(events: list[dict]) -> list[str]:
+    return [item["label"] for item in at.summarize_run(events)["bottlenecks"]]
+
+
+def test_classifier_threshold_boundaries_are_inclusive() -> None:
+    shape_at_threshold = _shape_sequence_steps([128, 128, 128, 128, 256, 256, 256, 384, 384, 512, 512])
+
+    assert "input_bound" in _labels(_single_signal_steps("input", 200))
+    assert "copy_bound" in _labels(_single_signal_steps("copy", 150))
+    assert "sync_bound" in _labels(_single_signal_steps("sync", 100))
+    assert "memory_pressure" in _labels(_memory_pressure_steps(90))
+    assert "shape_instability" in _labels(shape_at_threshold)
+    assert at.summarize_run(shape_at_threshold)["run_summary"]["shape_volatility_ratio"] == 0.3
+
+
+def test_classifier_threshold_boundaries_do_not_fire_just_below() -> None:
+    shape_below_threshold = _shape_sequence_steps([128, 128, 128, 128, 128, 256, 256, 256, 384, 384, 384])
+
+    assert "input_bound" not in _labels(_single_signal_steps("input", 199))
+    assert "copy_bound" not in _labels(_single_signal_steps("copy", 149))
+    assert "sync_bound" not in _labels(_single_signal_steps("sync", 99))
+    assert "memory_pressure" not in _labels(_memory_pressure_steps(89))
+    assert "shape_instability" not in _labels(shape_below_threshold)
+    assert at.summarize_run(shape_below_threshold)["run_summary"]["shape_volatility_ratio"] == 0.2
+
+
+def test_input_bound_confidence_calibration() -> None:
+    high_confidence = at.summarize_run(_single_signal_steps("input", 500))
+    medium_confidence = at.summarize_run(_single_signal_steps("input", 200))
+
+    assert high_confidence["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert high_confidence["diagnosis"]["confidence"]["level"] == "high"
+    assert medium_confidence["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert medium_confidence["diagnosis"]["confidence"]["level"] == "medium"
 
 
 def test_input_bound_golden_case() -> None:
@@ -60,6 +180,23 @@ def test_launch_bound_golden_case() -> None:
     assert summary["diagnosis"]["primary_bottleneck"] == "underutilized_gpu"
     assert summary["diagnosis"]["secondary_bottlenecks"] == ["launch_bound"]
     assert summary["diagnosis"]["why_not_others"]
+
+
+def test_launch_bound_tiny_kernel_golden_case() -> None:
+    summary = at.summarize_run(LAUNCH_BOUND_TINY_KERNEL_EVENTS)
+    labels = [item["label"] for item in summary["bottlenecks"]]
+    launch_result = next(item for item in summary["bottlenecks"] if item["label"] == "launch_bound")
+
+    assert labels[0] == "underutilized_gpu"
+    assert "launch_bound" in labels
+    assert summary["run_summary"]["profiler_windows_exported"] == 2
+    assert summary["run_summary"]["kernel_count_per_step"] == 200
+    assert summary["run_summary"]["median_cuda_kernel_duration_us"] == 7.5
+    assert summary["run_summary"]["small_kernel_fraction"] == 0.84
+    assert launch_result["evidence"]["kernel_count_per_step"] == 200
+    assert launch_result["evidence"]["median_cuda_kernel_duration_us"] == 7.5
+    assert launch_result["evidence"]["small_kernel_fraction"] == 0.84
+    assert summary["diagnosis"]["secondary_bottlenecks"] == ["launch_bound"]
 
 
 def test_memory_pressure_golden_case() -> None:

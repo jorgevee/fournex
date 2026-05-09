@@ -3,6 +3,8 @@ import sys
 import uuid
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
@@ -121,6 +123,35 @@ summary_path.write_text(json.dumps({
             "step_time_avg_ns": step_ns,
             "memory_pressure_peak_ratio": 0.25,
             "dominant_stall_type": "compute_bound"
+        }
+    }
+}), encoding="utf-8")
+"""
+
+BOTTLENECK_SPEEDUP_WRITER = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+bottleneck = sys.argv[1]
+throughput = 10.0
+if bottleneck in {"input_bound", "copy_bound"} and os.environ.get("FRX_PIN_MEMORY") == "true":
+    throughput = 13.0
+elif bottleneck == "launch_bound" and os.environ.get("FRX_TORCH_COMPILE") == "1":
+    throughput = 13.0
+
+summary_path = Path(os.environ["FRX_DERIVED_SUMMARY_PATH"])
+summary_path.parent.mkdir(parents=True, exist_ok=True)
+summary_path.write_text(json.dumps({
+    "steady_state": {
+        "step_count": 5,
+        "run_summary": {
+            "throughput_steps_per_sec": throughput,
+            "average_gpu_utilization_pct": 45.0,
+            "step_time_avg_ns": int(1_000_000_000 / throughput),
+            "memory_pressure_peak_ratio": 0.25,
+            "dominant_stall_type": bottleneck
         }
     }
 }), encoding="utf-8")
@@ -398,6 +429,50 @@ def test_experiment_runner_infers_baseline_batch_size_from_trace():
     assert report.trials[0].env_vars["FRX_BATCH_SIZE"] == "40"
     assert report.trials[0].throughput_delta > 0.3
     assert report.winner is not None
+
+
+@pytest.mark.parametrize(
+    "bottleneck,safe_only,environment,expected_config_id",
+    [
+        ("input_bound", True, {"cpu_count": 2}, "dl_nw0_pin1"),
+        ("copy_bound", True, {"cpu_count": 2}, "dl_nw0_pin1"),
+        (
+            "launch_bound",
+            False,
+            {"static_shapes": True, "torch_compile_supported": True},
+            "compile_default",
+        ),
+    ],
+)
+def test_experiment_runner_measures_speedup_for_optimized_bottleneck_config(
+    bottleneck: str,
+    safe_only: bool,
+    environment: dict,
+    expected_config_id: str,
+) -> None:
+    tmp_path = _workspace_tmp(f"runner-speedup-{bottleneck}")
+    runner = ExperimentRunner(
+        workload_command=[sys.executable, "-c", BOTTLENECK_SPEEDUP_WRITER, bottleneck],
+        job_name=f"unit-runner-speedup-{bottleneck}",
+        out_dir=str(tmp_path),
+        max_trials=1,
+        safe_only=safe_only,
+        race_enabled=False,
+        time_budget_s=5,
+        thresholds=PromotionThresholds(min_speedup=0.05, require_sufficient_steps=3),
+        bottleneck_diagnosis=bottleneck,
+        environment=environment,
+        verbose=False,
+    )
+
+    report = runner.run()
+    trial = report.trials[0]
+
+    assert trial.config_id == expected_config_id
+    assert trial.throughput_delta >= 0.25
+    assert trial.is_viable
+    assert report.winner is not None
+    assert report.winner.config_id == expected_config_id
 
 
 def test_experiment_runner_race_stage_only_full_benchmarks_top_candidates():
