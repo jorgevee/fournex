@@ -101,6 +101,8 @@ TOP RECOMMENDATIONS (3 of 5)
 
 ## Detected bottleneck types
 
+**Training-level (SDK / CLI telemetry)**
+
 | Label | Signal |
 |---|---|
 | `input_bound` | DataLoader wait ≥ 20% of step time |
@@ -111,6 +113,18 @@ TOP RECOMMENDATIONS (3 of 5)
 | `shape_instability` | Shape volatility ratio ≥ 30% |
 | `launch_bound` | Low utilization + profiler windows, no dominant stall |
 | `insufficient_telemetry` | No timing or GPU utilization data |
+
+**Kernel-level (Nsight Compute / `POST /ncu/analyze`)**
+
+| Label | Signal |
+|---|---|
+| `memory_bandwidth_bound` | DRAM throughput ≥ 80% of peak |
+| `warp_stall_memory` | Memory stalls dominate ≥ 40% of profiled kernels |
+| `warp_stall_sync` | Sync stalls dominate ≥ 40% of profiled kernels |
+| `cache_thrashing` | L1 cache hit rate < 30% |
+| `tensor_core_underutilized` | Tensor core utilization < 20% |
+| `low_issue_efficiency` | Issue slot utilization < 40% |
+| `insufficient_ncu_data` | NCU CSV had no parseable metrics |
 
 ---
 
@@ -164,6 +178,59 @@ prof.export_chrome_trace("frx-job-run/profiler_trace.json")
 ```bash
 frx collect --name prof-run -- python train.py
 # frx automatically imports frx-job-run/profiler_trace.json
+```
+
+---
+
+## REST API (advanced analysis)
+
+Fournex ships a FastAPI backend for deeper GPU diagnostics that go beyond step-level telemetry.
+
+```bash
+cd backend && uvicorn api:app --reload
+```
+
+### CUDA static inspection — `POST /cuda/static-inspect`
+
+Analyze `.cu`/`.cuh` source files without a GPU. Detects kernel signatures, launch configs, shared memory allocations, indexing patterns, bank conflict risk, and reduction patterns.
+
+```bash
+curl -X POST http://localhost:8000/cuda/static-inspect \
+  -H "Content-Type: application/json" \
+  -d '{"files": [{"filename": "kernel.cu", "content": "<source>"}], "gpu_model": "A100"}'
+```
+
+### PTX analysis — `POST /ptx/analyze`
+
+Static analysis of PTX (NVIDIA's virtual ISA). No live GPU needed, pass PTX text extracted via `cuobjdump`. Returns per-kernel register pressure, spill detection, instruction mix, and severity-ranked findings.
+
+```bash
+curl -X POST http://localhost:8000/ptx/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"content": "<ptx text>", "filename": "kernel.ptx"}'
+```
+
+### Nsight Compute analysis — `POST /ncu/analyze`
+
+Ingest an NCU CSV export. Returns warp stall breakdown, DRAM/cache/tensor core metrics, bottleneck labels, and recommendations.
+
+```bash
+curl -X POST http://localhost:8000/ncu/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"content": "<csv text>", "filename": "report.csv"}'
+```
+
+### Implementation comparison — `POST /compare`
+
+Compare two implementations side-by-side (baseline vs optimized, CUDA vs Triton, etc.). Each side accepts any combination of CUDA source, PTX, and NCU CSV. Returns structural diffs, profiler metric deltas, a 4-dimension efficiency scorecard, and an overall verdict.
+
+```bash
+curl -X POST http://localhost:8000/compare \
+  -H "Content-Type: application/json" \
+  -d '{
+    "a": {"label": "baseline", "ptx": "<ptx text>", "ncu_csv": "<csv>"},
+    "b": {"label": "optimized", "ptx": "<ptx text>", "ncu_csv": "<csv>"}
+  }'
 ```
 
 ---
