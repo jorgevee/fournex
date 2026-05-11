@@ -62,6 +62,14 @@ class KernelLaunchSummary:
     grid_dims: tuple[int, int, int] | None = None
     occupancy_estimate: dict[str, Any] = field(default_factory=dict)
     metrics: dict[str, float] = field(default_factory=dict)
+    dram_throughput_pct: float | None = None
+    tensor_core_utilization_pct: float | None = None
+    l1_cache_hit_rate_pct: float | None = None
+    l2_cache_hit_rate_pct: float | None = None
+    issue_slot_utilization_pct: float | None = None
+    dominant_warp_stall: str | None = None
+    dominant_warp_stall_pct: float | None = None
+    warp_stall_breakdown: dict = field(default_factory=dict)
     source: str = "kernel_inspector"
 
     def to_dict(self) -> dict[str, Any]:
@@ -164,6 +172,15 @@ def launch_summary_from_attrs(
 
 def parse_nsight_compute_csv(path: str | Path) -> list[KernelLaunchSummary]:
     rows = _read_csv_rows(path)
+    return _rows_to_kernel_summaries(rows)
+
+
+def parse_nsight_compute_csv_text(text: str) -> list[KernelLaunchSummary]:
+    rows = _text_to_csv_rows(text)
+    return _rows_to_kernel_summaries(rows)
+
+
+def _rows_to_kernel_summaries(rows: list[dict[str, str]]) -> list[KernelLaunchSummary]:
     by_kernel: dict[str, dict[str, Any]] = {}
 
     for row in rows:
@@ -196,6 +213,7 @@ def parse_nsight_compute_csv(path: str | Path) -> list[KernelLaunchSummary]:
     for entry in by_kernel.values():
         summary = launch_summary_from_attrs(entry, source="nsight_compute_csv")
         summary.metrics = dict(entry.get("metrics", {}))
+        _compute_derived_ncu_fields(summary)
         summaries.append(summary)
     return summaries
 
@@ -310,10 +328,29 @@ def _cuda_extract_command(executable: str, binary: Path, output: str) -> list[st
 
 def _read_csv_rows(path: str | Path) -> list[dict[str, str]]:
     text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
+    return _text_to_csv_rows(text)
+
+
+def _text_to_csv_rows(text: str) -> list[dict[str, str]]:
     lines = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
     if not lines:
         return []
     return list(csv.DictReader(lines))
+
+
+def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:
+    m = summary.metrics
+    summary.dram_throughput_pct = m.get("dram_throughput_pct")
+    summary.tensor_core_utilization_pct = m.get("tensor_core_utilization_pct")
+    summary.l1_cache_hit_rate_pct = m.get("l1_cache_hit_rate_pct")
+    summary.l2_cache_hit_rate_pct = m.get("l2_cache_hit_rate_pct")
+    summary.issue_slot_utilization_pct = m.get("issue_slot_utilization_pct")
+    stalls = {k[len("warp_stall_"):]: v for k, v in m.items() if k.startswith("warp_stall_")}
+    summary.warp_stall_breakdown = stalls
+    if stalls:
+        dominant_key = max(stalls, key=stalls.__getitem__)
+        summary.dominant_warp_stall = dominant_key
+        summary.dominant_warp_stall_pct = stalls[dominant_key]
 
 
 def _apply_ncu_metric(entry: dict[str, Any], metric_name: str, value: float) -> None:
@@ -327,10 +364,14 @@ def _apply_ncu_metric(entry: dict[str, Any], metric_name: str, value: float) -> 
         entry[metric_name] = int(value)
 
 
+_NCU_STALL_PREFIX = "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_"
+
+
 def _canonical_ncu_metric_name(name: str) -> str:
     lowered = name.strip().lower()
     lowered = lowered.replace(" ", "_").replace("-", "_").replace(".", "_")
     aliases = {
+        # Launch config
         "launch__registers_per_thread": "registers_per_thread",
         "registers_per_thread": "registers_per_thread",
         "launch__shared_mem_per_block_static": "shared_memory_per_block_bytes",
@@ -345,8 +386,32 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "launch__grid_dim_x": "grid_x",
         "launch__grid_dim_y": "grid_y",
         "launch__grid_dim_z": "grid_z",
+        # Occupancy
         "sm__warps_active_avg_pct_of_peak_sustained_active": "achieved_occupancy_pct",
+        # DRAM / memory bandwidth
+        "dram__throughput_avg_pct_of_peak_sustained_elapsed": "dram_throughput_pct",
+        "memory_throughput": "dram_throughput_pct",
+        "memory throughput": "dram_throughput_pct",
+        # Tensor core utilization
+        "sm__pipe_tensor_cycles_active_avg_pct_of_peak_sustained_active": "tensor_core_utilization_pct",
+        "tensor_core_utilization": "tensor_core_utilization_pct",
+        "tensor core utilization": "tensor_core_utilization_pct",
+        # Cache hit rates
+        "l1tex__t_sector_hit_rate_pct": "l1_cache_hit_rate_pct",
+        "l1/tex_cache_throughput": "l1_cache_hit_rate_pct",
+        "lts__t_sector_hit_rate_pct": "l2_cache_hit_rate_pct",
+        "l2_cache_hit_rate": "l2_cache_hit_rate_pct",
+        # Issue slot utilization (IPC proxy)
+        "sm__issue_active_avg_pct_of_peak_sustained_active": "issue_slot_utilization_pct",
+        "issue_slots_busy": "issue_slot_utilization_pct",
+        "issue slots busy": "issue_slot_utilization_pct",
     }
+    if lowered in aliases:
+        return aliases[lowered]
+    # Regex-free fallback: arbitrary warp stall reasons from NCU sampling data
+    if lowered.startswith(_NCU_STALL_PREFIX):
+        stall_type = lowered[len(_NCU_STALL_PREFIX):]
+        return f"warp_stall_{stall_type}"
     return aliases.get(lowered, lowered)
 
 
@@ -411,7 +476,7 @@ def _first_present(row: dict[str, Any], *keys: str) -> Any:
 
 
 def _metric_unit(metric_name: str) -> str:
-    if metric_name.endswith("_pct"):
+    if metric_name.endswith("_pct") or metric_name.startswith("warp_stall_"):
         return "percent"
     if metric_name.endswith("_bytes"):
         return "bytes"

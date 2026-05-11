@@ -83,8 +83,21 @@ from .kernel_inspector import (
     launch_summary_from_attrs,
     map_nsight_compute_csv_to_ir,
     parse_nsight_compute_csv,
+    parse_nsight_compute_csv_text,
     summarize_kernel_launches,
 )
+from .ncu_analysis import (
+    analyze_ncu_csv,
+    analyze_ncu_csv_text,
+    classify_ncu_bottlenecks,
+    derive_ncu_run_summary,
+)
+from .ptx_analysis import (
+    PtxKernelAnalysis,
+    analyze_ptx_text,
+    parse_ptx_text,
+)
+from .comparison import compare_implementations
 from .cuda_static import (
     CudaKernelSource,
     CudaLaunchConfig,
@@ -107,6 +120,7 @@ from .shapes import (
 )
 
 __all__ = [
+    "compare_implementations",
     "AnnotationRecord",
     "BOTTLENECK_CLASSES",
     "DataPipelineRecord",
@@ -169,6 +183,14 @@ __all__ = [
     "launch_summary_from_attrs",
     "map_nsight_compute_csv_to_ir",
     "map_nvml_sample_to_ir",
+    "analyze_ncu_csv",
+    "analyze_ncu_csv_text",
+    "classify_ncu_bottlenecks",
+    "derive_ncu_run_summary",
+    "parse_nsight_compute_csv_text",
+    "PtxKernelAnalysis",
+    "analyze_ptx_text",
+    "parse_ptx_text",
     "map_distributed_record_to_ir",
     "map_data_pipeline_record_to_ir",
     "persist_local_trace",

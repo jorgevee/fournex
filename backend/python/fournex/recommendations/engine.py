@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from .signals import extract_signals
+from .signals import extract_ncu_signals, extract_signals
 
 _CATALOG_PATH = pathlib.Path(__file__).parent / "catalog.yaml"
 _RULES_PATH = pathlib.Path(__file__).parent / "rules.yaml"
@@ -31,6 +31,9 @@ _BUNDLE_LABELS = {
     "memory": "Memory Pressure Relief",
     "shape_stability": "Shape Stability Improvement",
     "telemetry": "Telemetry & Observability",
+    "ncu_memory": "Memory Bandwidth & Cache Optimization",
+    "ncu_compute": "Compute Efficiency Improvement",
+    "ncu_sync": "Kernel Synchronization Reduction",
 }
 
 
@@ -50,10 +53,13 @@ def generate_recommendations(
     run_summary: dict[str, Any],
     per_step: list[dict[str, Any]] | None = None,
     environment: dict[str, Any] | None = None,
+    *,
+    signals: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     catalog = _load_catalog()
     rules = _load_rules()
-    signals = extract_signals(run_summary, bottlenecks, per_step or [], environment)
+    if signals is None:
+        signals = extract_signals(run_summary, bottlenecks, per_step or [], environment)
 
     bottleneck_map = {b["label"]: b for b in bottlenecks}
 

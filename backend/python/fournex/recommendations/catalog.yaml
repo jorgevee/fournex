@@ -443,3 +443,238 @@
     - "Kernel-level evidence should appear in the bottleneck diagnosis."
   caveats:
     - "Profiling adds overhead — collect only a few steps, not the full run."
+
+# ── NCU: Memory bandwidth & cache ─────────────────────────────────────────────
+
+- id: rec_ncu_improve_coalescing
+  title: Improve global memory access coalescing
+  category: ncu_memory
+  applies_to: [memory_bandwidth_bound, warp_stall_memory]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: high
+  action_templates:
+    - "Ensure adjacent threads access adjacent memory addresses (stride-1 access)."
+    - "Restructure array-of-structs (AoS) layouts to struct-of-arrays (SoA) where profitable."
+    - "Use Nsight Compute's memory chart to identify divergent access patterns per warp."
+    - "Align buffers to 128-byte cache line boundaries."
+  validation_templates:
+    - "DRAM throughput % should decrease after improving coalescing."
+    - "L2 hit rate should improve as fewer cache lines are fetched."
+    - "Memory stall fraction should drop."
+  caveats:
+    - "SoA restructuring may require changes to both CPU data preparation and GPU kernel code."
+    - "Some access patterns (e.g., gather operations) are inherently non-coalesced."
+
+- id: rec_ncu_tiling_shared_mem
+  title: Add shared-memory tiling to reduce DRAM traffic
+  category: ncu_memory
+  applies_to: [memory_bandwidth_bound, cache_thrashing, warp_stall_memory]
+  prerequisites: {}
+  impact: high
+  effort: high
+  safety: medium
+  action_templates:
+    - "Identify data reuse patterns in the kernel (e.g., matrix multiply tiles, convolution sliding windows)."
+    - "Load data tiles from global memory into shared memory before use."
+    - "Ensure tile dimensions are chosen so all threads in a block contribute to loading."
+    - "Pad shared memory arrays by 1-4 elements to avoid 32-way bank conflicts."
+  validation_templates:
+    - "DRAM throughput % should decrease as shared memory absorbs repeated accesses."
+    - "L1 cache hit rate should improve significantly."
+    - "Kernel execution time should decrease."
+  caveats:
+    - "Shared memory is limited per SM — large tiles can reduce occupancy."
+    - "Incorrect padding can introduce correctness bugs; test thoroughly."
+
+- id: rec_ncu_reduce_working_set
+  title: Reduce per-kernel working set to improve cache reuse
+  category: ncu_memory
+  applies_to: [memory_bandwidth_bound, cache_thrashing]
+  prerequisites: {}
+  impact: medium
+  effort: high
+  safety: medium
+  action_templates:
+    - "Split memory-heavy kernels into multiple passes with smaller working sets."
+    - "Use FP16 or INT8 data types where precision permits to halve memory footprint."
+    - "Apply register blocking: accumulate results in registers instead of global memory."
+    - "Minimize the number of distinct global memory arrays accessed per kernel."
+  validation_templates:
+    - "L1/L2 cache hit rate should improve after reducing the working set."
+    - "DRAM bandwidth pressure should decrease."
+  caveats:
+    - "Splitting kernels adds launch overhead — benchmark the tradeoff."
+    - "Reduced precision may affect model quality; validate numerics."
+
+# ── NCU: Compute / tensor core ────────────────────────────────────────────────
+
+- id: rec_ncu_enable_amp
+  title: Enable automatic mixed precision (AMP) to engage tensor cores
+  category: ncu_compute
+  applies_to: [tensor_core_underutilized]
+  prerequisites:
+    framework: [pytorch]
+    mixed_precision_enabled: false
+  impact: high
+  effort: low
+  safety: medium
+  action_templates:
+    - "Wrap the forward pass with torch.autocast(device_type='cuda', dtype=torch.float16)."
+    - "Use torch.amp.GradScaler to handle FP16 gradient underflow during backward."
+    - "Prefer BF16 on Ampere and Hopper GPUs (A100, H100) for improved numerical stability."
+    - "Verify that critical accumulation ops (softmax, layer norm) auto-cast to FP32."
+  validation_templates:
+    - "Tensor core utilization in NCU should rise above 50% after enabling AMP."
+    - "Step time should decrease, especially for transformer or GEMM-heavy workloads."
+    - "Memory usage should decrease, potentially allowing a larger batch size."
+  caveats:
+    - "FP16 has limited dynamic range — watch for NaN/Inf in activations or gradients."
+    - "BF16 has lower numerical precision than FP32; monitor validation metrics."
+    - "Some custom ops may not have FP16 implementations and will fall back to FP32."
+
+- id: rec_ncu_use_tensor_ops
+  title: Use Tensor Core-optimized BLAS operations
+  category: ncu_compute
+  applies_to: [tensor_core_underutilized]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: high
+  action_templates:
+    - "Use cuBLAS GEMMEx or cublasGemmEx for matrix multiplications with FP16 inputs."
+    - "Use cuDNN convolution ops — they automatically select Tensor Core paths when possible."
+    - "Replace custom GEMM kernels with torch.matmul or F.linear, which dispatch to cuBLAS."
+    - "Verify inputs are contiguous and in FP16/BF16 before calling BLAS routines."
+  validation_templates:
+    - "Tensor core utilization should increase measurably in NCU after switching to cuBLAS/cuDNN."
+    - "GEMM or convolution kernel time should decrease."
+  caveats:
+    - "cuBLAS Tensor Core paths require inputs in FP16, BF16, or TF32 — FP32 inputs use SIMT."
+    - "TF32 is enabled by default on Ampere for matmul; use torch.backends.cuda.matmul.allow_tf32."
+
+- id: rec_ncu_align_matmul_dims
+  title: Align matrix dimensions to multiples of 16 or 32 for Tensor Core efficiency
+  category: ncu_compute
+  applies_to: [tensor_core_underutilized]
+  prerequisites: {}
+  impact: medium
+  effort: low
+  safety: high
+  action_templates:
+    - "Pad batch size, sequence length, and hidden dimensions to the nearest multiple of 16."
+    - "For Ampere and later GPUs, align to multiples of 32 for optimal warp-level efficiency."
+    - "Check vocabulary size, embedding dimensions, and projection layer widths for alignment."
+    - "Use torch.nn.utils.parametrize or padding in custom layers to enforce alignment."
+  validation_templates:
+    - "Tensor core utilization should improve after aligning dimensions."
+    - "Wasted compute from partial tiles should decrease."
+  caveats:
+    - "Padding increases memory consumption proportionally — measure memory headroom."
+    - "Sequence padding in NLP requires attention masking to maintain correctness."
+
+# ── NCU: Kernel synchronization ───────────────────────────────────────────────
+
+- id: rec_ncu_reduce_syncthreads
+  title: Reduce __syncthreads() frequency
+  category: ncu_sync
+  applies_to: [warp_stall_sync]
+  prerequisites: {}
+  impact: medium
+  effort: high
+  safety: low
+  action_templates:
+    - "Audit each __syncthreads() and verify it is necessary for correctness."
+    - "Merge multiple __syncthreads() barriers by rescheduling shared memory operations."
+    - "Use warp-level primitives (__syncwarp(), warp shuffles) where full-block sync is unnecessary."
+    - "Consider cooperative groups for fine-grained synchronization at the subwarp level."
+  validation_templates:
+    - "Warp stall barrier fraction should decrease in NCU after reducing sync points."
+    - "Issue slot utilization should improve as warps stall less on barriers."
+  caveats:
+    - "Removing a necessary __syncthreads() causes race conditions and silent data corruption."
+    - "Always verify correctness with test inputs before and after any sync changes."
+    - "Warp-level shuffles only synchronize within a single warp (32 threads)."
+
+- id: rec_ncu_shared_mem_layout
+  title: Restructure shared memory layout to reduce bank conflicts
+  category: ncu_sync
+  applies_to: [warp_stall_sync]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Pad 2D shared memory arrays by 1 column to avoid column-wise bank conflicts."
+    - "Use conflict-free access patterns for reductions (e.g., sequential halving)."
+    - "Verify tile dimensions are not exact multiples of 32 — prefer tile widths of 33."
+    - "Use Nsight Compute's shared memory bank conflict chart to identify hot spots."
+  validation_templates:
+    - "Shared memory bank conflict count should decrease in NCU."
+    - "Warp stall barrier fraction should decrease."
+  caveats:
+    - "Padding increases shared memory consumption — ensure occupancy is not impacted."
+
+# ── NCU: Instruction throughput ───────────────────────────────────────────────
+
+- id: rec_ncu_increase_block_size
+  title: Increase thread block size to improve warp-level parallelism
+  category: ncu_compute
+  applies_to: [low_issue_efficiency]
+  prerequisites: {}
+  impact: medium
+  effort: low
+  safety: medium
+  action_templates:
+    - "Increase blockDim.x from 128 to 256 or 512 threads and benchmark."
+    - "Use cudaOccupancyMaxPotentialBlockSize() to find the optimal block size."
+    - "Verify that register usage does not increase disproportionately with larger blocks."
+    - "Ensure shared memory per block does not exceed SM limits at the new block size."
+  validation_templates:
+    - "Achieved occupancy in NCU should increase after tuning block size."
+    - "Issue slot utilization should improve as more warps are available to hide latency."
+  caveats:
+    - "Larger blocks consume more shared memory and registers per SM, potentially reducing occupancy."
+    - "Very large blocks can cause register spilling if the compiler runs out of register file space."
+
+- id: rec_ncu_instruction_level_parallelism
+  title: Increase instruction-level parallelism (ILP) via loop unrolling
+  category: ncu_compute
+  applies_to: [low_issue_efficiency]
+  prerequisites: {}
+  impact: medium
+  effort: high
+  safety: medium
+  action_templates:
+    - "Add #pragma unroll N to inner loops to allow the compiler to unroll and pipeline instructions."
+    - "Process 2–4 elements per thread per iteration (register blocking) instead of 1."
+    - "Eliminate serial data dependencies across loop iterations where safe."
+    - "Profile with NCU to confirm issue slot utilization improves after unrolling."
+  validation_templates:
+    - "Issue slot utilization in NCU should increase after applying ILP."
+    - "Warp stall fractions for compute reasons should decrease."
+  caveats:
+    - "Aggressive unrolling increases register usage and can reduce occupancy."
+    - "The compiler may unroll automatically at -O3; verify with cuobjdump before manual unrolling."
+
+# ── NCU: Insufficient data ────────────────────────────────────────────────────
+
+- id: rec_ncu_collect_metrics
+  title: Re-export NCU profile with full performance counter set
+  category: ncu_compute
+  applies_to: [insufficient_ncu_data]
+  prerequisites: {}
+  impact: high
+  effort: low
+  safety: high
+  action_templates:
+    - "Re-run: ncu --set full --export report.ncu-rep --csv ./report.csv ./your_app"
+    - "Alternatively: ncu --metrics dram__throughput,sm__pipe_tensor_cycles_active,... --csv ..."
+    - "Use ncu --query-metrics to discover available metric names for your GPU."
+  validation_templates:
+    - "The exported CSV should contain Metric Name and Metric Value columns."
+    - "Metrics like 'Memory Throughput' and 'Issue Slots Busy' should appear in the output."
+  caveats:
+    - "Full metric collection has high overhead — use --kernel-name to filter to hot kernels."
+    - "Some metrics are mutually exclusive and require multiple passes."

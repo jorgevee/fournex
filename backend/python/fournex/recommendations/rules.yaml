@@ -277,3 +277,147 @@
   explanation: >
     No timing or GPU utilization data was collected. Verify that telemetry
     hooks are attached and the profiler is active before the training loop.
+
+# ── NCU: Memory bandwidth ─────────────────────────────────────────────────────
+
+- id: rule_ncu_memory_bandwidth_bound
+  bottleneck: memory_bandwidth_bound
+  min_score: 0.40
+  signals:
+    memory_bandwidth_saturated: true
+    warp_stall_is_memory: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_improve_coalescing
+    - rec_ncu_tiling_shared_mem
+    - rec_ncu_reduce_working_set
+  priority_boost: 0.20
+  explanation: >
+    DRAM throughput is above 70% of peak and memory stalls dominate warp
+    scheduling. Access coalescing and shared-memory tiling are the most
+    effective mitigations.
+
+- id: rule_ncu_memory_bandwidth_no_warp_stall
+  bottleneck: memory_bandwidth_bound
+  min_score: 0.40
+  signals:
+    memory_bandwidth_saturated: true
+  suppressed_if:
+    warp_stall_is_memory: true
+  recommendations:
+    - rec_ncu_improve_coalescing
+    - rec_ncu_reduce_working_set
+  priority_boost: 0.10
+  explanation: >
+    DRAM throughput is elevated but warp stall data is unavailable. Improving
+    memory coalescing is the safest first step.
+
+- id: rule_ncu_cache_thrashing
+  bottleneck: cache_thrashing
+  min_score: 0.35
+  signals:
+    l1_cache_miss_heavy: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_tiling_shared_mem
+    - rec_ncu_reduce_working_set
+  priority_boost: 0.15
+  explanation: >
+    L1 cache hit rate is below 40%, indicating poor data locality. Shared-memory
+    tiling can dramatically reduce cache miss traffic.
+
+- id: rule_ncu_warp_stall_memory
+  bottleneck: warp_stall_memory
+  min_score: 0.20
+  signals:
+    warp_stall_is_memory: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_improve_coalescing
+    - rec_ncu_tiling_shared_mem
+  priority_boost: 0.15
+  explanation: >
+    Warp stalls are dominated by memory throttle or long-scoreboard waits,
+    indicating high-latency or uncoalesced global memory access patterns.
+
+# ── NCU: Tensor core underutilization ────────────────────────────────────────
+
+- id: rule_ncu_tensor_core_inactive
+  bottleneck: tensor_core_underutilized
+  min_score: 0.30
+  signals:
+    tensor_core_underutilized: true
+    mixed_precision_enabled: false
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_enable_amp
+    - rec_ncu_use_tensor_ops
+    - rec_ncu_align_matmul_dims
+  priority_boost: 0.25
+  explanation: >
+    Tensor core utilization is below 30% and mixed precision is not enabled.
+    Enabling AMP (FP16/BF16) engages tensor cores and typically doubles
+    throughput on Ampere and Hopper GPUs.
+
+- id: rule_ncu_tensor_core_low_amp
+  bottleneck: tensor_core_underutilized
+  min_score: 0.30
+  signals:
+    tensor_core_underutilized: true
+    mixed_precision_enabled: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_use_tensor_ops
+    - rec_ncu_align_matmul_dims
+  priority_boost: 0.15
+  explanation: >
+    Mixed precision is enabled but tensor core utilization remains low. Matrix
+    dimensions may not be aligned to multiples of 16/32, or ops may not be
+    using tensor-core-optimized BLAS routines.
+
+# ── NCU: Warp stall — sync ────────────────────────────────────────────────────
+
+- id: rule_ncu_warp_stall_sync
+  bottleneck: warp_stall_sync
+  min_score: 0.20
+  signals:
+    warp_stall_is_sync: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_reduce_syncthreads
+    - rec_ncu_shared_mem_layout
+  priority_boost: 0.15
+  explanation: >
+    Warp stalls are dominated by barrier waits, indicating frequent or
+    unnecessary __syncthreads() calls. Reducing synchronization points
+    or restructuring shared memory access can improve throughput.
+
+# ── NCU: Low issue efficiency ─────────────────────────────────────────────────
+
+- id: rule_ncu_low_issue_efficiency
+  bottleneck: low_issue_efficiency
+  min_score: 0.35
+  signals:
+    issue_efficiency_very_low: true
+  suppressed_if:
+    warp_stall_is_memory: true
+  recommendations:
+    - rec_ncu_increase_block_size
+    - rec_ncu_instruction_level_parallelism
+  priority_boost: 0.10
+  explanation: >
+    Issue slot utilization is below 40%, indicating the GPU is frequently
+    unable to issue instructions. Increasing block size or adding ILP via
+    loop unrolling can improve instruction throughput.
+
+- id: rule_ncu_insufficient_ncu_data
+  bottleneck: insufficient_ncu_data
+  min_score: 0.50
+  signals: {}
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_collect_metrics
+  priority_boost: 0.0
+  explanation: >
+    The NCU export contains no performance counter data. Re-export with
+    --set full or specify the required metric sections.

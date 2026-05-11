@@ -14,7 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from fournex.analysis import derive_step_metrics, summarize_step_scope
+from fournex.comparison import compare_implementations
 from fournex.cuda_static import inspect_cuda_source
+from fournex.ncu_analysis import analyze_ncu_csv_text
+from fournex.ptx_analysis import analyze_ptx_text
 
 app = FastAPI(title="Fournex API", version="0.1.0")
 
@@ -51,6 +54,32 @@ class CudaStaticInspectRequest(BaseModel):
     gpu_model: str | None = None
 
 
+class NcuAnalyzeRequest(BaseModel):
+    content: str
+    filename: str = "export.csv"
+    environment: dict[str, Any] | None = None
+
+
+class PtxAnalyzeRequest(BaseModel):
+    content: str
+    filename: str = "kernel.ptx"
+
+
+class ComparisonSide(BaseModel):
+    label: str
+    cuda_source: str | None = None
+    cuda_filename: str = "<memory>"
+    ptx: str | None = None
+    ptx_filename: str = "kernel.ptx"
+    ncu_csv: str | None = None
+    gpu_model: str | None = None
+
+
+class CompareRequest(BaseModel):
+    a: ComparisonSide
+    b: ComparisonSide
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -66,6 +95,49 @@ def analyze(request: AnalyzeRequest) -> dict[str, Any]:
             environment=request.environment,
         )
         return result
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/ncu/analyze")
+def analyze_ncu(request: NcuAnalyzeRequest) -> dict[str, Any]:
+    try:
+        return analyze_ncu_csv_text(request.content, environment=request.environment)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/ptx/analyze")
+def analyze_ptx(request: PtxAnalyzeRequest) -> dict[str, Any]:
+    try:
+        return analyze_ptx_text(request.content, filename=request.filename)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/compare")
+def compare(request: CompareRequest) -> dict[str, Any]:
+    try:
+        return compare_implementations(
+            {
+                "label": request.a.label,
+                "cuda_source": request.a.cuda_source,
+                "cuda_filename": request.a.cuda_filename,
+                "ptx": request.a.ptx,
+                "ptx_filename": request.a.ptx_filename,
+                "ncu_csv": request.a.ncu_csv,
+                "gpu_model": request.a.gpu_model,
+            },
+            {
+                "label": request.b.label,
+                "cuda_source": request.b.cuda_source,
+                "cuda_filename": request.b.cuda_filename,
+                "ptx": request.b.ptx,
+                "ptx_filename": request.b.ptx_filename,
+                "ncu_csv": request.b.ncu_csv,
+                "gpu_model": request.b.gpu_model,
+            },
+        )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
