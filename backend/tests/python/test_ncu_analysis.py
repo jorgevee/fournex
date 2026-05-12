@@ -127,7 +127,9 @@ def test_derive_ncu_run_summary_averages() -> None:
     assert result["avg_dram_throughput_pct"] == 70.0
     assert result["avg_tensor_core_utilization_pct"] == 25.0
     assert result["dominant_warp_stall"] == "memory_throttle"
-    assert result["memory_stall_fraction"] == 1.0
+    # Both kernels have only memory_throttle stalls (40% and 25%).
+    # New semantics: avg(40, 25) / 100 = 0.325
+    assert result["memory_stall_fraction"] == 0.325
     assert result["kernels_with_ncu_data"] == 2
 
 
@@ -140,7 +142,9 @@ def test_derive_ncu_run_summary_sync_stall_fraction() -> None:
     summaries = at.parse_nsight_compute_csv_text(text)
     result = at.derive_ncu_run_summary(summaries)
 
-    assert result["memory_stall_fraction"] == 0.5
+    # ker_b has 40% memory stall; ker_a has 0% (barrier is sync, not memory).
+    # New semantics: avg(0, 40) / 100 = 0.20
+    assert result["memory_stall_fraction"] == 0.2
     assert result["compute_stall_fraction"] == 0.0
 
 
@@ -275,3 +279,100 @@ def test_analyze_ncu_existing_launch_fields_preserved() -> None:
     assert summaries[0].registers_per_thread == 64
     assert summaries[0].shared_memory_per_block_bytes == 16384
     assert summaries[0].threads_per_block == 256
+
+
+# ── Gap fixes ─────────────────────────────────────────────────────────────────
+
+def test_memory_stall_fraction_uses_magnitude_not_dominance() -> None:
+    """memory_stall_fraction must reflect actual stall percentages, not just whether
+    memory is the dominant stall type.  5% memory stalls must not produce fraction=1.0."""
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker_a,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,5.0",
+        "ker_b,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,5.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+    result = at.derive_ncu_run_summary(summaries)
+
+    # avg(5, 5) / 100 = 0.05 — both kernels have memory_throttle as dominant at only 5%
+    assert result["memory_stall_fraction"] == 0.05, (
+        f"expected 0.05 for 5% stalls, got {result['memory_stall_fraction']}"
+    )
+
+
+def test_parse_realistic_ncu_csv_prof_prefix_lines() -> None:
+    """==PROF== metadata lines emitted by NCU must be stripped before CSV parsing."""
+    text = "\n".join([
+        "==PROF== Connected to process 12345 (/usr/bin/myapp)",
+        "==PROF== Profiling \"my_kernel\" - 0: 0%....50%....100% - 8 passes",
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "my_kernel,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,82.0",
+        "my_kernel,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,15.0",
+        "my_kernel,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,38.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s.kernel_name == "my_kernel"
+    assert s.dram_throughput_pct == 82.0
+    assert s.tensor_core_utilization_pct == 15.0
+    assert s.dominant_warp_stall == "memory_throttle"
+
+
+def test_parse_realistic_ncu_csv_extra_columns() -> None:
+    """Real NCU exports include ID / Process ID / Section Name columns; parser must ignore them."""
+    text = "\n".join([
+        "ID,Process ID,Process Name,Host Name,Kernel Name,Kernel Time,Context,Stream,Section Name,Metric Name,Metric Unit,Metric Value",
+        "0,12345,/usr/bin/app,hostname,my_gemm,2024-01-01,1,7,Memory Workload,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,75.0",
+        "0,12345,/usr/bin/app,hostname,my_gemm,2024-01-01,1,7,Warp State Stats,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,38.0",
+        "0,12345,/usr/bin/app,hostname,my_gemm,2024-01-01,1,7,Warp State Stats,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard,%,22.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s.dram_throughput_pct == 75.0
+    assert s.dominant_warp_stall == "memory_throttle"
+    assert abs(s.dominant_warp_stall_pct - 38.0) < 0.01
+    assert "long_scoreboard" in s.warp_stall_breakdown
+
+
+def test_tensor_core_underutilized_end_to_end() -> None:
+    """Full CSV → classify pipeline must detect tensor_core_underutilized when tc < 30%."""
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        # launch config → occupancy > 40%
+        "tc_kernel,launch__block_size,thread/block,256",
+        "tc_kernel,launch__registers_per_thread,register/thread,32",
+        # tensor core utilization below threshold
+        "tc_kernel,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,12.0",
+        "tc_kernel,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,45.0",
+        "tc_kernel,l1tex__t_sector_hit_rate.pct,%,72.0",
+        "tc_kernel,lts__t_sector_hit_rate.pct,%,80.0",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+
+    labels = [b["label"] for b in result["bottlenecks"]]
+    assert "tensor_core_underutilized" in labels, f"expected tensor_core_underutilized in {labels}"
+    tc_b = next(b for b in result["bottlenecks"] if b["label"] == "tensor_core_underutilized")
+    assert tc_b["evidence"]["avg_tensor_core_utilization_pct"] == 12.0
+
+
+def test_parse_ncu_csv_combined_prof_prefix_and_extra_columns() -> None:
+    """Combined real-NCU scenario: ==PROF== lines + extra ID/Process ID columns."""
+    text = "\n".join([
+        "==PROF== Connected to process 99999 (/bin/app)",
+        "==PROF== Profiling \"big_kernel\" - 0: 0%....100% - 4 passes",
+        "ID,Process ID,Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "0,99999,big_kernel,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,88.0",
+        "0,99999,big_kernel,l1tex__t_sector_hit_rate.pct,%,28.0",
+        "0,99999,big_kernel,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,45.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s.dram_throughput_pct == 88.0
+    assert s.l1_cache_hit_rate_pct == 28.0
+    assert s.dominant_warp_stall == "memory_throttle"

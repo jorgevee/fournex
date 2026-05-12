@@ -69,21 +69,23 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         dominant_stall = "unknown"
         dominant_stall_pct = 0.0
 
-    # Fraction of kernels dominated by memory vs compute stalls
-    def _dominant_group(s: KernelLaunchSummary) -> str:
-        if not s.dominant_warp_stall:
-            return "unknown"
-        if s.dominant_warp_stall in _MEMORY_STALL_TYPES:
-            return "memory"
-        if s.dominant_warp_stall in _COMPUTE_STALL_TYPES:
-            return "compute"
-        if s.dominant_warp_stall in _SYNC_STALL_TYPES:
-            return "sync"
-        return "other"
-
-    groups = [_dominant_group(s) for s in summaries]
-    memory_stall_fraction = round(groups.count("memory") / kernel_count, 4)
-    compute_stall_fraction = round(groups.count("compute") / kernel_count, 4)
+    # Fraction of issue-slot cycles stalled on memory/compute reasons (absolute, 0.0–1.0).
+    # Each kernel contributes its raw stall percentage sum divided by 100 so the result
+    # reflects magnitude, not merely which stall category happened to be dominant.
+    memory_stall_fraction = round(
+        sum(
+            sum(v for k, v in s.warp_stall_breakdown.items() if k in _MEMORY_STALL_TYPES)
+            for s in summaries
+        ) / (100.0 * kernel_count),
+        4,
+    )
+    compute_stall_fraction = round(
+        sum(
+            sum(v for k, v in s.warp_stall_breakdown.items() if k in _COMPUTE_STALL_TYPES)
+            for s in summaries
+        ) / (100.0 * kernel_count),
+        4,
+    )
 
     return {
         "kernel_count": kernel_count,

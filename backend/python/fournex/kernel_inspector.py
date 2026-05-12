@@ -332,7 +332,12 @@ def _read_csv_rows(path: str | Path) -> list[dict[str, str]]:
 
 
 def _text_to_csv_rows(text: str) -> list[dict[str, str]]:
-    lines = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    lines = [
+        line for line in text.splitlines()
+        if line.strip()
+        and not line.lstrip().startswith("#")
+        and not line.lstrip().startswith("==")  # strip ==PROF== metadata from NCU exports
+    ]
     if not lines:
         return []
     return list(csv.DictReader(lines))
