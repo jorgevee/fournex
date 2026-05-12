@@ -195,7 +195,7 @@ cd backend && uvicorn api:app --reload
 Analyze `.cu`/`.cuh` source files without a GPU. Detects kernel signatures, launch configs, shared memory allocations, indexing patterns, bank conflict risk, and reduction patterns.
 
 ```bash
-curl -X POST http://localhost:8000/cuda/static-inspect \
+curl -X POST http://http://127.0.0.1:8000/cuda/static-inspect \
   -H "Content-Type: application/json" \
   -d '{"files": [{"filename": "kernel.cu", "content": "<source>"}], "gpu_model": "A100"}'
 ```
@@ -205,7 +205,7 @@ curl -X POST http://localhost:8000/cuda/static-inspect \
 Static analysis of PTX (NVIDIA's virtual ISA). No live GPU needed, pass PTX text extracted via `cuobjdump`. Returns per-kernel register pressure, spill detection, instruction mix, and severity-ranked findings.
 
 ```bash
-curl -X POST http://localhost:8000/ptx/analyze \
+curl -X POST http://127.0.0.1:8000/ptx/analyze \
   -H "Content-Type: application/json" \
   -d '{"content": "<ptx text>", "filename": "kernel.ptx"}'
 ```
@@ -215,7 +215,7 @@ curl -X POST http://localhost:8000/ptx/analyze \
 Ingest an NCU CSV export. Returns warp stall breakdown, DRAM/cache/tensor core metrics, bottleneck labels, and recommendations.
 
 ```bash
-curl -X POST http://localhost:8000/ncu/analyze \
+curl -X POST http://http://127.0.0.1:8000/ncu/analyze \
   -H "Content-Type: application/json" \
   -d '{"content": "<csv text>", "filename": "report.csv"}'
 ```
@@ -225,7 +225,7 @@ curl -X POST http://localhost:8000/ncu/analyze \
 Compare two implementations side-by-side (baseline vs optimized, CUDA vs Triton, etc.). Each side accepts any combination of CUDA source, PTX, and NCU CSV. Returns structural diffs, profiler metric deltas, a 4-dimension efficiency scorecard, and an overall verdict.
 
 ```bash
-curl -X POST http://localhost:8000/compare \
+curl -X POST http://127.0.0.1:8000/compare \
   -H "Content-Type: application/json" \
   -d '{
     "a": {"label": "baseline", "ptx": "<ptx text>", "ncu_csv": "<csv>"},
