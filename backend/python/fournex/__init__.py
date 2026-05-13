@@ -98,6 +98,7 @@ from .ptx_analysis import (
     parse_ptx_text,
 )
 from .comparison import compare_implementations
+from .ncu_comparison import diff_ncu_runs
 from .cuda_static import (
     CudaKernelSource,
     CudaLaunchConfig,
@@ -121,6 +122,7 @@ from .shapes import (
 
 __all__ = [
     "compare_implementations",
+    "diff_ncu_runs",
     "AnnotationRecord",
     "BOTTLENECK_CLASSES",
     "DataPipelineRecord",

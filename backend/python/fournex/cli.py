@@ -245,7 +245,24 @@ def _build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
     analyze_parser = subparsers.add_parser("analyze", help="analyze a collected run bundle and print diagnosis")
-    analyze_parser.add_argument("run_path", help="path to a run directory (e.g. runs/run-abc123)")
+    analyze_parser.add_argument(
+        "run_path",
+        nargs="?",
+        default=None,
+        help="path to a run directory or .zip bundle (omit when using --baseline/--optimized)",
+    )
+    analyze_parser.add_argument(
+        "--baseline",
+        default=None,
+        metavar="CSV",
+        help="Nsight Compute CSV for baseline — enables before/after comparison mode",
+    )
+    analyze_parser.add_argument(
+        "--optimized",
+        default=None,
+        metavar="CSV",
+        help="Nsight Compute CSV for optimized run — pair with --baseline",
+    )
     analyze_parser.add_argument(
         "--scope",
         choices=["run", "steady_state", "auto"],
@@ -644,6 +661,13 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def analyze(args: argparse.Namespace) -> int:
+    if args.baseline or args.optimized:
+        return _analyze_ncu_diff(args)
+
+    if not args.run_path:
+        print("Error: provide a run_path or use --baseline/--optimized for NCU comparison.", file=sys.stderr)
+        return 1
+
     run_path = Path(args.run_path)
 
     temp_context = None
@@ -1221,6 +1245,107 @@ def _write_smoke_profiler_trace(run_dir: Path) -> None:
     )
 
 
+def _analyze_ncu_diff(args: argparse.Namespace) -> int:
+    if not args.baseline or not args.optimized:
+        print("Error: --baseline and --optimized must both be provided together.", file=sys.stderr)
+        return 1
+
+    baseline_path  = Path(args.baseline)
+    optimized_path = Path(args.optimized)
+
+    for path in (baseline_path, optimized_path):
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            return 1
+
+    try:
+        from .ncu_comparison import diff_ncu_runs
+    except ImportError as exc:
+        print(f"Error: ncu_comparison module unavailable: {exc}", file=sys.stderr)
+        return 1
+
+    baseline_text  = baseline_path.read_text(encoding="utf-8-sig", errors="replace")
+    optimized_text = optimized_path.read_text(encoding="utf-8-sig", errors="replace")
+
+    result = diff_ncu_runs(
+        baseline_text,
+        optimized_text,
+        label_baseline=baseline_path.stem,
+        label_optimized=optimized_path.stem,
+    )
+
+    if args.output_json:
+        print(json.dumps(result, indent=2))
+        return 0
+
+    _print_ncu_comparison_report(result)
+    return 0
+
+
+def _print_ncu_comparison_report(result: dict[str, Any]) -> None:
+    sep = "-" * 60
+    label_b = result["label_baseline"]
+    label_o = result["label_optimized"]
+    verdict = result["verdict"]
+    bdiff   = result["bottleneck_diff"]
+    deltas  = result["metric_deltas"]
+
+    outcome_labels = {
+        "improved":  "IMPROVED",
+        "regressed": "REGRESSED",
+        "mixed":     "MIXED  (some resolved, some new)",
+        "neutral":   "NEUTRAL  (no change in bottleneck profile)",
+    }
+
+    print(f"\n{sep}")
+    print(f"  GPU Autopilot - NCU Before/After Comparison")
+    print(f"  Baseline  : {label_b}")
+    print(f"  Optimized : {label_o}")
+    print(sep)
+
+    print(f"\nVERDICT: {outcome_labels.get(verdict['outcome'], verdict['outcome'].upper())}")
+    print(f"  Bottlenecks resolved  : {verdict['bottlenecks_resolved']}")
+    print(f"  Bottlenecks new       : {verdict['bottlenecks_new']}")
+    print(f"  Persistent (improved) : {verdict['bottlenecks_improved']} of {verdict['bottlenecks_persistent']}")
+
+    if bdiff["resolved"]:
+        print(f"\nRESOLVED")
+        for label in bdiff["resolved"]:
+            print(f"  [+]  {label}")
+
+    if bdiff["new"]:
+        print(f"\nNEW REGRESSIONS")
+        for label in bdiff["new"]:
+            print(f"  [-]  {label}")
+
+    if bdiff["persistent"]:
+        improved_set = set(bdiff["improved"])
+        score_deltas = bdiff["score_deltas"]
+        print(f"\nPERSISTENT")
+        for label in bdiff["persistent"]:
+            d = score_deltas.get(label, 0.0)
+            tag = "  (score improved)" if label in improved_set else ""
+            print(f"  [~]  {label:<42}  score {d:+.2f}{tag}")
+
+    if deltas:
+        print(f"\nMETRIC DELTAS")
+        for key, info in deltas.items():
+            a = info["baseline"]
+            b = info["optimized"]
+            d = info["delta"]
+            direction = info["direction"] or "n/a"
+            tag = {"improved": "[+]", "regressed": "[-]", "neutral": "[=]"}.get(direction, "[ ]")
+            d_str = f"{d:+.4f}" if d is not None else "  N/A "
+            print(f"  {tag}  {key:<44}  {a!r:>8} -> {b!r:<8}  ({d_str})")
+
+    b_primary = result["baseline"]["primary_bottleneck"]
+    o_primary = result["optimized"]["primary_bottleneck"]
+    print(f"\nPRIMARY BOTTLENECK")
+    print(f"  Before : {b_primary or 'none'}")
+    print(f"  After  : {o_primary or 'none'}")
+    print()
+
+
 def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = "auto") -> None:
     run_id = run_dir.name
     has_steady_state = "steady_state" in summary
@@ -1312,21 +1437,51 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
             score = rec.get("score", 0.0)
             print(f"\n  {i}. [{priority}] {title}")
             print(f"     Effort: {effort}  |  Risk: {risk}  |  Score: {score:.2f}")
+            triggered_by = rec.get("triggered_by")
+            if triggered_by:
+                print(f"     Triggered by: {triggered_by}")
             why_text = rec.get("why", "")
             if why_text:
-                print(f"     {why_text}")
+                print(f"     Why: {why_text}")
+            ranked = rec.get("why_ranked", [])
+            if ranked:
+                print(f"     Ranked: {', '.join(ranked[:2])}")
             actions = rec.get("actions", [])
             if actions:
                 print(f"     Actions:")
                 for action in actions[:3]:
                     print(f"       - {action}")
+            validation = rec.get("validation", [])
+            if validation:
+                print(f"     Validate: {validation[0]}")
     else:
         print(f"\nNo recommendations generated.")
         if not primary:
             print("  Instrument the workload with fournex for richer trace data.")
 
+    withheld = diagnosis.get("withheld_recommendations", [])
+    if withheld:
+        print(f"\nWHY NOT")
+        for item in withheld[:3]:
+            title = item.get("title", item.get("id", "recommendation"))
+            reason = item.get("reason", "")
+            evidence = _format_report_evidence(item.get("evidence", {}))
+            print(f"  - {title}: {reason}")
+            if evidence:
+                print(f"    Evidence: {evidence}")
+
     event_count = summary.get("event_count", scope_data.get("event_count", 0))
     print(f"\n  ({event_count} trace events analyzed)\n")
+
+
+def _format_report_evidence(evidence: dict[str, Any]) -> str:
+    parts = []
+    for key, value in evidence.items():
+        if isinstance(value, float):
+            parts.append(f"{key}={value:.4f}")
+        else:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts)
 
 
 if __name__ == "__main__":

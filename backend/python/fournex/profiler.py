@@ -8,7 +8,11 @@ from typing import Any
 from .sdk import build_runtime_event, emit_event, get_runtime_config
 
 try:
-    import torch
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.filterwarnings("ignore", "Failed to initialize NumPy", UserWarning)
+        import torch
+    del _w
 except ImportError:
     torch = None
 

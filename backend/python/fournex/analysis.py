@@ -349,6 +349,7 @@ def build_diagnosis_result(
             "why_not_others": [],
             "recommendations": [],
             "recommendation_bundles": [],
+            "withheld_recommendations": [],
             "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
             "classifier_version": CLASSIFIER_VERSION,
         }
@@ -391,6 +392,7 @@ def build_diagnosis_result(
         "why_not_others": _contradiction_bullets(primary, bottlenecks[1:3], run_summary),
         "recommendations": rec_output["recommendations"],
         "recommendation_bundles": rec_output["bundles"],
+        "withheld_recommendations": rec_output.get("withheld_recommendations", []),
         "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
         "classifier_version": CLASSIFIER_VERSION,
     }

@@ -21,6 +21,9 @@ _DEPENDENCY_ORDER = {
     "rec_launch_fuse_ops": ("rec_launch_torch_compile",),
     "rec_shape_disable_dynamic": ("rec_shape_bucket_inputs",),
 }
+_EQUIVALENT_RECOMMENDATIONS = {
+    "rec_copy_pinned_memory": ("rec_input_pinned_memory",),
+}
 
 _BUNDLE_LABELS = {
     "input_pipeline": "Input Pipeline Optimization",
@@ -89,7 +92,8 @@ def generate_recommendations(
                 candidates[rec_id] = (boost, rule, b_score)
 
     if not candidates:
-        return {"recommendations": [], "bundles": []}
+        withheld = _build_withheld_recommendations(catalog, bottlenecks, signals, set())
+        return {"recommendations": [], "bundles": [], "withheld_recommendations": withheld}
 
     # ── Score and build recommendation objects ────────────────────────────────
     scored_by_id: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -133,15 +137,22 @@ def generate_recommendations(
         }
         scored_by_id[rec_id] = (score, rec)
 
+    _dedupe_equivalent_recommendations(scored_by_id)
     _enforce_dependency_order(scored_by_id)
     scored = list(scored_by_id.values())
     scored.sort(key=lambda x: x[0], reverse=True)
     recommendations = [rec for _, rec in scored]
+    active_ids = {rec["id"] for rec in recommendations}
 
     # ── Build bundles ─────────────────────────────────────────────────────────
     bundles = _build_bundles(recommendations)
+    withheld = _build_withheld_recommendations(catalog, bottlenecks, signals, active_ids)
 
-    return {"recommendations": recommendations, "bundles": bundles}
+    return {
+        "recommendations": recommendations,
+        "bundles": bundles,
+        "withheld_recommendations": withheld,
+    }
 
 
 def _signals_match(conditions: dict[str, Any], signals: dict[str, Any]) -> bool:
@@ -327,6 +338,14 @@ def _enforce_dependency_order(scored_by_id: dict[str, tuple[float, dict[str, Any
                 scored_by_id[rec_id] = current
 
 
+def _dedupe_equivalent_recommendations(scored_by_id: dict[str, tuple[float, dict[str, Any]]]) -> None:
+    for canonical_id, duplicate_ids in _EQUIVALENT_RECOMMENDATIONS.items():
+        if canonical_id not in scored_by_id:
+            continue
+        for duplicate_id in duplicate_ids:
+            scored_by_id.pop(duplicate_id, None)
+
+
 def _clamp(value: float) -> float:
     return min(1.0, max(0.0, float(value)))
 
@@ -346,3 +365,55 @@ def _build_bundles(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]
                 "recommendation_ids": rec_ids,
             })
     return bundles
+
+
+def _build_withheld_recommendations(
+    catalog: dict[str, dict[str, Any]],
+    bottlenecks: list[dict[str, Any]],
+    signals: dict[str, Any],
+    active_ids: set[str],
+) -> list[dict[str, Any]]:
+    bottleneck_labels = {b["label"] for b in bottlenecks}
+    withheld: list[dict[str, Any]] = []
+
+    if (
+        "input_bound" in bottleneck_labels
+        and signals.get("input_pipeline_stalled")
+        and signals.get("h2d_copy_low")
+        and "rec_input_pinned_memory" not in active_ids
+        and "rec_copy_pinned_memory" not in active_ids
+    ):
+        withheld.append(_withheld_entry(
+            catalog,
+            "rec_input_pinned_memory",
+            reason=(
+                "DataLoader wait is elevated, but H2D copy time is low; pinned memory "
+                "is unlikely to improve a CPU-side input stall."
+            ),
+            blocked_by=["h2d_copy_low"],
+            evidence={
+                "input_frac": round(float(signals.get("input_frac", 0.0)), 4),
+                "h2d_frac": round(float(signals.get("h2d_frac", 0.0)), 4),
+            },
+        ))
+
+    return withheld
+
+
+def _withheld_entry(
+    catalog: dict[str, dict[str, Any]],
+    rec_id: str,
+    *,
+    reason: str,
+    blocked_by: list[str],
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    entry = catalog.get(rec_id, {})
+    return {
+        "id": rec_id,
+        "title": entry.get("title", rec_id),
+        "category": entry.get("category", "general"),
+        "reason": reason,
+        "blocked_by": blocked_by,
+        "evidence": evidence,
+    }

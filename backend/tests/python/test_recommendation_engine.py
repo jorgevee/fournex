@@ -52,7 +52,7 @@ GOLDEN_RECOMMENDATION_CASES = [
     (
         "input_bound",
         INPUT_BOUND_EVENTS,
-        {"rec_input_num_workers", "rec_input_pinned_memory", "rec_input_prefetch_factor"},
+        {"rec_input_num_workers", "rec_input_prefetch_factor"},
         {"rec_launch_torch_compile", "rec_sync_remove_item", "rec_mem_reduce_batch"},
     ),
     (
@@ -176,8 +176,10 @@ def test_input_starvation_top_recs_are_dataloader_fixes() -> None:
     ids = _rec_ids(summary)
 
     assert "rec_input_num_workers" in ids
-    assert "rec_input_pinned_memory" in ids
+    assert "rec_input_pinned_memory" not in ids
     assert "rec_input_prefetch_factor" in ids
+    withheld_ids = {item["id"] for item in summary["diagnosis"]["withheld_recommendations"]}
+    assert "rec_input_pinned_memory" in withheld_ids
 
 
 def test_input_starvation_does_not_recommend_unrelated_fixes() -> None:
@@ -229,6 +231,15 @@ def test_copy_bound_does_not_recommend_dataloader_workers() -> None:
     ids = _rec_ids(summary)
 
     assert "rec_input_num_workers" not in ids
+
+
+def test_mixed_input_and_copy_pressure_shows_one_pinned_memory_rec() -> None:
+    summary = at.summarize_run(MIXED_SIGNAL_EVENTS)
+    ids = _rec_ids(summary)
+
+    assert "rec_copy_pinned_memory" in ids
+    assert "rec_input_pinned_memory" not in ids
+    assert summary["diagnosis"]["withheld_recommendations"] == []
 
 
 def test_copy_bound_severe_adds_reduce_volume_rec() -> None:
@@ -500,7 +511,7 @@ def test_recommendation_tier_consistent_with_score_and_practicality() -> None:
     summary = at.summarize_run(events)
 
     tiers = {rec["id"]: rec["tier"] for rec in summary["diagnosis"]["recommendations"]}
-    assert tiers["rec_input_pinned_memory"] == "try_now"
+    assert tiers["rec_input_num_workers"] == "try_now"
     assert tiers["rec_input_move_transforms"] in {"next", "advanced"}
 
 

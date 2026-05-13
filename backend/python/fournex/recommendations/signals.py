@@ -44,6 +44,7 @@ def extract_signals(
         "input_frac": input_frac,
 
         # ── H2D copy ─────────────────────────────────────────────────────────
+        "h2d_copy_low": h2d_frac < 0.05,
         "h2d_copy_stalled": h2d_frac >= 0.15,
         "h2d_copy_severe": h2d_frac >= 0.30,
         "h2d_frac": h2d_frac,

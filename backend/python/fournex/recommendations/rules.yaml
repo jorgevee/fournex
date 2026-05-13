@@ -21,7 +21,6 @@
   suppressed_if: {}
   recommendations:
     - rec_input_num_workers
-    - rec_input_pinned_memory
     - rec_input_prefetch_factor
     - rec_input_move_transforms
   priority_boost: 0.25
@@ -38,12 +37,26 @@
     input_pipeline_severe: true
   recommendations:
     - rec_input_num_workers
-    - rec_input_pinned_memory
     - rec_input_prefetch_factor
   priority_boost: 0.10
   explanation: >
     DataLoader wait accounts for a significant fraction of step time,
     suggesting the input pipeline cannot keep pace with the GPU.
+
+- id: rule_input_with_h2d_pressure
+  bottleneck: input_bound
+  min_score: 0.20
+  signals:
+    input_pipeline_stalled: true
+    h2d_copy_stalled: true
+  suppressed_if: {}
+  recommendations:
+    - rec_input_pinned_memory
+  priority_boost: 0.15
+  explanation: >
+    The input pipeline is stalled and H2D transfer time is also elevated.
+    Pinned memory reduces transfer latency and is the appropriate fix when
+    both stalls are present; it is not recommended when copy time is low.
 
 # ── H2D copy ─────────────────────────────────────────────────────────────────
 

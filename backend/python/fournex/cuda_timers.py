@@ -8,7 +8,11 @@ from typing import Any, Iterator
 from .sdk import begin_span, build_runtime_event, end_span
 
 try:
-    import torch
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.filterwarnings("ignore", "Failed to initialize NumPy", UserWarning)
+        import torch
+    del _w
 except ImportError:
     torch = None
 
