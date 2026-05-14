@@ -37,6 +37,7 @@ _BUNDLE_LABELS = {
     "ncu_memory": "Memory Bandwidth & Cache Optimization",
     "ncu_compute": "Compute Efficiency Improvement",
     "ncu_sync": "Kernel Synchronization Reduction",
+    "ptx_static": "PTX Static Optimization",
 }
 
 

@@ -333,3 +333,58 @@ def test_analyze_ptx_text_empty_returns_zero_kernels() -> None:
     result = at.analyze_ptx_text("")
     assert result["kernel_count"] == 0
     assert result["findings"] == []
+
+
+def test_analyze_ptx_text_spills_return_recommendations() -> None:
+    result = at.analyze_ptx_text(PTX_SPILL)
+    rec_ids = {rec["id"] for rec in result["recommendations"]}
+
+    assert result["primary_bottleneck"] == "ptx_register_spills"
+    assert "rec_ptx_reduce_register_pressure" in rec_ids
+
+
+def test_analyze_ptx_text_high_register_count_returns_recommendations() -> None:
+    text = """
+    .visible .entry fat_kernel() {
+        .reg .f32 %f<130>;
+        ret;
+    }
+    """
+    result = at.analyze_ptx_text(text)
+    rec_ids = {rec["id"] for rec in result["recommendations"]}
+
+    assert result["primary_bottleneck"] == "ptx_register_pressure"
+    assert "rec_ptx_reduce_register_pressure" in rec_ids
+
+
+def test_analyze_ptx_text_global_memory_heavy_returns_tiling_recommendation() -> None:
+    result = at.analyze_ptx_text(PTX_HIGH_GLOBAL)
+    rec_ids = {rec["id"] for rec in result["recommendations"]}
+
+    assert result["primary_bottleneck"] == "ptx_global_memory_heavy"
+    assert "rec_ptx_stage_global_memory" in rec_ids
+    assert "rec_ncu_collect_metrics" in rec_ids
+
+
+def test_analyze_ptx_text_clean_kernel_has_no_recommendations() -> None:
+    text = """
+    .visible .entry clean_kernel() {
+        .reg .f32 %f<8>;
+        add.f32 %f0, %f1, %f2;
+        mul.f32 %f3, %f0, %f2;
+        ret;
+    }
+    """
+    result = at.analyze_ptx_text(text)
+
+    assert result["primary_bottleneck"] is None
+    assert result["bottlenecks"] == []
+    assert result["recommendations"] == []
+
+
+def test_classify_ptx_bottlenecks_orders_spills_before_register_pressure() -> None:
+    result = at.analyze_ptx_text(PTX_SPILL)
+    labels = [item["label"] for item in result["bottlenecks"]]
+
+    assert labels[0] == "ptx_register_spills"
+    assert "ptx_register_pressure" in labels

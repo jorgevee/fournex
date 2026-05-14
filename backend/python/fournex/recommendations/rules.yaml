@@ -434,3 +434,73 @@
   explanation: >
     The NCU export contains no performance counter data. Re-export with
     --set full or specify the required metric sections.
+
+# PTX static analysis
+
+- id: rule_ptx_register_spills
+  bottleneck: ptx_register_spills
+  min_score: 0.50
+  signals:
+    ptx_has_register_spills: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ptx_reduce_register_pressure
+  priority_boost: 0.20
+  explanation: >
+    PTX contains local-memory spill loads or stores, which usually means
+    register pressure is forcing values out to memory.
+
+- id: rule_ptx_register_pressure
+  bottleneck: ptx_register_pressure
+  min_score: 0.45
+  signals:
+    ptx_high_register_count: true
+  suppressed_if:
+    ptx_has_register_spills: true
+  recommendations:
+    - rec_ptx_reduce_register_pressure
+  priority_boost: 0.10
+  explanation: >
+    PTX virtual register count is elevated, which can reduce occupancy or
+    lead to spills after compilation.
+
+- id: rule_ptx_global_memory_heavy
+  bottleneck: ptx_global_memory_heavy
+  min_score: 0.45
+  signals:
+    ptx_global_memory_heavy: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ptx_stage_global_memory
+    - rec_ncu_collect_metrics
+  priority_boost: 0.10
+  explanation: >
+    A large fraction of PTX instructions are global memory operations. Static
+    PTX cannot prove reuse, but shared-memory staging and NCU validation are
+    the right next checks.
+
+- id: rule_ptx_fp64_usage
+  bottleneck: ptx_fp64_usage
+  min_score: 0.30
+  signals:
+    ptx_has_fp64: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ptx_reduce_fp64
+  priority_boost: 0.05
+  explanation: >
+    PTX includes FP64 operations. On most non-HPC GPUs, double precision has
+    much lower throughput than FP32.
+
+- id: rule_ptx_branch_divergence
+  bottleneck: ptx_branch_divergence_risk
+  min_score: 0.30
+  signals:
+    ptx_branch_divergence_risk: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ptx_reduce_branch_divergence
+  priority_boost: 0.05
+  explanation: >
+    Conditional branch density is high in PTX, which can indicate warp
+    divergence risk if neighboring threads take different paths.

@@ -95,6 +95,7 @@ from .ncu_analysis import (
 from .ptx_analysis import (
     PtxKernelAnalysis,
     analyze_ptx_text,
+    classify_ptx_bottlenecks,
     parse_ptx_text,
 )
 from .comparison import compare_implementations
@@ -192,6 +193,7 @@ __all__ = [
     "parse_nsight_compute_csv_text",
     "PtxKernelAnalysis",
     "analyze_ptx_text",
+    "classify_ptx_bottlenecks",
     "parse_ptx_text",
     "map_distributed_record_to_ir",
     "map_data_pipeline_record_to_ir",

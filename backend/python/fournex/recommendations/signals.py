@@ -143,6 +143,36 @@ def extract_ncu_signals(
     }
 
 
+def extract_ptx_signals(
+    ptx_summary: dict[str, Any],
+    bottlenecks: list[dict[str, Any]],
+    environment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    env = environment or {}
+    labels = {b["label"] for b in bottlenecks}
+    max_regs = int(ptx_summary.get("max_register_count") or 0)
+    max_global_ratio = float(ptx_summary.get("max_global_memory_ratio") or 0.0)
+    max_branch_density = float(ptx_summary.get("max_branch_density") or 0.0)
+    kernels_without_shared = int(ptx_summary.get("kernels_without_shared_memory") or 0)
+    kernel_count = int(ptx_summary.get("kernel_count") or 0)
+
+    return {
+        "ptx_has_register_spills": "ptx_register_spills" in labels,
+        "ptx_high_register_count": max_regs > 64,
+        "ptx_very_high_register_count": max_regs > 128,
+        "ptx_max_register_count": max_regs,
+        "ptx_global_memory_heavy": "ptx_global_memory_heavy" in labels,
+        "ptx_max_global_memory_ratio": max_global_ratio,
+        "ptx_no_shared_memory": kernel_count > 0 and kernels_without_shared == kernel_count,
+        "ptx_has_fp64": bool(ptx_summary.get("has_fp64", False)),
+        "ptx_branch_divergence_risk": max_branch_density > 0.15,
+        "ptx_max_branch_density": max_branch_density,
+        "framework_pytorch": str(env.get("framework", "")).lower() == "pytorch",
+        "mixed_precision_enabled": bool(env.get("mixed_precision", False)),
+        "num_gpus": int(env.get("num_gpus", 1)),
+    }
+
+
 def _coefficient_of_variation(values: list[float]) -> float:
     if len(values) < 2:
         return 0.0

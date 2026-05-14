@@ -24,6 +24,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
             "dominant_warp_stall": "unknown",
             "dominant_warp_stall_pct": 0.0,
             "warp_stall_breakdown": {},
+            "kernels_with_warp_stall_data": 0,
             "memory_stall_fraction": 0.0,
             "compute_stall_fraction": 0.0,
         }
@@ -46,9 +47,14 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     # kernels_with_ncu_data: those with at least one performance counter
     kernels_with_ncu_data = sum(
         1 for s in summaries
-        if any(v is not None for v in [s.dram_throughput_pct, s.tensor_core_utilization_pct,
-                                        s.l1_cache_hit_rate_pct, s.issue_slot_utilization_pct,
-                                        s.dominant_warp_stall])
+        if any(v is not None for v in [
+            s.dram_throughput_pct,
+            s.tensor_core_utilization_pct,
+            s.l1_cache_hit_rate_pct,
+            s.l2_cache_hit_rate_pct,
+            s.issue_slot_utilization_pct,
+            s.dominant_warp_stall,
+        ])
     )
 
     # Aggregate warp stall breakdown across kernels
@@ -72,20 +78,26 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     # Fraction of issue-slot cycles stalled on memory/compute reasons (absolute, 0.0–1.0).
     # Each kernel contributes its raw stall percentage sum divided by 100 so the result
     # reflects magnitude, not merely which stall category happened to be dominant.
-    memory_stall_fraction = round(
-        sum(
-            sum(v for k, v in s.warp_stall_breakdown.items() if k in _MEMORY_STALL_TYPES)
-            for s in summaries
-        ) / (100.0 * kernel_count),
-        4,
-    )
-    compute_stall_fraction = round(
-        sum(
-            sum(v for k, v in s.warp_stall_breakdown.items() if k in _COMPUTE_STALL_TYPES)
-            for s in summaries
-        ) / (100.0 * kernel_count),
-        4,
-    )
+    stall_samples = [s for s in summaries if s.warp_stall_breakdown]
+    stall_sample_count = len(stall_samples)
+    if stall_sample_count:
+        memory_stall_fraction = round(
+            sum(
+                sum(v for k, v in s.warp_stall_breakdown.items() if k in _MEMORY_STALL_TYPES)
+                for s in stall_samples
+            ) / (100.0 * stall_sample_count),
+            4,
+        )
+        compute_stall_fraction = round(
+            sum(
+                sum(v for k, v in s.warp_stall_breakdown.items() if k in _COMPUTE_STALL_TYPES)
+                for s in stall_samples
+            ) / (100.0 * stall_sample_count),
+            4,
+        )
+    else:
+        memory_stall_fraction = 0.0
+        compute_stall_fraction = 0.0
 
     return {
         "kernel_count": kernel_count,
@@ -99,6 +111,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         "dominant_warp_stall": dominant_stall,
         "dominant_warp_stall_pct": dominant_stall_pct,
         "warp_stall_breakdown": combined_stalls,
+        "kernels_with_warp_stall_data": stall_sample_count,
         "memory_stall_fraction": memory_stall_fraction,
         "compute_stall_fraction": compute_stall_fraction,
     }

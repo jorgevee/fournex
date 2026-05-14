@@ -678,3 +678,81 @@
   caveats:
     - "Full metric collection has high overhead — use --kernel-name to filter to hot kernels."
     - "Some metrics are mutually exclusive and require multiple passes."
+
+# PTX static analysis
+
+- id: rec_ptx_reduce_register_pressure
+  title: Reduce register pressure and local-memory spills
+  category: ptx_static
+  applies_to: [ptx_register_spills, ptx_register_pressure]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Reduce aggressive loop unrolling or split the kernel into smaller passes."
+    - "Use __launch_bounds__ to cap register allocation when occupancy is too low."
+    - "Move rarely used temporaries out of the hot path or recompute cheap values instead of keeping them live."
+  validation_templates:
+    - "PTX local memory declarations and ld.local/st.local instructions should decrease."
+    - "Nsight Compute registers-per-thread and local memory traffic should decrease."
+    - "Achieved occupancy should improve if register pressure was limiting residency."
+  caveats:
+    - "Reducing registers can increase instruction count; benchmark the tradeoff."
+    - "__launch_bounds__ can cause extra spills if set too aggressively."
+
+- id: rec_ptx_stage_global_memory
+  title: Stage repeated global memory access through shared memory
+  category: ptx_static
+  applies_to: [ptx_global_memory_heavy]
+  prerequisites: {}
+  impact: high
+  effort: high
+  safety: medium
+  action_templates:
+    - "Identify global loads reused by multiple threads in the same block."
+    - "Load reusable tiles into shared memory before the compute loop."
+    - "Prefer coalesced global loads when populating each shared-memory tile."
+  validation_templates:
+    - "Global memory instruction ratio should decrease in PTX."
+    - "Nsight Compute DRAM throughput pressure should decrease."
+    - "L1/L2 hit rates should improve when reuse is captured."
+  caveats:
+    - "Shared memory tiling only helps when data reuse exists."
+    - "Extra shared memory can reduce occupancy; verify block residency."
+
+- id: rec_ptx_reduce_fp64
+  title: Remove unnecessary FP64 operations
+  category: ptx_static
+  applies_to: [ptx_fp64_usage]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Audit double literals, casts, and accumulator types in the source kernel."
+    - "Use float constants and FP32 math when double precision is not required."
+    - "Keep only numerically sensitive reductions or accumulations in FP64."
+  validation_templates:
+    - "PTX .f64 instruction count should decrease."
+    - "Kernel time should improve on GPUs with low FP64 throughput."
+  caveats:
+    - "Changing precision can alter numerical results; compare output error bounds."
+
+- id: rec_ptx_reduce_branch_divergence
+  title: Reduce branch divergence risk
+  category: ptx_static
+  applies_to: [ptx_branch_divergence_risk]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: high
+  action_templates:
+    - "Move thread-divergent conditionals out of inner loops when possible."
+    - "Group inputs so neighboring threads follow the same branch path."
+    - "Replace small conditionals with predicated arithmetic where it reduces divergence."
+  validation_templates:
+    - "Conditional branch density in PTX should decrease."
+    - "Nsight Compute branch efficiency should improve."
+  caveats:
+    - "Predication can increase executed instructions; benchmark both forms."

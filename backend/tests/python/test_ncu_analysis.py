@@ -148,6 +148,46 @@ def test_derive_ncu_run_summary_sync_stall_fraction() -> None:
     assert result["compute_stall_fraction"] == 0.0
 
 
+def test_derive_ncu_run_summary_multi_kernel_partial_metrics() -> None:
+    text = _long_format_csv(
+        ("mem_a", "dram__throughput.avg.pct_of_peak_sustained_elapsed", "%", "90.0"),
+        ("mem_a", "l1tex__t_sector_hit_rate.pct", "%", "24.0"),
+        ("mem_a", "lts__t_sector_hit_rate.pct", "%", "44.0"),
+        ("mem_a", "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle", "%", "45.0"),
+        ("mem_a", "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard", "%", "15.0"),
+        ("mem_b", "dram__throughput.avg.pct_of_peak_sustained_elapsed", "%", "78.0"),
+        ("mem_b", "l1tex__t_sector_hit_rate.pct", "%", "36.0"),
+        ("mem_b", "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle", "%", "35.0"),
+        ("tensor_only", "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active", "%", "18.0"),
+        ("tensor_only", "sm__issue_active.avg.pct_of_peak_sustained_active", "%", "72.0"),
+        ("l2_only", "lts__t_sector_hit_rate.pct", "%", "42.0"),
+        ("sync_only", "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_barrier", "%", "30.0"),
+        ("sync_only", "sm__issue_active.avg.pct_of_peak_sustained_active", "%", "55.0"),
+        ("launch_only", "launch__registers_per_thread", "register/thread", "64"),
+        ("launch_only", "launch__block_size", "thread/block", "256"),
+    )
+    summaries = at.parse_nsight_compute_csv_text(text)
+    result = at.derive_ncu_run_summary(summaries)
+
+    assert result["kernel_count"] == 6
+    assert result["kernels_with_ncu_data"] == 5
+    assert result["kernels_with_warp_stall_data"] == 3
+    assert result["avg_dram_throughput_pct"] == 84.0
+    assert result["avg_tensor_core_utilization_pct"] == 18.0
+    assert result["avg_l1_cache_hit_rate_pct"] == 30.0
+    assert result["avg_l2_cache_hit_rate_pct"] == 43.0
+    assert result["avg_issue_slot_utilization_pct"] == 63.5
+    assert result["dominant_warp_stall"] == "memory_throttle"
+    assert result["dominant_warp_stall_pct"] == 26.67
+    assert result["warp_stall_breakdown"] == {
+        "barrier": 10.0,
+        "long_scoreboard": 5.0,
+        "memory_throttle": 26.67,
+    }
+    assert result["memory_stall_fraction"] == 0.3167
+    assert result["compute_stall_fraction"] == 0.0
+
+
 # ── classify_ncu_bottlenecks ──────────────────────────────────────────────────
 
 def test_classify_memory_bandwidth_bound() -> None:

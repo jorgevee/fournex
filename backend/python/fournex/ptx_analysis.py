@@ -114,6 +114,7 @@ def analyze_ptx_text(text: str, *, filename: str = "<memory>") -> dict[str, Any]
     avg_regs = (
         round(sum(k.register_count for k in kernels) / len(kernels), 1) if kernels else 0.0
     )
+    max_regs = max((k.register_count for k in kernels), default=0)
 
     # Dominant instruction category across all kernels
     combined_mix: dict[str, int] = {}
@@ -121,6 +122,46 @@ def analyze_ptx_text(text: str, *, filename: str = "<memory>") -> dict[str, Any]
         for cat, cnt in k.instruction_mix.items():
             combined_mix[cat] = combined_mix.get(cat, 0) + cnt
     dominant = max(combined_mix, key=combined_mix.__getitem__) if combined_mix else "unknown"
+    global_memory_ratios = [
+        (k.global_load_count + k.global_store_count) / k.instruction_count
+        for k in kernels
+        if k.instruction_count > 0
+    ]
+    branch_ratios = [
+        k.conditional_branch_count / k.instruction_count
+        for k in kernels
+        if k.instruction_count > 0
+    ]
+    summary = {
+        "kernel_count": len(kernels),
+        "total_instructions": total_instructions,
+        "avg_register_count": avg_regs,
+        "max_register_count": max_regs,
+        "any_spills": any_spills,
+        "kernels_with_spills": sum(1 for k in kernels if k.has_register_spills),
+        "total_spill_loads": total_spill_loads,
+        "total_spill_stores": total_spill_stores,
+        "dominant_instruction_category": dominant,
+        "has_fp64": any(k.has_fp64 for k in kernels),
+        "kernels_with_fp64": sum(1 for k in kernels if k.has_fp64),
+        "has_tensor_ops": any(k.has_tensor_ops for k in kernels),
+        "max_global_memory_ratio": round(max(global_memory_ratios, default=0.0), 4),
+        "avg_global_memory_ratio": round(
+            sum(global_memory_ratios) / len(global_memory_ratios), 4
+        ) if global_memory_ratios else 0.0,
+        "kernels_with_high_global_memory_ratio": sum(1 for ratio in global_memory_ratios if ratio > 0.40),
+        "kernels_without_shared_memory": sum(
+            1
+            for k in kernels
+            if k.shared_load_count == 0 and k.shared_store_count == 0
+        ),
+        "max_branch_density": round(max(branch_ratios, default=0.0), 4),
+        "kernels_with_high_branch_density": sum(1 for ratio in branch_ratios if ratio > 0.15),
+    }
+    bottlenecks = classify_ptx_bottlenecks(summary)
+    recommendations = _recommendations_for_ptx(bottlenecks, summary)
+    primary = bottlenecks[0]["label"] if bottlenecks else None
+    secondary = [b["label"] for b in bottlenecks[1:3]]
 
     return {
         "schema": "ptx_analysis_v1",
@@ -130,16 +171,97 @@ def analyze_ptx_text(text: str, *, filename: str = "<memory>") -> dict[str, Any]
         "kernel_count": len(kernels),
         "kernels": [k.to_dict() for k in kernels],
         "findings": sorted(all_findings, key=lambda f: _severity_rank(f["severity"])),
-        "run_summary": {
-            "total_instructions": total_instructions,
-            "avg_register_count": avg_regs,
-            "any_spills": any_spills,
-            "total_spill_loads": total_spill_loads,
-            "total_spill_stores": total_spill_stores,
-            "dominant_instruction_category": dominant,
-            "has_fp64": any(k.has_fp64 for k in kernels),
-            "has_tensor_ops": any(k.has_tensor_ops for k in kernels),
-        },
+        "run_summary": summary,
+        "bottlenecks": bottlenecks,
+        "primary_bottleneck": primary,
+        "secondary_bottlenecks": secondary,
+        "recommendations": recommendations["recommendations"],
+        "bundles": recommendations["bundles"],
+    }
+
+
+def classify_ptx_bottlenecks(ptx_summary: dict[str, Any]) -> list[dict[str, Any]]:
+    kernel_count = int(ptx_summary.get("kernel_count") or 0)
+    if kernel_count == 0 and int(ptx_summary.get("total_instructions") or 0) == 0:
+        return []
+
+    bottlenecks: list[dict[str, Any]] = []
+    kernels_with_spills = int(ptx_summary.get("kernels_with_spills") or 0)
+    if ptx_summary.get("any_spills"):
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_register_spills",
+            0.95 + min(0.05, 0.01 * kernels_with_spills),
+            {
+                "kernels_with_spills": kernels_with_spills,
+                "total_spill_loads": ptx_summary.get("total_spill_loads", 0),
+                "total_spill_stores": ptx_summary.get("total_spill_stores", 0),
+            },
+        ))
+
+    max_regs = int(ptx_summary.get("max_register_count") or 0)
+    avg_regs = float(ptx_summary.get("avg_register_count") or 0.0)
+    if max_regs > 128:
+        score = 0.75 + min(0.15, (max_regs - 128) / 512)
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_register_pressure",
+            score,
+            {"max_register_count": max_regs, "avg_register_count": avg_regs},
+        ))
+    elif max_regs > 64:
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_register_pressure",
+            0.50 + min(0.20, (max_regs - 64) / 320),
+            {"max_register_count": max_regs, "avg_register_count": avg_regs},
+        ))
+
+    global_ratio = float(ptx_summary.get("max_global_memory_ratio") or 0.0)
+    if global_ratio > 0.40:
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_global_memory_heavy",
+            0.45 + min(0.35, global_ratio - 0.40),
+            {
+                "max_global_memory_ratio": global_ratio,
+                "kernels_with_high_global_memory_ratio": ptx_summary.get(
+                    "kernels_with_high_global_memory_ratio", 0
+                ),
+            },
+        ))
+
+    if ptx_summary.get("has_fp64"):
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_fp64_usage",
+            0.45,
+            {"kernels_with_fp64": ptx_summary.get("kernels_with_fp64", 0)},
+        ))
+
+    branch_density = float(ptx_summary.get("max_branch_density") or 0.0)
+    if branch_density > 0.15:
+        bottlenecks.append(_ptx_bottleneck(
+            "ptx_branch_divergence_risk",
+            0.40 + min(0.30, branch_density - 0.15),
+            {"max_branch_density": branch_density},
+        ))
+
+    return sorted(bottlenecks, key=lambda item: item["score"], reverse=True)
+
+
+def _recommendations_for_ptx(
+    bottlenecks: list[dict[str, Any]],
+    ptx_summary: dict[str, Any],
+) -> dict[str, Any]:
+    from .recommendations.engine import generate_recommendations
+    from .recommendations.signals import extract_ptx_signals
+
+    signals = extract_ptx_signals(ptx_summary, bottlenecks)
+    return generate_recommendations(bottlenecks, ptx_summary, signals=signals)
+
+
+def _ptx_bottleneck(label: str, score: float, evidence: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "label": label,
+        "score": round(min(1.0, max(0.0, score)), 4),
+        "evidence": evidence,
+        "worst_steps": [],
     }
 
 
