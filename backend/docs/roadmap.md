@@ -1,6 +1,6 @@
 # Roadmap
 
-## v0.1 - Local collect + analyze (current)
+## v0.1 - Local collect + analyze
 
 ### Shipped
 
