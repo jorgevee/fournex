@@ -300,6 +300,7 @@ def test_analyze_ncu_csv_text_returns_recommendations() -> None:
 
     assert result["schema"] == "ncu_analysis_v1"
     assert result["kernel_count"] == 1
+    assert result["diagnostic_scope"]["type"] == "measured_ncu"
     assert result["primary_bottleneck"] is not None
     assert isinstance(result["recommendations"], list)
     assert len(result["recommendations"]) > 0

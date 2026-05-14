@@ -108,6 +108,35 @@ PTX_HIGH_GLOBAL = """
 }
 """
 
+PTX_VECTORIZED_GLOBAL = """
+.visible .entry vector_global() {
+    .reg .f32  %f<64>;
+    .reg .b64  %rd<8>;
+    ld.global.v4.f32 {%f0,%f1,%f2,%f3}, [%rd0];
+    ld.global.v4.f32 {%f4,%f5,%f6,%f7}, [%rd1];
+    ld.global.v4.f32 {%f8,%f9,%f10,%f11}, [%rd2];
+    ld.global.v4.f32 {%f12,%f13,%f14,%f15}, [%rd3];
+    ld.global.v4.f32 {%f16,%f17,%f18,%f19}, [%rd4];
+    fma.rn.f32 %f20, %f0, %f1, %f2;
+    ret;
+}
+"""
+
+PTX_FP64_DATA_MOVEMENT = """
+.visible .entry fp64_copy() {
+    .reg .f64  %fd<4>;
+    .reg .f32  %f<8>;
+    .reg .b64  %rd<4>;
+    ld.global.f64 %fd0, [%rd0];
+    st.global.f64 [%rd1], %fd0;
+    add.f32 %f0, %f1, %f2;
+    add.f32 %f3, %f4, %f5;
+    mul.f32 %f6, %f0, %f3;
+    add.f32 %f7, %f6, %f5;
+    ret;
+}
+"""
+
 
 # ── Register declarations ─────────────────────────────────────────────────────
 
@@ -180,6 +209,15 @@ def test_instruction_mix_counts_global_memory() -> None:
     assert k.global_store_count == 1
     assert k.instruction_mix["global_loads"] == 1
     assert k.instruction_mix["global_stores"] == 1
+
+
+def test_instruction_mix_weights_vectorized_global_memory() -> None:
+    kernels = at.parse_ptx_text(PTX_VECTORIZED_GLOBAL)
+    k = kernels[0]
+
+    assert k.instruction_count == 7
+    assert k.global_load_count == 20
+    assert k.instruction_mix["global_loads"] == 20
 
 
 def test_instruction_mix_counts_shared_memory() -> None:
@@ -258,6 +296,17 @@ def test_finding_fp64_detected() -> None:
     assert "fp64_detected" in codes
 
 
+def test_finding_fp64_data_movement_detected() -> None:
+    kernels = at.parse_ptx_text(PTX_FP64_DATA_MOVEMENT)
+    k = kernels[0]
+    codes = {f["code"] for f in k.findings}
+
+    assert k.has_fp64 is False
+    assert k.has_fp64_data_movement is True
+    assert k.fp64_data_movement_count == 2
+    assert "fp64_data_movement_detected" in codes
+
+
 def test_finding_very_high_register_count() -> None:
     text = """
     .visible .entry fat_kernel() {
@@ -306,6 +355,7 @@ def test_analyze_ptx_text_multi_kernel() -> None:
     result = at.analyze_ptx_text(PTX_MULTI_KERNEL)
     assert result["schema"] == "ptx_analysis_v1"
     assert result["kernel_count"] == 2
+    assert result["diagnostic_scope"]["type"] == "static_ptx"
 
 
 def test_analyze_ptx_text_extracts_version_and_target() -> None:
@@ -364,6 +414,25 @@ def test_analyze_ptx_text_global_memory_heavy_returns_tiling_recommendation() ->
     assert result["primary_bottleneck"] == "ptx_global_memory_heavy"
     assert "rec_ptx_stage_global_memory" in rec_ids
     assert "rec_ncu_collect_metrics" in rec_ids
+
+
+def test_analyze_ptx_text_vectorized_global_memory_returns_tiling_recommendation() -> None:
+    result = at.analyze_ptx_text(PTX_VECTORIZED_GLOBAL)
+    rec_ids = {rec["id"] for rec in result["recommendations"]}
+
+    assert result["run_summary"]["max_global_memory_ratio"] > 0.40
+    assert result["primary_bottleneck"] == "ptx_global_memory_heavy"
+    assert "rec_ptx_stage_global_memory" in rec_ids
+
+
+def test_analyze_ptx_text_fp64_data_movement_returns_fp64_recommendation() -> None:
+    result = at.analyze_ptx_text(PTX_FP64_DATA_MOVEMENT)
+    rec_ids = {rec["id"] for rec in result["recommendations"]}
+
+    assert result["run_summary"]["has_fp64"] is False
+    assert result["run_summary"]["has_fp64_data_movement"] is True
+    assert result["primary_bottleneck"] == "ptx_fp64_usage"
+    assert "rec_ptx_reduce_fp64" in rec_ids
 
 
 def test_analyze_ptx_text_clean_kernel_has_no_recommendations() -> None:

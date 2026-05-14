@@ -732,6 +732,7 @@
   action_templates:
     - "Audit double literals, casts, and accumulator types in the source kernel."
     - "Use float constants and FP32 math when double precision is not required."
+    - "Use FP32 buffers when double-precision loads and stores are not required."
     - "Keep only numerically sensitive reductions or accumulations in FP64."
   validation_templates:
     - "PTX .f64 instruction count should decrease."

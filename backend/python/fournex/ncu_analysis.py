@@ -251,6 +251,11 @@ def _build_ncu_result(
         "kernel_count": ncu_summary["kernel_count"],
         "kernels_with_ncu_data": ncu_summary["kernels_with_ncu_data"],
         "ncu_run_summary": ncu_summary,
+        "diagnostic_scope": {
+            "type": "measured_ncu",
+            "confidence": "high" if ncu_summary["kernels_with_ncu_data"] else "low",
+            "message": "Nsight Compute metrics are measured runtime evidence for the profiled kernels.",
+        },
         "bottlenecks": bottlenecks,
         "primary_bottleneck": primary,
         "secondary_bottlenecks": secondary,

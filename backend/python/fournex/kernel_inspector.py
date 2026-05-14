@@ -393,12 +393,14 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "launch__grid_dim_z": "grid_z",
         # Occupancy
         "sm__warps_active_avg_pct_of_peak_sustained_active": "achieved_occupancy_pct",
+        "sm__warps_active_avg_pct_of_peak_sustained_elapsed": "achieved_occupancy_pct",
         # DRAM / memory bandwidth
         "dram__throughput_avg_pct_of_peak_sustained_elapsed": "dram_throughput_pct",
         "memory_throughput": "dram_throughput_pct",
         "memory throughput": "dram_throughput_pct",
         # Tensor core utilization
         "sm__pipe_tensor_cycles_active_avg_pct_of_peak_sustained_active": "tensor_core_utilization_pct",
+        "sm__pipe_tensor_cycles_active_avg_pct_of_peak_sustained_elapsed": "tensor_core_utilization_pct",
         "tensor_core_utilization": "tensor_core_utilization_pct",
         "tensor core utilization": "tensor_core_utilization_pct",
         # Cache hit rates
@@ -408,6 +410,9 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "l2_cache_hit_rate": "l2_cache_hit_rate_pct",
         # Issue slot utilization (IPC proxy)
         "sm__issue_active_avg_pct_of_peak_sustained_active": "issue_slot_utilization_pct",
+        "sm__issue_active_avg_pct_of_peak_sustained_elapsed": "issue_slot_utilization_pct",
+        "smsp__issue_active_avg_pct_of_peak_sustained_active": "issue_slot_utilization_pct",
+        "smsp__issue_active_avg_pct_of_peak_sustained_elapsed": "issue_slot_utilization_pct",
         "issue_slots_busy": "issue_slot_utilization_pct",
         "issue slots busy": "issue_slot_utilization_pct",
     }
@@ -416,6 +421,11 @@ def _canonical_ncu_metric_name(name: str) -> str:
     # Regex-free fallback: arbitrary warp stall reasons from NCU sampling data
     if lowered.startswith(_NCU_STALL_PREFIX):
         stall_type = lowered[len(_NCU_STALL_PREFIX):]
+        return f"warp_stall_{stall_type}"
+    per_warp_prefix = "smsp__warp_issue_stalled_"
+    per_warp_suffix = "_per_warp_active_pct"
+    if lowered.startswith(per_warp_prefix) and lowered.endswith(per_warp_suffix):
+        stall_type = lowered[len(per_warp_prefix):-len(per_warp_suffix)]
         return f"warp_stall_{stall_type}"
     return aliases.get(lowered, lowered)
 

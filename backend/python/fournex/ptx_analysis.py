@@ -26,6 +26,11 @@ _INSTRUCTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\.f32\b"),                                     "fp32_ops"),
     (re.compile(r"\.[subu]\d+\b|\.b\d+\b"),                      "int_ops"),
 ]
+_VECTOR_MEMORY_RE = re.compile(
+    r"\b(?:ld|st)\.global(?:\.[a-z0-9_]+)*\.v(?P<width>[248])\.",
+    re.IGNORECASE,
+)
+_FP64_DATA_MOVEMENT_CATEGORIES = frozenset({"global_loads", "global_stores", "local_loads", "local_stores"})
 
 _ENTRY_RE = re.compile(
     r"\.(?:visible\s+|extern\s+)?\.entry\s+(?P<name>\w+)",
@@ -72,6 +77,8 @@ class PtxKernelAnalysis:
     has_tensor_ops: bool
     has_special_function_ops: bool
     has_fp64: bool
+    fp64_data_movement_count: int
+    has_fp64_data_movement: bool
     has_atomics: bool
     # Findings
     findings: list[dict[str, Any]] = field(default_factory=list)
@@ -144,6 +151,9 @@ def analyze_ptx_text(text: str, *, filename: str = "<memory>") -> dict[str, Any]
         "dominant_instruction_category": dominant,
         "has_fp64": any(k.has_fp64 for k in kernels),
         "kernels_with_fp64": sum(1 for k in kernels if k.has_fp64),
+        "has_fp64_data_movement": any(k.has_fp64_data_movement for k in kernels),
+        "kernels_with_fp64_data_movement": sum(1 for k in kernels if k.has_fp64_data_movement),
+        "total_fp64_data_movement_ops": sum(k.fp64_data_movement_count for k in kernels),
         "has_tensor_ops": any(k.has_tensor_ops for k in kernels),
         "max_global_memory_ratio": round(max(global_memory_ratios, default=0.0), 4),
         "avg_global_memory_ratio": round(
@@ -172,6 +182,11 @@ def analyze_ptx_text(text: str, *, filename: str = "<memory>") -> dict[str, Any]
         "kernels": [k.to_dict() for k in kernels],
         "findings": sorted(all_findings, key=lambda f: _severity_rank(f["severity"])),
         "run_summary": summary,
+        "diagnostic_scope": {
+            "type": "static_ptx",
+            "confidence": "medium" if kernels else "low",
+            "message": "PTX findings are static risks; validate runtime impact with Nsight Compute or a before/after benchmark.",
+        },
         "bottlenecks": bottlenecks,
         "primary_bottleneck": primary,
         "secondary_bottlenecks": secondary,
@@ -227,11 +242,16 @@ def classify_ptx_bottlenecks(ptx_summary: dict[str, Any]) -> list[dict[str, Any]
             },
         ))
 
-    if ptx_summary.get("has_fp64"):
+    if ptx_summary.get("has_fp64") or ptx_summary.get("has_fp64_data_movement"):
+        score = 0.45 if ptx_summary.get("has_fp64") else 0.35
         bottlenecks.append(_ptx_bottleneck(
             "ptx_fp64_usage",
-            0.45,
-            {"kernels_with_fp64": ptx_summary.get("kernels_with_fp64", 0)},
+            score,
+            {
+                "kernels_with_fp64": ptx_summary.get("kernels_with_fp64", 0),
+                "kernels_with_fp64_data_movement": ptx_summary.get("kernels_with_fp64_data_movement", 0),
+                "total_fp64_data_movement_ops": ptx_summary.get("total_fp64_data_movement_ops", 0),
+            },
         ))
 
     branch_density = float(ptx_summary.get("max_branch_density") or 0.0)
@@ -313,7 +333,10 @@ def _analyze_kernel_body(name: str, body: str) -> PtxKernelAnalysis:
             if pattern.search(line):
                 category = cat
                 break
-        mix[category] = mix.get(category, 0) + 1
+        weight = _instruction_weight(line, category)
+        mix[category] = mix.get(category, 0) + weight
+        if category in _FP64_DATA_MOVEMENT_CATEGORIES and ".f64" in line:
+            mix["fp64_memory_ops"] = mix.get("fp64_memory_ops", 0) + weight
 
         # Branch tracking
         if re.search(r"\bbra\b", line):
@@ -352,6 +375,8 @@ def _analyze_kernel_body(name: str, body: str) -> PtxKernelAnalysis:
         has_tensor_ops=mix.get("tensor_ops", 0) > 0,
         has_special_function_ops=mix.get("special_func", 0) > 0,
         has_fp64=mix.get("fp64_ops", 0) > 0,
+        fp64_data_movement_count=mix.get("fp64_memory_ops", 0),
+        has_fp64_data_movement=mix.get("fp64_memory_ops", 0) > 0,
         has_atomics=mix.get("atomic_ops", 0) > 0,
         findings=[],
     )
@@ -388,13 +413,19 @@ def _ptx_findings(a: PtxKernelAnalysis) -> list[dict[str, Any]]:
             f"FP64 operations detected ({a.instruction_mix.get('fp64_ops', 0)} instructions). FP64 runs at 1/2 to 1/64× of FP32 throughput on most GPUs.",
             "Use FP32 unless double precision is required. Check if accumulations can stay in FP32.",
         ))
+    if a.has_fp64_data_movement:
+        findings.append(_finding(
+            "low", "fp64_data_movement_detected",
+            f"FP64 load/store operations detected ({a.fp64_data_movement_count} scalar-equivalent memory ops).",
+            "If double precision is not required, use FP32 buffers and validate runtime impact with Nsight Compute.",
+        ))
 
     if a.instruction_count > 0:
         global_ratio = (a.global_load_count + a.global_store_count) / a.instruction_count
         if global_ratio > 0.40:
             findings.append(_finding(
                 "medium", "high_global_memory_ratio",
-                f"{round(global_ratio * 100)}% of instructions are global memory ops — kernel is memory-bound.",
+                f"{round(global_ratio * 100)}% scalar-equivalent global memory operations per instruction — kernel is memory-heavy.",
                 "Add shared memory tiling to stage data and improve reuse. Check L2 cache hit rate in Nsight Compute.",
             ))
 
@@ -436,6 +467,14 @@ def _ptx_findings(a: PtxKernelAnalysis) -> list[dict[str, Any]]:
         ))
 
     return findings
+
+
+def _instruction_weight(line: str, category: str) -> int:
+    if category in {"global_loads", "global_stores"}:
+        vector_match = _VECTOR_MEMORY_RE.search(line)
+        if vector_match:
+            return int(vector_match.group("width"))
+    return 1
 
 
 def _find_matching_brace(text: str, open_index: int) -> int | None:

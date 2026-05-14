@@ -91,6 +91,28 @@ def test_nsight_compute_csv_import_maps_kernel_metrics_to_ir(tmp_path: Path) -> 
     assert any(metric.metric_name == "kernel.registers_per_thread" for metric in metrics)
 
 
+def test_ncu_metric_aliases_used_by_real_cuda_integration() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "global_heavy,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,81.0",
+        "global_heavy,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_elapsed,%,12.0",
+        "global_heavy,l1tex__t_sector_hit_rate.pct,%,33.0",
+        "global_heavy,lts__t_sector_hit_rate.pct,%,48.0",
+        "global_heavy,smsp__issue_active.avg.pct_of_peak_sustained_active,%,57.0",
+        "global_heavy,smsp__warp_issue_stalled_long_scoreboard_per_warp_active.pct,%,31.0",
+    ])
+
+    summary = at.parse_nsight_compute_csv_text(text)[0]
+
+    assert summary.dram_throughput_pct == 81.0
+    assert summary.tensor_core_utilization_pct == 12.0
+    assert summary.l1_cache_hit_rate_pct == 33.0
+    assert summary.l2_cache_hit_rate_pct == 48.0
+    assert summary.issue_slot_utilization_pct == 57.0
+    assert summary.warp_stall_breakdown["long_scoreboard"] == 31.0
+    assert summary.dominant_warp_stall == "long_scoreboard"
+
+
 def test_common_ir_run_summary_includes_kernel_launch_summary() -> None:
     event = at.EventRecord(
         event_id="kernel_1",

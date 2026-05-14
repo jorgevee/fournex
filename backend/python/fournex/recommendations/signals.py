@@ -164,7 +164,12 @@ def extract_ptx_signals(
         "ptx_global_memory_heavy": "ptx_global_memory_heavy" in labels,
         "ptx_max_global_memory_ratio": max_global_ratio,
         "ptx_no_shared_memory": kernel_count > 0 and kernels_without_shared == kernel_count,
-        "ptx_has_fp64": bool(ptx_summary.get("has_fp64", False)),
+        "ptx_has_fp64": bool(
+            ptx_summary.get("has_fp64", False)
+            or ptx_summary.get("has_fp64_data_movement", False)
+        ),
+        "ptx_has_fp64_arithmetic": bool(ptx_summary.get("has_fp64", False)),
+        "ptx_has_fp64_data_movement": bool(ptx_summary.get("has_fp64_data_movement", False)),
         "ptx_branch_divergence_risk": max_branch_density > 0.15,
         "ptx_max_branch_density": max_branch_density,
         "framework_pytorch": str(env.get("framework", "")).lower() == "pytorch",

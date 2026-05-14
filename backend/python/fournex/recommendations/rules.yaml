@@ -489,8 +489,9 @@
     - rec_ptx_reduce_fp64
   priority_boost: 0.05
   explanation: >
-    PTX includes FP64 operations. On most non-HPC GPUs, double precision has
-    much lower throughput than FP32.
+    PTX includes FP64 arithmetic or data movement. On most non-HPC GPUs,
+    double precision has much lower throughput and doubles memory footprint
+    relative to FP32.
 
 - id: rule_ptx_branch_divergence
   bottleneck: ptx_branch_divergence_risk
