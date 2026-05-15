@@ -175,14 +175,14 @@ def test_fp32_kernel_has_no_fp64_finding():
 
 @pytest.mark.skipif(not NVCC, reason="nvcc not on PATH")
 def test_register_spills_kernel_triggers_register_pressure_rec():
-    """-maxrregcount 8 forces spills → register_spills_detected + rec."""
-    ptx    = compile_ptx(CUDA_DIR / "register_spills.cu", ["-maxrregcount", "8"])
+    """volatile local array forces .local PTX memory → register_spills_detected + rec."""
+    ptx    = compile_ptx(CUDA_DIR / "register_spills.cu")
     result = at.analyze_ptx_text(ptx)
     codes  = _finding_codes(result)
     recs   = _rec_ids(result)
 
     assert result["run_summary"]["any_spills"], (
-        "Expected register spills when compiled with -maxrregcount 8"
+        "Expected .local memory from volatile float arr[16] — architecture-independent spill"
     )
     assert "register_spills_detected" in codes, (
         f"Expected register_spills_detected; got codes={codes}"
@@ -260,8 +260,8 @@ def test_fp64_to_fp32_comparison_resolves_fp64_finding():
 
 @pytest.mark.skipif(not NVCC, reason="nvcc not on PATH")
 def test_spill_to_bounded_comparison_winner_is_b():
-    """Removing -maxrregcount eliminates spills → b wins register_efficiency and overall."""
-    ptx_bad  = compile_ptx(CUDA_DIR / "register_spills.cu",  ["-maxrregcount", "8"])
+    """volatile-array kernel has .local spills; scalar kernel does not → b wins."""
+    ptx_bad  = compile_ptx(CUDA_DIR / "register_spills.cu")
     ptx_good = compile_ptx(CUDA_DIR / "register_bounded.cu")
 
     result = at.compare_implementations(
@@ -278,7 +278,7 @@ def test_spill_to_bounded_comparison_winner_is_b():
 @pytest.mark.skipif(not NVCC, reason="nvcc not on PATH")
 def test_spill_to_bounded_comparison_resolves_spill_finding():
     """findings_diff shows register_spills_detected resolved in bounded version."""
-    ptx_bad  = compile_ptx(CUDA_DIR / "register_spills.cu",  ["-maxrregcount", "8"])
+    ptx_bad  = compile_ptx(CUDA_DIR / "register_spills.cu")
     ptx_good = compile_ptx(CUDA_DIR / "register_bounded.cu")
 
     result        = at.compare_implementations(
@@ -341,6 +341,13 @@ def test_ncu_profile_of_global_heavy_detects_memory_bottleneck():
             pytest.skip(f"ncu run failed (no GPU or permission?): {ncu_proc.stderr[:300]}")
 
         ncu_result = at.analyze_ncu_csv_text(ncu_proc.stdout)
+
+        if ncu_result.get("ncu_run_summary", {}).get("kernels_with_ncu_data", 0) == 0:
+            pytest.skip(
+                "ncu ran but profiled 0 kernels — hardware counters unavailable "
+                "(WDDM consumer GPU from WSL2 requires Windows admin access)"
+            )
+
         bottleneck_labels = {b["label"] for b in ncu_result.get("bottlenecks", [])}
 
         # cache_thrashing fires on L1 hit rate alone (no stall data needed).

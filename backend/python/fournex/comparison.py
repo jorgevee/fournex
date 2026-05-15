@@ -34,6 +34,7 @@ def compare_implementations(
     ncu_diff    = _build_ncu_diff(ncu_a, ncu_b)
     scorecard   = _build_scorecard(static_a, ptx_a, ncu_a, static_b, ptx_b, ncu_b)
     verdict     = _build_verdict(scorecard, label_a, label_b)
+    tradeoffs   = _build_tradeoffs(ptx_diff, ncu_diff)
 
     return {
         "schema": "comparison_v1",
@@ -56,6 +57,7 @@ def compare_implementations(
         "ncu_diff": ncu_diff,
         "scorecard": scorecard,
         "verdict": verdict,
+        "tradeoffs": tradeoffs,
     }
 
 
@@ -245,6 +247,54 @@ def _build_ncu_diff(ncu_a: dict | None, ncu_b: dict | None) -> dict[str, Any]:
             "b": (ncu_b or {}).get("primary_bottleneck"),
         },
     }
+
+
+def _build_tradeoffs(ptx_diff: dict[str, Any], ncu_diff: dict[str, Any]) -> list[dict[str, Any]]:
+    tradeoffs: list[dict[str, Any]] = []
+    if not (ptx_diff.get("available") and ncu_diff.get("available")):
+        return tradeoffs
+
+    reg_better = ptx_diff.get("register_count", {}).get("better")
+    spill_info = ptx_diff.get("has_register_spills", {})
+    occ_better = ncu_diff.get("avg_occupancy_pct", {}).get("better")
+    occ_delta = ncu_diff.get("avg_occupancy_pct", {}).get("delta")
+
+    register_improved_in_b = reg_better == "b" or spill_info.get("resolved_in_b")
+    register_regressed_in_b = reg_better == "a" or spill_info.get("introduced_in_b")
+
+    if register_improved_in_b and occ_better == "a":
+        tradeoffs.append({
+            "label": "register_pressure_improved_but_occupancy_regressed",
+            "severity": "medium",
+            "message": "The optimized version reduced register pressure or spills, but achieved occupancy decreased.",
+            "evidence": {
+                "register_count": ptx_diff.get("register_count"),
+                "has_register_spills": spill_info,
+                "avg_occupancy_pct": ncu_diff.get("avg_occupancy_pct"),
+            },
+        })
+
+    if occ_better == "b" and register_regressed_in_b:
+        tradeoffs.append({
+            "label": "occupancy_improved_but_register_pressure_regressed",
+            "severity": "medium",
+            "message": "The optimized version improved achieved occupancy, but register pressure or spills regressed.",
+            "evidence": {
+                "register_count": ptx_diff.get("register_count"),
+                "has_register_spills": spill_info,
+                "avg_occupancy_pct": ncu_diff.get("avg_occupancy_pct"),
+            },
+        })
+
+    if occ_delta is not None and abs(float(occ_delta)) >= 20.0 and not (register_improved_in_b or register_regressed_in_b):
+        tradeoffs.append({
+            "label": "large_occupancy_shift",
+            "severity": "low",
+            "message": "Achieved occupancy changed materially; verify this is intentional and improves wall-clock time.",
+            "evidence": {"avg_occupancy_pct": ncu_diff.get("avg_occupancy_pct")},
+        })
+
+    return tradeoffs
 
 
 # ── Scorecard ─────────────────────────────────────────────────────────────────

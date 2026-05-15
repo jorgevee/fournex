@@ -93,6 +93,9 @@ def extract_ncu_signals(
     l2 = ncu_summary.get("avg_l2_cache_hit_rate_pct")
     isu = ncu_summary.get("avg_issue_slot_utilization_pct") or 0.0
     occ = ncu_summary.get("avg_occupancy_pct") or 0.0
+    eligible = ncu_summary.get("avg_eligible_warps_per_scheduler")
+    scheduler_active = ncu_summary.get("avg_scheduler_active_pct")
+    causes = set(ncu_summary.get("occupancy_limit_causes") or [])
     stall = ncu_summary.get("dominant_warp_stall") or "unknown"
     mem_frac = ncu_summary.get("memory_stall_fraction") or 0.0
 
@@ -121,10 +124,17 @@ def extract_ncu_signals(
         "issue_efficiency_low": isu < 60.0,
         "issue_efficiency_very_low": isu < 40.0,
         "issue_slot_utilization_pct": isu,
+        "eligible_warps_low": eligible is not None and eligible < 1.0,
+        "scheduler_active_low": scheduler_active is not None and scheduler_active < 40.0,
+        "avg_eligible_warps_per_scheduler": eligible if eligible is not None else 0.0,
+        "avg_scheduler_active_pct": scheduler_active if scheduler_active is not None else 0.0,
 
         # ── Occupancy ────────────────────────────────────────────────────────
         "occupancy_good": occ > 60.0,
         "occupancy_low": occ < 30.0,
+        "occupancy_limited_by_registers": "registers" in causes,
+        "occupancy_limited_by_shared_memory": "shared_memory" in causes,
+        "occupancy_limited_by_block_size": bool(causes & {"threads", "blocks", "unknown_threads_per_block"}),
         "avg_occupancy_pct": occ,
 
         # ── Warp stalls ──────────────────────────────────────────────────────

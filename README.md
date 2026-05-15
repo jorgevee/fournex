@@ -1,12 +1,12 @@
 # Fournex
 
-**Open-source GPU performance profiler and bottleneck analyzer for PyTorch.**
+**Open-source GPU performance profiler and bottleneck analyzer for PyTorch and CUDA.**
 
 [![PyPI](https://img.shields.io/pypi/v/fournex)](https://pypi.org/project/fournex/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
-Fournex wraps your training script, collects GPU telemetry, and tells you exactly what is slowing it down, dataloader starvation, H2D copy overhead, kernel launch bottlenecks, memory pressure, and more, with ranked, actionable recommendations.
+Fournex helps developers find GPU performance bottlenecks and turn profiler evidence into ranked recommendations. It supports PyTorch training-loop telemetry, PTX static analysis, CUDA source inspection, Nsight Compute CSV ingestion, and before/after CUDA comparisons.
 
 ---
 
@@ -16,39 +16,22 @@ Fournex wraps your training script, collects GPU telemetry, and tells you exactl
 pip install fournex
 ```
 
-Requires Python 3.10+. A CUDA-capable GPU is recommended; CPU-only mode works for trace analysis.
+Requires Python 3.10+. A CUDA-capable GPU is recommended for runtime profiling; PTX, CUDA source, and imported Nsight Compute CSV analysis can run without live GPU access.
 
 ---
 
 ## 60-second demo
 
-**Step 1 — Profile your workload**
+### Analyze a training run
 
 ```bash
 frx collect --name my-run -- python train.py
-```
-
-```
-frx collect completed
-Run bundle: runs/run-a1b2c3d4e5f6
-Zip bundle: runs/run-a1b2c3d4e5f6.zip
-
-Captured (6 files):
-  metadata.json
-  run_config.yaml
-  gpu_metrics.csv
-  optional_logs.txt
-  raw/trace.jsonl
-  derived/summary.json
-```
-
-**Step 2 — Analyze**
-
-```bash
 frx analyze runs/run-a1b2c3d4e5f6
 ```
 
-```
+Example output:
+
+```text
 --------------------------------------------------------
   GPU Autopilot - Run Analysis
   Run  : run-a1b2c3d4e5f6
@@ -66,108 +49,150 @@ EVIDENCE
 
 PERFORMANCE SNAPSHOT
   Avg GPU Utilization : 23.4%
-  Avg Memory Util     : 18.1%
-  Peak Memory Pressure: 0.21
   Avg Step Time       : 482.000 ms
   Throughput          : 2.1 steps/sec
   Dominant Stall      : dataloader
 
-TOP RECOMMENDATIONS (3 of 5)
+TOP RECOMMENDATIONS
+  1. Increase DataLoader num_workers
+  2. Tune prefetching / persistent workers
+  3. Move expensive CPU transforms closer to the GPU path
+```
 
-  1. [HIGH] Increase DataLoader num_workers
-     Effort: config  |  Risk: low  |  Score: 0.91
-     DataLoader is the dominant bottleneck. More workers will overlap
-     data loading with GPU compute.
-     Actions:
-       - Set num_workers=8 (or os.cpu_count() // 2)
-       - Benchmark with num_workers=4, 8, 12 to find the sweet spot
+### Analyze CUDA evidence directly
 
-  2. [HIGH] Enable pin_memory
-     Effort: config  |  Risk: low  |  Score: 0.88
-     Pinned memory enables faster host-to-device transfers for
-     DataLoader output tensors.
-     Actions:
-       - Add pin_memory=True to DataLoader
+```bash
+frx analyze kernel.ptx
+frx analyze kernel.cu
+frx analyze ncu_report.csv
+```
 
-  3. [MEDIUM] Move transforms to GPU
-     Effort: medium  |  Risk: low  |  Score: 0.71
-     CPU-side augmentation pipelines are a common source of
-     DataLoader starvation.
-     Actions:
-       - Replace torchvision CPU transforms with GPU equivalents (v2 API)
+### Compare before and after
+
+```bash
+frx analyze --before before.ptx --after after.ptx
+frx analyze --before before.csv --after after.csv
+```
+
+Use JSON for automation:
+
+```bash
+frx analyze ncu_report.csv --json
+frx analyze --before before.ptx --after after.ptx --json
+```
+
+JSON output is wrapped as:
+
+```json
+{
+  "mode": "ptx",
+  "result": {}
+}
 ```
 
 ---
 
-## Detected bottleneck types
+## What Fournex Detects
 
-**Training-level (SDK / CLI telemetry)**
-
-| Label | Signal |
-|---|---|
-| `input_bound` | DataLoader wait ≥ 20% of step time |
-| `copy_bound` | H2D transfer ≥ 15% of step time |
-| `sync_bound` | Sync wait ≥ 10% of step time |
-| `underutilized_gpu` | GPU utilization < 35% |
-| `memory_pressure` | Peak memory ratio ≥ 90% |
-| `shape_instability` | Shape volatility ratio ≥ 30% |
-| `launch_bound` | Low utilization + profiler windows, no dominant stall |
-| `insufficient_telemetry` | No timing or GPU utilization data |
-
-**Kernel-level (Nsight Compute / `POST /ncu/analyze`)**
+### Training-level bottlenecks
 
 | Label | Signal |
 |---|---|
-| `memory_bandwidth_bound` | DRAM throughput ≥ 80% of peak |
-| `warp_stall_memory` | Memory stalls dominate ≥ 40% of profiled kernels |
-| `warp_stall_sync` | Sync stalls dominate ≥ 40% of profiled kernels |
-| `cache_thrashing` | L1 cache hit rate < 30% |
-| `tensor_core_underutilized` | Tensor core utilization < 20% |
-| `low_issue_efficiency` | Issue slot utilization < 40% |
-| `insufficient_ncu_data` | NCU CSV had no parseable metrics |
+| `input_bound` | DataLoader / input pipeline consumes a large share of step time |
+| `copy_bound` | Host-to-device transfer time is material |
+| `sync_bound` | Synchronization wait is material |
+| `underutilized_gpu` | GPU utilization is low without another dominant stall |
+| `memory_pressure` | GPU memory pressure is high |
+| `shape_instability` | Batch or tensor shapes vary enough to disrupt steady execution |
+| `launch_bound` | Many small kernels / low utilization pattern |
+| `insufficient_telemetry` | Not enough trace data to make a reliable call |
+
+### CUDA / kernel-level bottlenecks
+
+| Label | Signal |
+|---|---|
+| `ptx_register_spills` | PTX local-memory spill loads/stores detected |
+| `ptx_high_register_pressure` | High per-thread register use |
+| `ptx_global_memory_heavy` | Global-memory-heavy PTX with little shared-memory use |
+| `ptx_fp64_usage` | FP64 arithmetic or FP64 data movement detected |
+| `ptx_branch_divergence_risk` | High conditional branch density |
+| `memory_bandwidth_bound` | High DRAM throughput plus memory stalls in Nsight Compute data |
+| `warp_stall_memory` | Memory-related warp stalls dominate |
+| `warp_stall_sync` | Barrier/synchronization stalls dominate |
+| `cache_thrashing` | Low L1 or L2 cache hit rate |
+| `tensor_core_underutilized` | Tensor core utilization is low where tensor cores may apply |
+| `low_issue_efficiency` | Issue slot utilization is low |
+| `insufficient_ncu_data` | NCU CSV had no parseable performance metrics |
 
 ---
 
-## CLI reference
+## CLI Reference
 
-```
+```bash
+# Collect and analyze PyTorch training telemetry
 frx collect --name <name> [--out <dir>] -- python train.py
-frx analyze <run-dir> [--scope run|steady_state|auto] [--json]
+frx analyze <run-dir-or-zip> [--scope run|steady_state|auto] [--json]
+
+# Analyze CUDA evidence files
+frx analyze kernel.ptx [--json]
+frx analyze kernel.cu [--gpu-model A100] [--json]
+frx analyze ncu_report.csv [--json]
+
+# Generate Nsight Compute collection commands
+frx ncu-command --list
+frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
+frx ncu-command full --kernel-name regex:my_kernel --output ncu_full.csv -- ./my_kernel_app
+
+# Compare two versions
+frx analyze --before before.ptx --after after.ptx [--json]
+frx analyze --before before.csv --after after.csv [--json]
+
+# Compare with multiple evidence layers per side
+frx analyze \
+  --before-source before.cu --before-ptx before.ptx --before-ncu before.csv \
+  --after-source after.cu --after-ptx after.ptx --after-ncu after.csv
+
+# Utilities
 frx doctor
 frx smoke-test
+frx tune --safe --max-trials 12 -- python train.py
 ```
+
+`--baseline` and `--optimized` are still accepted as deprecated aliases for NCU before/after comparison. Prefer `--before` and `--after`.
 
 Full documentation: **[fournex.com/docs](https://fournex.com/docs)**
 
 ---
 
-## SDK instrumentation (optional)
+## SDK Instrumentation
 
 For richer per-step telemetry, instrument your training loop:
 
 ```python
-from fournex import AutopilotSession
+import fournex as frx
 
-with AutopilotSession(job_name="resnet-baseline") as session:
-    for batch in dataloader:
-        with session.step():
-            with session.phase("forward"):
-                loss = model(batch)
-            with session.phase("backward"):
-                loss.backward()
+frx.init(job_name="resnet-baseline")
+
+for step, batch in enumerate(dataloader):
+    with frx.step_context(step=step, batch=batch, model=model):
+        with frx.phase("forward", step=step):
+            loss = model(batch)
+        with frx.phase("backward", step=step):
+            loss.backward()
+        with frx.phase("optimizer", step=step):
             optimizer.step()
 ```
 
-Without the SDK, `frx collect` still works using `nvidia-smi` sampling and an optional PyTorch profiler trace import.
+Without SDK instrumentation, `frx collect` can still wrap the process, sample `nvidia-smi`, and import optional PyTorch profiler traces.
 
 ---
 
-## PyTorch profiler integration
+## PyTorch Profiler Integration
 
-Export a Chrome-format trace from `torch.profiler` and pass it to `frx collect`:
+Export a Chrome-format trace from `torch.profiler` into `frx-job-run/profiler_trace.json`; `frx collect` imports it automatically.
 
 ```python
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import ProfilerActivity, profile
 
 with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
     train()
@@ -177,32 +202,94 @@ prof.export_chrome_trace("frx-job-run/profiler_trace.json")
 
 ```bash
 frx collect --name prof-run -- python train.py
-# frx automatically imports frx-job-run/profiler_trace.json
+frx analyze runs/<run-id>
 ```
 
 ---
 
-## REST API (advanced analysis)
+## CUDA Workflow
 
-Fournex ships a FastAPI backend for deeper GPU diagnostics that go beyond step-level telemetry.
+### PTX analysis
+
+Generate PTX with your CUDA toolchain, then analyze it:
 
 ```bash
-cd backend && uvicorn api:app --reload
+nvcc -ptx kernel.cu -o kernel.ptx
+frx analyze kernel.ptx
 ```
 
-### CUDA static inspection — `POST /cuda/static-inspect`
+PTX analysis is static. It flags likely risks such as register spills, high register pressure, global-memory-heavy instruction mix, FP64 use, branch divergence risk, and atomics.
 
-Analyze `.cu`/`.cuh` source files without a GPU. Detects kernel signatures, launch configs, shared memory allocations, indexing patterns, bank conflict risk, and reduction patterns.
+### Nsight Compute CSV analysis
+
+Export a CSV from Nsight Compute and pass it to Fournex:
 
 ```bash
-curl -X POST http://http://127.0.0.1:8000/cuda/static-inspect \
+frx ncu-command full --output ncu_report.csv -- ./my_kernel_app
+# prints:
+# ncu --csv --target-processes all --metrics <fournex metrics> ./my_kernel_app > ncu_report.csv
+
+frx analyze ncu_report.csv
+```
+
+NCU analysis uses measured runtime counters, so its confidence is higher when hardware counters are available. On some WSL2/WDDM setups, NCU hardware counters may be inaccessible.
+
+Fournex ships metric presets for common CUDA investigations:
+
+| Preset | Use when | Includes |
+|---|---|---|
+| `memory` | DRAM bandwidth, cache, or memory stalls are suspected | DRAM throughput, L1/L2 hit rates, memory stall reasons |
+| `tensor` | GEMM/convolution/AMP performance is suspected | Tensor core utilization, issue utilization, achieved occupancy |
+| `occupancy` | Launch config or resource pressure may limit active warps | Achieved occupancy, block size, registers/thread, shared memory |
+| `stalls` | You need warp stall reason breakdown | Memory, sync, scoreboard, dispatch, and scheduler stall metrics |
+| `full` | You want the broadest Fournex CUDA diagnosis | Union of all presets |
+
+Examples:
+
+```bash
+frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
+frx ncu-command tensor --kernel-name regex:gemm --output ncu_tensor.csv -- ./my_kernel_app
+frx ncu-command occupancy --launch-skip 5 --launch-count 20 --output ncu_occ.csv -- ./my_kernel_app
+frx ncu-command stalls --target-processes all --output ncu_stalls.csv -- python train.py
+```
+
+`frx analyze ncu_report.csv` validates the CSV before reporting. If key metrics are missing, Fournex prints warnings such as "Memory diagnosis may be incomplete" or "Occupancy diagnosis may be incomplete." Malformed CSVs fail with actionable errors for missing kernel, metric, or value columns.
+
+### Before/after comparison
+
+```bash
+frx analyze --before baseline.ptx --after optimized.ptx
+frx analyze --before baseline.csv --after optimized.csv
+```
+
+For the strongest comparison, provide source, PTX, and NCU CSV for both sides:
+
+```bash
+frx analyze \
+  --before-source baseline.cu --before-ptx baseline.ptx --before-ncu baseline.csv \
+  --after-source optimized.cu --after-ptx optimized.ptx --after-ncu optimized.csv
+```
+
+---
+
+## REST API
+
+Fournex also ships a FastAPI backend for integration use cases.
+
+```bash
+cd backend
+uvicorn api:app --reload
+```
+
+### CUDA static inspection - `POST /cuda/static-inspect`
+
+```bash
+curl -X POST http://127.0.0.1:8000/cuda/static-inspect \
   -H "Content-Type: application/json" \
   -d '{"files": [{"filename": "kernel.cu", "content": "<source>"}], "gpu_model": "A100"}'
 ```
 
-### PTX analysis — `POST /ptx/analyze`
-
-Static analysis of PTX (NVIDIA's virtual ISA). No live GPU needed, pass PTX text extracted via `cuobjdump`. Returns per-kernel register pressure, spill detection, instruction mix, and severity-ranked findings.
+### PTX analysis - `POST /ptx/analyze`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ptx/analyze \
@@ -210,19 +297,15 @@ curl -X POST http://127.0.0.1:8000/ptx/analyze \
   -d '{"content": "<ptx text>", "filename": "kernel.ptx"}'
 ```
 
-### Nsight Compute analysis — `POST /ncu/analyze`
-
-Ingest an NCU CSV export. Returns warp stall breakdown, DRAM/cache/tensor core metrics, bottleneck labels, and recommendations.
+### Nsight Compute analysis - `POST /ncu/analyze`
 
 ```bash
-curl -X POST http://http://127.0.0.1:8000/ncu/analyze \
+curl -X POST http://127.0.0.1:8000/ncu/analyze \
   -H "Content-Type: application/json" \
   -d '{"content": "<csv text>", "filename": "report.csv"}'
 ```
 
-### Implementation comparison — `POST /compare`
-
-Compare two implementations side-by-side (baseline vs optimized, CUDA vs Triton, etc.). Each side accepts any combination of CUDA source, PTX, and NCU CSV. Returns structural diffs, profiler metric deltas, a 4-dimension efficiency scorecard, and an overall verdict.
+### Implementation comparison - `POST /compare`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/compare \
@@ -235,7 +318,7 @@ curl -X POST http://127.0.0.1:8000/compare \
 
 ---
 
-## Development setup
+## Development Setup
 
 ```bash
 git clone https://github.com/jorgevee/fournex.git
@@ -261,14 +344,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
 
 ---
 
-## Coming soon
+## Coming Soon
 
-- `frx upload` — push run bundles to the cloud for shareable analysis URLs
-- Automated config optimization (private beta — [join the waitlist](https://fournex.com))
-- Distributed (multi-GPU) workload support
+- `frx upload` - push run bundles to the cloud for shareable analysis URLs
+- Automated config optimization
+- Distributed and multi-GPU workload support
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

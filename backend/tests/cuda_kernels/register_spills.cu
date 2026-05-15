@@ -1,8 +1,11 @@
-// Register-pressure kernel — compiled with -maxrregcount 8 in the test suite.
-// 10+ named float variables (a..m) exceed the 8-register limit, forcing nvcc to
-// spill values to local memory (.local .align .b8 declaration + st.local/ld.local).
+// Local-memory spill kernel.
+// A volatile float array with runtime indexing cannot be register-allocated by
+// any nvcc version, so the compiler always emits:
+//   .local .align 4 .b8 __local_depot0[64]   (16 floats × 4 bytes)
+//   st.local / ld.local instructions
+// This is architecture-independent — no -maxrregcount flag needed.
 //
-// Expected PTX analysis (when compiled with -maxrregcount 8):
+// Expected PTX analysis:
 //   finding : register_spills_detected  (.local memory declaration present)
 //   rec     : rec_ptx_reduce_register_pressure
 
@@ -11,18 +14,17 @@ __global__ void compute_reduce(const float* __restrict__ in,
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
 
-    float a = in[i];
-    float b = in[i ^ 1];
-    float c = in[i ^ 2];
-    float d = in[i ^ 3];
+    // volatile prevents nvcc from promoting the array to registers.
+    // Runtime indexing with threadIdx ensures the compiler cannot fold
+    // accesses at compile time.
+    volatile float arr[16];
+    for (int j = 0; j < 16; j++) {
+        arr[j] = in[(i + j) % n];
+    }
 
-    float e = a + b;
-    float f = c + d;
-    float g = e * f;
-    float h = sqrtf(g);
-
-    float k = a * c + b * d;
-    float m = e * h + f * g;
-
-    out[i] = k + m + g + h + e + f;
+    float sum = 0.f;
+    for (int j = 0; j < 16; j++) {
+        sum += arr[j];
+    }
+    out[i] = sum;
 }

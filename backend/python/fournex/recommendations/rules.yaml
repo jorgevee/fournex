@@ -423,6 +423,65 @@
     unable to issue instructions. Increasing block size or adding ILP via
     loop unrolling can improve instruction throughput.
 
+- id: rule_ncu_low_scheduler_utilization
+  bottleneck: low_warp_scheduler_utilization
+  min_score: 0.20
+  signals:
+    eligible_warps_low: true
+  suppressed_if:
+    warp_stall_is_memory: true
+  recommendations:
+    - rec_ncu_increase_block_size
+    - rec_ncu_instruction_level_parallelism
+  priority_boost: 0.15
+  explanation: >
+    Few warps are eligible to issue each scheduler cycle, so the scheduler
+    often has no ready warp. More resident warps or more independent work per
+    warp can improve issue throughput.
+
+- id: rule_ncu_occupancy_limited_by_registers
+  bottleneck: occupancy_limited_by_registers
+  min_score: 0.25
+  signals:
+    occupancy_limited_by_registers: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_reduce_register_pressure
+    - rec_ncu_collect_metrics
+  priority_boost: 0.15
+  explanation: >
+    Achieved or estimated occupancy is low and block residency is limited by
+    registers per thread. Reducing live values or tuning launch bounds can
+    increase active warps.
+
+- id: rule_ncu_occupancy_limited_by_shared_memory
+  bottleneck: occupancy_limited_by_shared_memory
+  min_score: 0.25
+  signals:
+    occupancy_limited_by_shared_memory: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_reduce_shared_memory_footprint
+    - rec_ncu_shared_mem_layout
+  priority_boost: 0.15
+  explanation: >
+    Occupancy is low and shared memory per block is limiting block residency.
+    Smaller tiles, packed shared buffers, or lower dynamic shared memory can
+    allow more blocks per SM.
+
+- id: rule_ncu_occupancy_limited_by_block_size
+  bottleneck: occupancy_limited_by_block_size
+  min_score: 0.25
+  signals:
+    occupancy_limited_by_block_size: true
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_increase_block_size
+  priority_boost: 0.10
+  explanation: >
+    Occupancy is low and the launch shape does not provide enough resident
+    threads or blocks per SM. Sweep block sizes and validate achieved occupancy.
+
 - id: rule_ncu_insufficient_ncu_data
   bottleneck: insufficient_ncu_data
   min_score: 0.50

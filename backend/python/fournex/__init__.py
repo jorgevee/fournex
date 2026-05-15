@@ -91,6 +91,14 @@ from .ncu_analysis import (
     analyze_ncu_csv_text,
     classify_ncu_bottlenecks,
     derive_ncu_run_summary,
+    validate_ncu_csv_text,
+)
+from .ncu_presets import (
+    NCU_METRIC_PRESETS,
+    build_ncu_command,
+    describe_ncu_presets,
+    format_shell_command,
+    get_ncu_preset,
 )
 from .ptx_analysis import (
     PtxKernelAnalysis,
@@ -124,6 +132,7 @@ from .shapes import (
 __all__ = [
     "compare_implementations",
     "diff_ncu_runs",
+    "NCU_METRIC_PRESETS",
     "AnnotationRecord",
     "BOTTLENECK_CLASSES",
     "DataPipelineRecord",
@@ -188,8 +197,12 @@ __all__ = [
     "map_nvml_sample_to_ir",
     "analyze_ncu_csv",
     "analyze_ncu_csv_text",
+    "build_ncu_command",
     "classify_ncu_bottlenecks",
     "derive_ncu_run_summary",
+    "describe_ncu_presets",
+    "format_shell_command",
+    "get_ncu_preset",
     "parse_nsight_compute_csv_text",
     "PtxKernelAnalysis",
     "analyze_ptx_text",
@@ -202,6 +215,7 @@ __all__ = [
     "persist_run_summary",
     "persist_run_with_steady_state_summary",
     "parse_nsight_compute_csv",
+    "validate_ncu_csv_text",
     "parse_cuda_kernels",
     "parse_cuda_launches",
     "step_context",

@@ -43,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         return doctor(args)
     elif args.command == "smoke-test":
         return smoke_test(args)
+    elif args.command == "ncu-command":
+        args.workload_command = _normalize_workload_command(args.workload_command)
+        args.workload_command = _resolve_workload_command(args.workload_command)
+        return ncu_command(args)
     elif args.command == "tune":
         args.workload_command = _normalize_workload_command(args.workload_command)
         args.workload_command = _resolve_workload_command(args.workload_command)
@@ -244,12 +248,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     collect_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
-    analyze_parser = subparsers.add_parser("analyze", help="analyze a collected run bundle and print diagnosis")
+    analyze_parser = subparsers.add_parser("analyze", help="analyze a run bundle, CUDA file, PTX file, NCU CSV, or before/after pair")
     analyze_parser.add_argument(
         "run_path",
         nargs="?",
         default=None,
-        help="path to a run directory or .zip bundle (omit when using --baseline/--optimized)",
+        help="path to a run directory, .zip bundle, .ptx, .cu/.cuh, or Nsight Compute .csv",
     )
     analyze_parser.add_argument(
         "--baseline",
@@ -263,6 +267,17 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="CSV",
         help="Nsight Compute CSV for optimized run — pair with --baseline",
     )
+    analyze_parser.add_argument("--before", default=None, metavar="FILE", help="baseline file for before/after comparison")
+    analyze_parser.add_argument("--after", default=None, metavar="FILE", help="optimized file for before/after comparison")
+    analyze_parser.add_argument("--before-label", default=None, help="label for the baseline side")
+    analyze_parser.add_argument("--after-label", default=None, help="label for the optimized side")
+    analyze_parser.add_argument("--before-source", default=None, metavar="CU", help="baseline CUDA source file")
+    analyze_parser.add_argument("--after-source", default=None, metavar="CU", help="optimized CUDA source file")
+    analyze_parser.add_argument("--before-ptx", default=None, metavar="PTX", help="baseline PTX file")
+    analyze_parser.add_argument("--after-ptx", default=None, metavar="PTX", help="optimized PTX file")
+    analyze_parser.add_argument("--before-ncu", default=None, metavar="CSV", help="baseline Nsight Compute CSV file")
+    analyze_parser.add_argument("--after-ncu", default=None, metavar="CSV", help="optimized Nsight Compute CSV file")
+    analyze_parser.add_argument("--gpu-model", default=None, help="optional GPU model used by CUDA source launch advisor")
     analyze_parser.add_argument(
         "--scope",
         choices=["run", "steady_state", "auto"],
@@ -274,6 +289,23 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("doctor", help="check environment for frx requirements")
 
     subparsers.add_parser("smoke-test", help="run a synthetic workload and verify end-to-end bundle generation")
+
+    ncu_parser = subparsers.add_parser("ncu-command", help="print an Nsight Compute command for Fournex metric presets")
+    ncu_parser.add_argument(
+        "preset",
+        nargs="?",
+        default="full",
+        choices=["memory", "tensor", "occupancy", "stalls", "full"],
+        help="metric preset to collect (default: full)",
+    )
+    ncu_parser.add_argument("--list", dest="list_presets", action="store_true", help="list available presets")
+    ncu_parser.add_argument("--output", "-o", default=None, help="CSV output path to append as shell redirection")
+    ncu_parser.add_argument("--kernel-name", default=None, help="optional Nsight Compute --kernel-name filter")
+    ncu_parser.add_argument("--target-processes", default="all", help="Nsight Compute target process mode (default: all)")
+    ncu_parser.add_argument("--launch-skip", type=int, default=None, help="skip the first N kernel launches")
+    ncu_parser.add_argument("--launch-count", type=int, default=None, help="profile at most N kernel launches")
+    ncu_parser.add_argument("--json", dest="output_json", action="store_true", help="output command and metrics as JSON")
+    ncu_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
     tune_parser = subparsers.add_parser(
         "tune",
@@ -366,6 +398,98 @@ def _detect_environment() -> dict[str, Any]:
         env["framework"] = "unknown"
         env["framework_detection_error"] = str(exc)
     return env
+
+
+def ncu_command(args: argparse.Namespace) -> int:
+    from .ncu_presets import build_ncu_command, describe_ncu_presets, format_shell_command, get_ncu_preset
+
+    _extract_ncu_remainder_options(args)
+    args.workload_command = _resolve_workload_command(_normalize_workload_command(args.workload_command))
+
+    if args.list_presets:
+        presets = describe_ncu_presets()
+        if args.output_json:
+            _print_json_result("ncu_presets", {"presets": presets})
+        else:
+            print("\nFournex NCU metric presets\n")
+            for preset in presets:
+                print(f"  {preset['name']:<10} {preset['description']}")
+                print(f"             metrics: {len(preset['metrics'])}")
+            print()
+        return 0
+
+    workload = args.workload_command or ["./your_app"]
+    try:
+        command = build_ncu_command(
+            args.preset,
+            workload,
+            output=args.output,
+            kernel_name=args.kernel_name,
+            target_processes=args.target_processes,
+            launch_skip=args.launch_skip,
+            launch_count=args.launch_count,
+        )
+        preset = get_ncu_preset(args.preset)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        _print_json_result(
+            "ncu_command",
+            {
+                "preset": preset.name,
+                "description": preset.description,
+                "metrics": list(preset.metrics),
+                "command": command,
+                "shell": format_shell_command(command),
+            },
+        )
+        return 0
+
+    print("\nFournex NCU command\n")
+    print(f"Preset : {preset.name}")
+    print(f"Purpose: {preset.description}")
+    print("\nCommand:")
+    print(f"  {format_shell_command(command)}")
+    print("\nMetrics:")
+    for metric in preset.metrics:
+        print(f"  - {metric}")
+    print()
+    return 0
+
+
+def _extract_ncu_remainder_options(args: argparse.Namespace) -> None:
+    command = list(args.workload_command or [])
+    if "--" not in command:
+        return
+
+    separator = command.index("--")
+    option_tokens = command[:separator]
+    workload_tokens = command[separator + 1:]
+    index = 0
+    while index < len(option_tokens):
+        token = option_tokens[index]
+        value = option_tokens[index + 1] if index + 1 < len(option_tokens) else None
+        if token in {"--output", "-o"} and value is not None:
+            args.output = value
+            index += 2
+        elif token == "--kernel-name" and value is not None:
+            args.kernel_name = value
+            index += 2
+        elif token == "--target-processes" and value is not None:
+            args.target_processes = value
+            index += 2
+        elif token == "--launch-skip" and value is not None:
+            args.launch_skip = int(value)
+            index += 2
+        elif token == "--launch-count" and value is not None:
+            args.launch_count = int(value)
+            index += 2
+        else:
+            workload_tokens = option_tokens[index:] + ["--"] + workload_tokens
+            break
+    args.workload_command = workload_tokens
 
 
 def _sample_gpu_metrics(
@@ -661,16 +785,19 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def analyze(args: argparse.Namespace) -> int:
-    if args.baseline or args.optimized:
-        return _analyze_ncu_diff(args)
+    if _has_comparison_args(args):
+        return _analyze_comparison(args)
 
     if not args.run_path:
-        print("Error: provide a run_path or use --baseline/--optimized for NCU comparison.", file=sys.stderr)
+        print("Error: provide a path to analyze or use --before/--after for comparison.", file=sys.stderr)
         return 1
 
-    run_path = Path(args.run_path)
+    input_path = Path(args.run_path)
+    if input_path.is_file() and input_path.suffix.lower() != ".zip":
+        return _analyze_evidence_file(input_path, args)
 
     temp_context = None
+    run_path = input_path
     if run_path.is_file() and run_path.suffix.lower() == ".zip":
         temp_context = tempfile.TemporaryDirectory(prefix="frx_analyze_")
         try:
@@ -693,7 +820,7 @@ def analyze(args: argparse.Namespace) -> int:
             return 1
 
         if args.output_json:
-            print(json.dumps(summary, indent=2))
+            _print_json_result("run_bundle", summary)
             return 0
 
         _print_analysis_report(run_path, summary, scope=args.scope)
@@ -701,6 +828,249 @@ def analyze(args: argparse.Namespace) -> int:
     finally:
         if temp_context is not None:
             temp_context.cleanup()
+
+
+_CUDA_SOURCE_SUFFIXES = {".cu", ".cuh", ".cuda"}
+_COMPARISON_FIELDS = (
+    "baseline",
+    "optimized",
+    "before",
+    "after",
+    "before_source",
+    "after_source",
+    "before_ptx",
+    "after_ptx",
+    "before_ncu",
+    "after_ncu",
+)
+
+
+def _has_comparison_args(args: argparse.Namespace) -> bool:
+    return any(getattr(args, name, None) for name in _COMPARISON_FIELDS)
+
+
+def _analyze_evidence_file(path: Path, args: argparse.Namespace) -> int:
+    if not path.exists():
+        print(f"Error: file not found: {path}", file=sys.stderr)
+        return 1
+
+    try:
+        text = _read_text_file(path)
+        kind = _detect_analysis_input_kind(path, text)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if kind == "ptx":
+        from .ptx_analysis import analyze_ptx_text
+
+        result = analyze_ptx_text(text, filename=str(path))
+        if args.output_json:
+            _print_json_result("ptx", result)
+        else:
+            _print_ptx_report(result)
+        return 0
+
+    if kind == "cuda_source":
+        from .cuda_static import inspect_cuda_source
+
+        result = inspect_cuda_source(text, filename=str(path), gpu_model=args.gpu_model)
+        if args.output_json:
+            _print_json_result("cuda_source", result)
+        else:
+            _print_cuda_source_report(result)
+        return 0
+
+    if kind == "ncu":
+        from .ncu_analysis import analyze_ncu_csv_text
+
+        result = analyze_ncu_csv_text(text, environment=_detect_environment())
+        validation = result.get("validation", {})
+        if args.output_json:
+            _print_json_result("ncu", result)
+            if validation.get("errors"):
+                return 1
+        else:
+            _print_ncu_report(result)
+        return 1 if validation.get("errors") else 0
+
+    print(f"Error: unsupported input file: {path}", file=sys.stderr)
+    print("Supported inputs: run directories, .zip bundles, .ptx, .cu/.cuh, and Nsight Compute .csv files.", file=sys.stderr)
+    return 1
+
+
+def _analyze_comparison(args: argparse.Namespace) -> int:
+    before_path = args.before or args.baseline
+    after_path = args.after or args.optimized
+    layer_specific = any(
+        getattr(args, name, None)
+        for name in ("before_source", "after_source", "before_ptx", "after_ptx", "before_ncu", "after_ncu")
+    )
+
+    if (before_path or after_path) and layer_specific:
+        print("Error: use either --before/--after or layer-specific comparison flags, not both.", file=sys.stderr)
+        return 1
+
+    try:
+        if before_path or after_path:
+            if not before_path or not after_path:
+                print("Error: --before and --after must be provided together.", file=sys.stderr)
+                return 1
+            return _analyze_auto_comparison(Path(before_path), Path(after_path), args)
+
+        before_input = _build_layered_comparison_input(args, "before")
+        after_input = _build_layered_comparison_input(args, "after")
+        _validate_layered_comparison(before_input, after_input)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    from .comparison import compare_implementations
+
+    result = compare_implementations(before_input, after_input)
+    if args.output_json:
+        _print_json_result("comparison", result)
+    else:
+        _print_cuda_comparison_report(result)
+    return 0
+
+
+def _analyze_auto_comparison(before_path: Path, after_path: Path, args: argparse.Namespace) -> int:
+    try:
+        before_text = _read_text_file(before_path)
+        after_text = _read_text_file(after_path)
+        before_kind = _detect_analysis_input_kind(before_path, before_text)
+        after_kind = _detect_analysis_input_kind(after_path, after_text)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    before_label = args.before_label or before_path.stem
+    after_label = args.after_label or after_path.stem
+
+    if before_kind == "ncu" and after_kind == "ncu":
+        from .ncu_comparison import diff_ncu_runs
+
+        result = diff_ncu_runs(
+            before_text,
+            after_text,
+            label_baseline=before_label,
+            label_optimized=after_label,
+            environment=_detect_environment(),
+        )
+        has_validation_errors = bool(result["baseline"].get("validation", {}).get("errors")) or bool(
+            result["optimized"].get("validation", {}).get("errors")
+        )
+        if args.output_json:
+            _print_json_result("comparison", result)
+            if has_validation_errors:
+                return 1
+        else:
+            _print_ncu_comparison_report(result)
+        return 1 if has_validation_errors else 0
+
+    try:
+        before_input = _comparison_input_from_detected_file(before_path, before_kind, before_text, before_label, args)
+        after_input = _comparison_input_from_detected_file(after_path, after_kind, after_text, after_label, args)
+        _validate_layered_comparison(before_input, after_input)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    from .comparison import compare_implementations
+
+    result = compare_implementations(before_input, after_input)
+    if args.output_json:
+        _print_json_result("comparison", result)
+    else:
+        _print_cuda_comparison_report(result)
+    return 0
+
+
+def _build_layered_comparison_input(args: argparse.Namespace, side: str) -> dict[str, Any]:
+    label_attr = "before_label" if side == "before" else "after_label"
+    payload: dict[str, Any] = {"label": getattr(args, label_attr) or side}
+
+    source_path = getattr(args, f"{side}_source")
+    ptx_path = getattr(args, f"{side}_ptx")
+    ncu_path = getattr(args, f"{side}_ncu")
+
+    if source_path:
+        path = Path(source_path)
+        payload["cuda_source"] = _read_text_file(path)
+        payload["cuda_filename"] = str(path)
+        payload["gpu_model"] = args.gpu_model
+    if ptx_path:
+        path = Path(ptx_path)
+        payload["ptx"] = _read_text_file(path)
+        payload["ptx_filename"] = str(path)
+    if ncu_path:
+        path = Path(ncu_path)
+        payload["ncu_csv"] = _read_text_file(path)
+
+    return payload
+
+
+def _comparison_input_from_detected_file(
+    path: Path,
+    kind: str,
+    text: str,
+    label: str,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"label": label}
+    if kind == "cuda_source":
+        payload.update({"cuda_source": text, "cuda_filename": str(path), "gpu_model": args.gpu_model})
+    elif kind == "ptx":
+        payload.update({"ptx": text, "ptx_filename": str(path)})
+    elif kind == "ncu":
+        payload.update({"ncu_csv": text})
+    else:
+        raise ValueError(f"unsupported comparison input: {path}")
+    return payload
+
+
+def _validate_layered_comparison(before_input: dict[str, Any], after_input: dict[str, Any]) -> None:
+    evidence_fields = ("cuda_source", "ptx", "ncu_csv")
+    before_layers = {field for field in evidence_fields if before_input.get(field)}
+    after_layers = {field for field in evidence_fields if after_input.get(field)}
+    if not before_layers or not after_layers:
+        raise ValueError("comparison requires at least one input for both before and after.")
+    if not (before_layers & after_layers):
+        raise ValueError("before and after must share at least one evidence type.")
+
+
+def _read_text_file(path: Path) -> str:
+    if not path.exists():
+        raise ValueError(f"file not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"not a file: {path}")
+    return path.read_text(encoding="utf-8-sig", errors="replace")
+
+
+def _detect_analysis_input_kind(path: Path, text: str) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".ptx":
+        return "ptx"
+    if suffix in _CUDA_SOURCE_SUFFIXES:
+        return "cuda_source"
+    if suffix == ".csv":
+        return "ncu"
+
+    lowered = text.lower()
+    if ".entry" in text or ".version" in text and ".target" in text:
+        return "ptx"
+    if "__global__" in text or "<<<" in text:
+        return "cuda_source"
+    if "metric name" in lowered and "metric value" in lowered:
+        return "ncu"
+    raise ValueError(
+        f"unsupported input file: {path}. Supported inputs are .ptx, .cu/.cuh, Nsight Compute .csv, run directories, and .zip bundles."
+    )
+
+
+def _print_json_result(mode: str, result: dict[str, Any]) -> None:
+    print(json.dumps({"mode": mode, "result": result}, indent=2))
 
 
 def doctor(args: argparse.Namespace) -> int:
@@ -1245,6 +1615,221 @@ def _write_smoke_profiler_trace(run_dir: Path) -> None:
     )
 
 
+def _print_ptx_report(result: dict[str, Any]) -> None:
+    sep = "-" * 60
+    summary = result.get("run_summary", {})
+    scope = result.get("diagnostic_scope", {})
+    print(f"\n{sep}")
+    print("  Fournex - PTX Analysis")
+    print(f"  File    : {result.get('filename', '<unknown>')}")
+    print(f"  Target  : {result.get('target') or 'unknown'}")
+    print(sep)
+
+    print("\nVERDICT")
+    print(f"  Primary Bottleneck : {result.get('primary_bottleneck') or 'none'}")
+    print(f"  Confidence         : {scope.get('confidence', 'unknown')} ({scope.get('type', 'static_ptx')})")
+    message = scope.get("message")
+    if message:
+        print(f"  Scope              : {message}")
+
+    print("\nEVIDENCE")
+    print(f"  Kernels            : {summary.get('kernel_count', result.get('kernel_count', 0))}")
+    print(f"  Avg Registers      : {summary.get('avg_register_count', 0)}")
+    print(f"  Max Registers      : {summary.get('max_register_count', 0)}")
+    print(f"  Kernels w/ Spills  : {summary.get('kernels_with_spills', 0)}")
+    print(f"  Max Global Mem Mix : {float(summary.get('max_global_memory_ratio', 0.0)):.2f}")
+    print(f"  FP64 Kernels       : {summary.get('kernels_with_fp64', 0)}")
+
+    _print_finding_list(result.get("findings", []))
+    _print_recommendation_list(result.get("recommendations", []))
+    print()
+
+
+def _print_cuda_source_report(result: dict[str, Any]) -> None:
+    sep = "-" * 60
+    print(f"\n{sep}")
+    print("  Fournex - CUDA Source Analysis")
+    print(f"  GPU Model: {result.get('gpu_model') or 'unspecified'}")
+    print(sep)
+
+    print("\nSUMMARY")
+    print(f"  Kernels : {result.get('kernel_count', 0)}")
+    print(f"  Launches: {result.get('launch_count', 0)}")
+
+    _print_finding_list(result.get("findings", []))
+
+    launch_advice = result.get("launch_advisor", [])
+    if launch_advice:
+        print("\nLAUNCH ADVISOR")
+        for item in launch_advice[:3]:
+            candidates = item.get("candidate_block_sizes", [])
+            blocks = [str(candidate.get("block_size")) for candidate in candidates if candidate.get("block_size")]
+            print(f"  - {item.get('kernel_name', '<kernel>')}: try block sizes {', '.join(blocks) or 'n/a'}")
+            notes = item.get("notes", [])
+            if notes:
+                print(f"    {notes[0]}")
+    print()
+
+
+def _print_ncu_report(result: dict[str, Any]) -> None:
+    sep = "-" * 60
+    summary = result.get("ncu_run_summary", {})
+    scope = result.get("diagnostic_scope", {})
+    print(f"\n{sep}")
+    print("  Fournex - Nsight Compute Analysis")
+    print(f"  Kernels : {result.get('kernel_count', 0)}")
+    print(sep)
+
+    print("\nVERDICT")
+    print(f"  Primary Bottleneck : {result.get('primary_bottleneck') or 'none'}")
+    print(f"  Confidence         : {scope.get('confidence', 'unknown')} ({scope.get('type', 'measured_ncu')})")
+    message = scope.get("message")
+    if message:
+        print(f"  Scope              : {message}")
+
+    _print_ncu_validation(result.get("validation", {}))
+
+    print("\nMEASURED METRICS")
+    print(f"  DRAM Throughput    : {_fmt_optional_pct(summary.get('avg_dram_throughput_pct'))}")
+    print(f"  L1 Hit Rate        : {_fmt_optional_pct(summary.get('avg_l1_cache_hit_rate_pct'))}")
+    print(f"  L2 Hit Rate        : {_fmt_optional_pct(summary.get('avg_l2_cache_hit_rate_pct'))}")
+    print(f"  Issue Utilization  : {_fmt_optional_pct(summary.get('avg_issue_slot_utilization_pct'))}")
+    print(f"  Occupancy          : {_fmt_optional_pct(summary.get('avg_occupancy_pct'))}")
+    print(f"  Eligible Warps/Sched: {_fmt_optional_float(summary.get('avg_eligible_warps_per_scheduler'))}")
+    print(f"  Scheduler Active   : {_fmt_optional_pct(summary.get('avg_scheduler_active_pct'))}")
+    print(f"  Memory Stall Frac  : {_fmt_optional_float(summary.get('memory_stall_fraction'))}")
+    print(f"  Dominant Stall     : {summary.get('dominant_warp_stall', 'unknown')}")
+    causes = summary.get("occupancy_limit_causes") or []
+    if causes:
+        print(f"  Occupancy Limits   : {', '.join(causes)}")
+
+    _print_bottleneck_list(result.get("bottlenecks", []))
+    _print_recommendation_list(result.get("recommendations", []))
+    print()
+
+
+def _print_ncu_validation(validation: dict[str, Any]) -> None:
+    errors = validation.get("errors", [])
+    warnings = validation.get("warnings", [])
+    if not errors and not warnings:
+        return
+    print("\nCSV VALIDATION")
+    for error in errors:
+        print(f"  [ERROR] {error}")
+    for warning in warnings[:4]:
+        print(f"  [WARN]  {warning}")
+
+
+def _print_cuda_comparison_report(result: dict[str, Any]) -> None:
+    sep = "-" * 60
+    verdict = result.get("verdict", {})
+    label_a = result.get("label_a", "before")
+    label_b = result.get("label_b", "after")
+    winner = verdict.get("overall_winner", "tie")
+    winner_label = label_b if winner == "b" else label_a if winner == "a" else "tie"
+
+    print(f"\n{sep}")
+    print("  Fournex - CUDA Before/After Comparison")
+    print(f"  Before : {label_a}")
+    print(f"  After  : {label_b}")
+    print(sep)
+
+    print("\nVERDICT")
+    print(f"  Winner      : {winner_label}")
+    print(f"  Score Before: {_fmt_optional_float(verdict.get('score_a'))}")
+    print(f"  Score After : {_fmt_optional_float(verdict.get('score_b'))}")
+    print(f"  Delta       : {_fmt_optional_float(verdict.get('score_delta'))}")
+
+    dimensions_b = verdict.get("dimensions_won_by_b", [])
+    dimensions_a = verdict.get("dimensions_won_by_a", [])
+    if dimensions_b:
+        print(f"  Improved    : {', '.join(dimensions_b)}")
+    if dimensions_a:
+        print(f"  Regressed   : {', '.join(dimensions_a)}")
+
+    tradeoffs = result.get("tradeoffs", [])
+    if tradeoffs:
+        print("\nTRADEOFFS")
+        for tradeoff in tradeoffs[:3]:
+            print(f"  - {tradeoff.get('label', 'tradeoff')}: {tradeoff.get('message', '')}")
+
+    for section_name, key in (("STATIC FINDINGS", "static_diff"), ("PTX FINDINGS", "ptx_diff")):
+        diff = result.get(key, {})
+        findings_diff = diff.get("findings_diff", {}) if diff.get("available") else {}
+        resolved = findings_diff.get("resolved_in_b", [])
+        new = findings_diff.get("new_in_b", [])
+        if resolved or new:
+            print(f"\n{section_name}")
+            for code in resolved:
+                print(f"  [+] Resolved: {code}")
+            for code in new:
+                print(f"  [-] New     : {code}")
+
+    ncu_diff = result.get("ncu_diff", {})
+    if ncu_diff.get("available"):
+        print("\nNCU DELTAS")
+        for key in ("avg_dram_throughput_pct", "avg_l1_cache_hit_rate_pct", "avg_issue_slot_utilization_pct", "memory_stall_fraction"):
+            info = ncu_diff.get(key, {})
+            if info.get("delta") is not None:
+                print(f"  - {key}: {info.get('a')} -> {info.get('b')} ({info.get('delta'):+.4f})")
+    print()
+
+
+def _print_finding_list(findings: list[dict[str, Any]]) -> None:
+    if not findings:
+        print("\nFINDINGS")
+        print("  No findings above threshold.")
+        return
+    print(f"\nFINDINGS ({min(len(findings), 5)} of {len(findings)})")
+    for finding in findings[:5]:
+        location = ""
+        if finding.get("filename") and finding.get("line"):
+            location = f" ({finding['filename']}:{finding['line']})"
+        kernel = f" [{finding['kernel_name']}]" if finding.get("kernel_name") else ""
+        print(f"  - {finding.get('severity', 'info').upper()}: {finding.get('code', 'finding')}{kernel}{location}")
+        message = finding.get("message")
+        if message:
+            print(f"    {message}")
+
+
+def _print_bottleneck_list(bottlenecks: list[dict[str, Any]]) -> None:
+    if not bottlenecks:
+        return
+    print(f"\nBOTTLENECK RANKING ({min(len(bottlenecks), 5)} of {len(bottlenecks)})")
+    for item in bottlenecks[:5]:
+        print(f"  - {item.get('label', 'unknown')}: score {float(item.get('score', 0.0)):.2f}")
+
+
+def _print_recommendation_list(recommendations: list[dict[str, Any]]) -> None:
+    if not recommendations:
+        print("\nRECOMMENDATIONS")
+        print("  No recommendations generated.")
+        return
+    print(f"\nTOP RECOMMENDATIONS ({min(len(recommendations), 3)} of {len(recommendations)})")
+    for index, rec in enumerate(recommendations[:3], start=1):
+        title = rec.get("title", rec.get("id", "recommendation"))
+        priority = rec.get("priority", "low").upper()
+        print(f"  {index}. [{priority}] {title}")
+        why = rec.get("why")
+        if why:
+            print(f"     Why: {why}")
+        actions = rec.get("actions", [])
+        if actions:
+            print(f"     Action: {actions[0]}")
+
+
+def _fmt_optional_pct(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.1f}%"
+
+
+def _fmt_optional_float(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.4f}"
+
+
 def _analyze_ncu_diff(args: argparse.Namespace) -> int:
     if not args.baseline or not args.optimized:
         print("Error: --baseline and --optimized must both be provided together.", file=sys.stderr)
@@ -1343,6 +1928,14 @@ def _print_ncu_comparison_report(result: dict[str, Any]) -> None:
     print(f"\nPRIMARY BOTTLENECK")
     print(f"  Before : {b_primary or 'none'}")
     print(f"  After  : {o_primary or 'none'}")
+
+    baseline_validation = result.get("baseline", {}).get("validation", {})
+    optimized_validation = result.get("optimized", {}).get("validation", {})
+    if baseline_validation.get("errors") or optimized_validation.get("errors"):
+        print(f"\nCSV VALIDATION")
+        for label, validation in ((label_b, baseline_validation), (label_o, optimized_validation)):
+            for error in validation.get("errors", []):
+                print(f"  [ERROR] {label}: {error}")
     print()
 
 

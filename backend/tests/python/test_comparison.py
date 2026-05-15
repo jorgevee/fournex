@@ -174,10 +174,29 @@ def test_response_schema_and_required_fields() -> None:
         assert dim in result["scorecard"]
 
 
+def test_tradeoff_register_pressure_improved_but_occupancy_regressed() -> None:
+    ncu_high_occ = _ncu_csv(
+        "ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,75.0",
+        "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,70.0",
+    )
+    ncu_low_occ = _ncu_csv(
+        "ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,35.0",
+        "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,70.0",
+    )
+    result = compare_implementations(
+        _side("heavy", ptx=PTX_HEAVY, ncu_csv=ncu_high_occ),
+        _side("light", ptx=PTX_LIGHT, ncu_csv=ncu_low_occ),
+    )
+
+    labels = {item["label"] for item in result["tradeoffs"]}
+    assert "register_pressure_improved_but_occupancy_regressed" in labels
+
+
 def test_api_compare_endpoint() -> None:
     import pathlib
     pytest = __import__("pytest")
-    fastapi = pytest.importorskip("fastapi", reason="fastapi not installed in this environment")
+    pytest.importorskip("fastapi", reason="fastapi not installed in this environment")
+    pytest.importorskip("httpx", reason="fastapi TestClient dependency httpx not installed")
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from fastapi.testclient import TestClient
     from api import app

@@ -67,6 +67,9 @@ class KernelLaunchSummary:
     l1_cache_hit_rate_pct: float | None = None
     l2_cache_hit_rate_pct: float | None = None
     issue_slot_utilization_pct: float | None = None
+    achieved_occupancy_pct: float | None = None
+    eligible_warps_per_scheduler: float | None = None
+    scheduler_active_pct: float | None = None
     dominant_warp_stall: str | None = None
     dominant_warp_stall_pct: float | None = None
     warp_stall_breakdown: dict = field(default_factory=dict)
@@ -350,6 +353,9 @@ def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:
     summary.l1_cache_hit_rate_pct = m.get("l1_cache_hit_rate_pct")
     summary.l2_cache_hit_rate_pct = m.get("l2_cache_hit_rate_pct")
     summary.issue_slot_utilization_pct = m.get("issue_slot_utilization_pct")
+    summary.achieved_occupancy_pct = m.get("achieved_occupancy_pct")
+    summary.eligible_warps_per_scheduler = m.get("eligible_warps_per_scheduler")
+    summary.scheduler_active_pct = m.get("scheduler_active_pct")
     stalls = {k[len("warp_stall_"):]: v for k, v in m.items() if k.startswith("warp_stall_")}
     summary.warp_stall_breakdown = stalls
     if stalls:
@@ -394,6 +400,11 @@ def _canonical_ncu_metric_name(name: str) -> str:
         # Occupancy
         "sm__warps_active_avg_pct_of_peak_sustained_active": "achieved_occupancy_pct",
         "sm__warps_active_avg_pct_of_peak_sustained_elapsed": "achieved_occupancy_pct",
+        "smsp__warps_eligible_avg_per_cycle_active": "eligible_warps_per_scheduler",
+        "eligible_warps_per_scheduler": "eligible_warps_per_scheduler",
+        "smsp__warps_active_avg_pct_of_peak_sustained_active": "scheduler_active_pct",
+        "smsp__warps_active_avg_pct_of_peak_sustained_elapsed": "scheduler_active_pct",
+        "scheduler_active_pct": "scheduler_active_pct",
         # DRAM / memory bandwidth
         "dram__throughput_avg_pct_of_peak_sustained_elapsed": "dram_throughput_pct",
         "memory_throughput": "dram_throughput_pct",

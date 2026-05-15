@@ -23,6 +23,9 @@ def _summary_with(
     stall: str = "unknown",
     stall_pct: float = 0.0,
     mem_frac: float = 0.0,
+    eligible: float | None = None,
+    scheduler_active: float | None = None,
+    occupancy_causes: list[str] | None = None,
 ) -> dict:
     stall_map = {
         "memory_throttle": "memory",
@@ -42,6 +45,9 @@ def _summary_with(
         "avg_l2_cache_hit_rate_pct": l2,
         "avg_issue_slot_utilization_pct": isu,
         "avg_occupancy_pct": occ,
+        "avg_eligible_warps_per_scheduler": eligible,
+        "avg_scheduler_active_pct": scheduler_active,
+        "occupancy_limit_causes": occupancy_causes or [],
         "dominant_warp_stall": stall,
         "dominant_warp_stall_pct": stall_pct,
         "warp_stall_breakdown": {stall: stall_pct} if stall != "unknown" else {},
@@ -160,6 +166,31 @@ def test_low_issue_efficiency_suppressed_when_memory_stall_dominates() -> None:
 
 
 # ── Cache thrashing ───────────────────────────────────────────────────────────
+
+def test_low_scheduler_utilization_recommends_block_size_and_ilp() -> None:
+    ncu = _summary_with(isu=45.0, eligible=0.4, scheduler_active=35.0, stall="short_scoreboard", stall_pct=12.0)
+    result = _recs_for(ncu)
+
+    assert "low_warp_scheduler_utilization" in result["bottlenecks"]
+    assert "rec_ncu_increase_block_size" in result["ids"]
+    assert "rec_ncu_instruction_level_parallelism" in result["ids"]
+
+
+def test_register_limited_occupancy_recommends_register_reduction() -> None:
+    ncu = _summary_with(occ=25.0, occupancy_causes=["registers"])
+    result = _recs_for(ncu)
+
+    assert "occupancy_limited_by_registers" in result["bottlenecks"]
+    assert "rec_ncu_reduce_register_pressure" in result["ids"]
+
+
+def test_shared_memory_limited_occupancy_recommends_shared_memory_reduction() -> None:
+    ncu = _summary_with(occ=25.0, occupancy_causes=["shared_memory"])
+    result = _recs_for(ncu)
+
+    assert "occupancy_limited_by_shared_memory" in result["bottlenecks"]
+    assert "rec_ncu_reduce_shared_memory_footprint" in result["ids"]
+
 
 def test_cache_thrashing_recommends_tiling() -> None:
     ncu = _summary_with(l1=25.0, l2=45.0, dram=50.0)

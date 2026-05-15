@@ -92,6 +92,16 @@ def test_parse_issue_slot_utilization() -> None:
     assert summaries[0].issue_slot_utilization_pct == 38.0
 
 
+def test_parse_scheduler_metrics() -> None:
+    text = _long_format_csv(
+        ("ker", "smsp__warps_eligible.avg.per_cycle_active", "warp", "0.5"),
+        ("ker", "smsp__warps_active.avg.pct_of_peak_sustained_active", "%", "31.0"),
+    )
+    summaries = at.parse_nsight_compute_csv_text(text)
+    assert summaries[0].eligible_warps_per_scheduler == 0.5
+    assert summaries[0].scheduler_active_pct == 31.0
+
+
 def test_parse_memory_throughput_column_name() -> None:
     # Alternative column spelling used by some NCU versions
     text = _long_format_csv(
@@ -277,6 +287,47 @@ def test_classify_low_issue_efficiency() -> None:
     assert "low_issue_efficiency" in labels
 
 
+def test_classify_occupancy_limited_by_registers() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,25.0",
+        "ker,launch__block_size,thread/block,256",
+        "ker,launch__registers_per_thread,register/thread,128",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+    labels = [b["label"] for b in result["bottlenecks"]]
+    assert "occupancy_limited" in labels
+    assert "occupancy_limited_by_registers" in labels
+    assert "registers" in result["ncu_run_summary"]["occupancy_limit_causes"]
+
+
+def test_classify_occupancy_limited_by_shared_memory() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,25.0",
+        "ker,launch__block_size,thread/block,128",
+        "ker,launch__shared_mem_per_block_static,byte/block,65536",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+    labels = [b["label"] for b in result["bottlenecks"]]
+    assert "occupancy_limited" in labels
+    assert "occupancy_limited_by_shared_memory" in labels
+    assert "shared_memory" in result["ncu_run_summary"]["occupancy_limit_causes"]
+
+
+def test_classify_low_warp_scheduler_utilization() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,smsp__warps_eligible.avg.per_cycle_active,warp,0.4",
+        "ker,smsp__warps_active.avg.pct_of_peak_sustained_active,%,35.0",
+        "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,45.0",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+    labels = [b["label"] for b in result["bottlenecks"]]
+    assert "low_warp_scheduler_utilization" in labels
+    assert result["ncu_run_summary"]["avg_eligible_warps_per_scheduler"] == 0.4
+
+
 def test_classify_insufficient_ncu_data() -> None:
     summary = at.derive_ncu_run_summary([])
     bottlenecks = at.classify_ncu_bottlenecks(summary)
@@ -311,6 +362,53 @@ def test_analyze_ncu_csv_text_returns_recommendations() -> None:
 def test_analyze_ncu_csv_text_empty_returns_insufficient_data() -> None:
     result = at.analyze_ncu_csv_text("")
     assert result["primary_bottleneck"] == "insufficient_ncu_data"
+    assert result["validation"]["valid"] is False
+    assert result["validation"]["errors"]
+
+
+def test_validate_ncu_csv_reports_missing_preset_metrics() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,88.0",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+
+    validation = result["validation"]
+    assert validation["valid"] is True
+    assert "dram_throughput_pct" in validation["present_metrics"]
+    assert "l1_cache_hit_rate_pct" in validation["missing_metrics_by_preset"]["memory"]
+    assert any("Memory diagnosis may be incomplete" in warning for warning in validation["warnings"])
+
+
+def test_validate_ncu_csv_reports_malformed_shape() -> None:
+    validation = at.validate_ncu_csv_text("not,ncu\n1,2")
+
+    assert validation["valid"] is False
+    assert "CSV is missing a kernel name column." in validation["errors"]
+    assert "CSV is missing a metric name column." in validation["errors"]
+    assert "CSV is missing a metric value column." in validation["errors"]
+
+
+def test_ncu_presets_build_command_and_describe_metrics() -> None:
+    preset = at.get_ncu_preset("memory")
+    command = at.build_ncu_command("memory", ["./app"], output="ncu_memory.csv", kernel_name="regex:my_kernel")
+    shell = at.format_shell_command(command)
+
+    assert "dram__throughput.avg.pct_of_peak_sustained_elapsed" in preset.metrics
+    assert "--metrics" in command
+    assert "--kernel-name regex:my_kernel" in shell
+    assert "> ncu_memory.csv" in shell
+
+
+def test_achieved_occupancy_metric_is_used_in_summary() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,37.5",
+        "ker,launch__block_size,thread/block,256",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+
+    assert result["ncu_run_summary"]["avg_occupancy_pct"] == 37.5
 
 
 def test_analyze_ncu_existing_launch_fields_preserved() -> None:

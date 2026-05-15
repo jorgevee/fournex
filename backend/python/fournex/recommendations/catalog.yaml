@@ -660,6 +660,48 @@
 
 # ── NCU: Insufficient data ────────────────────────────────────────────────────
 
+- id: rec_ncu_reduce_register_pressure
+  title: Reduce registers per thread to improve occupancy
+  category: ncu_compute
+  applies_to: [occupancy_limited, occupancy_limited_by_registers]
+  prerequisites: {}
+  impact: high
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Reduce live ranges by moving temporaries closer to their use sites."
+    - "Reduce aggressive unrolling or split the kernel into smaller passes."
+    - "Use __launch_bounds__(threads, minBlocksPerSM) only after benchmarking spill risk."
+    - "Check NCU registers-per-thread and local-memory traffic after each change."
+  validation_templates:
+    - "Registers per thread should decrease."
+    - "Achieved occupancy or active warps per SM should increase."
+    - "Local memory load/store traffic should not increase materially."
+  caveats:
+    - "Too much register capping can introduce spills and make the kernel slower."
+    - "Lower occupancy can still be fine for compute-heavy kernels with high ILP."
+
+- id: rec_ncu_reduce_shared_memory_footprint
+  title: Reduce shared memory per block to improve occupancy
+  category: ncu_compute
+  applies_to: [occupancy_limited, occupancy_limited_by_shared_memory]
+  prerequisites: {}
+  impact: medium
+  effort: medium
+  safety: medium
+  action_templates:
+    - "Reduce tile dimensions or split a large shared-memory tile into phases."
+    - "Reuse shared-memory buffers whose live ranges do not overlap."
+    - "Prefer narrower element types for shared storage when numerically safe."
+    - "Re-check static and dynamic shared memory per block in NCU."
+  validation_templates:
+    - "Shared memory per block should decrease."
+    - "More active blocks per SM should become possible."
+    - "Cache hit rate and DRAM traffic should not regress enough to offset occupancy gains."
+  caveats:
+    - "Smaller tiles can reduce data reuse and increase DRAM traffic."
+    - "Changing shared layout can introduce bank conflicts; validate stall reasons."
+
 - id: rec_ncu_collect_metrics
   title: Re-export NCU profile with full performance counter set
   category: ncu_compute

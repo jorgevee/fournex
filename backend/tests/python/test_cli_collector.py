@@ -20,6 +20,73 @@ def _test_out_dir(name: str) -> Path:
     return path
 
 
+PTX_SIMPLE = """
+.version 8.0
+.target sm_80
+.address_size 64
+
+.visible .entry simple_kernel() {
+    .reg .f32   %f<32>;
+    .reg .b64   %rd<8>;
+    ld.global.f32   %f0, [%rd0];
+    fma.rn.f32      %f1, %f0, %f0, %f0;
+    st.global.f32   [%rd0], %f1;
+    ret;
+}
+"""
+
+
+PTX_SPILL = """
+.version 8.0
+.target sm_80
+
+.visible .entry spill_kernel() {
+    .reg .f32   %f<256>;
+    .reg .b64   %SP;
+    .local .align 4 .b8 __local_depot0[512];
+    ld.local.f32    %f0, [%SP+0];
+    st.local.f32    [%SP+8], %f0;
+    ret;
+}
+"""
+
+
+CUDA_SOURCE = r"""
+__global__ void bad_barrier(float* y) {
+  if (threadIdx.x == 0) {
+    __syncthreads();
+  }
+  y[threadIdx.x] = 1.0f;
+}
+
+void launch(float* y) {
+  bad_barrier<<<1, 128>>>(y);
+}
+"""
+
+
+NCU_MEMORY_BOUND = "\n".join([
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,88.0",
+    "ker,l1tex__t_sector_hit_rate.pct,%,28.0",
+    "ker,lts__t_sector_hit_rate.pct,%,38.0",
+    "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,55.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,45.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard,%,22.0",
+])
+
+
+NCU_OPTIMIZED = "\n".join([
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,42.0",
+    "ker,l1tex__t_sector_hit_rate.pct,%,72.0",
+    "ker,lts__t_sector_hit_rate.pct,%,80.0",
+    "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,75.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,8.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard,%,4.0",
+])
+
+
 def test_collect_creates_run_folder_logs_manifest_and_zip() -> None:
     out_dir = _test_out_dir("success")
     code = "import os; print('run', os.environ['FRX_RUN_ID'])"
@@ -194,8 +261,149 @@ def test_analyze_accepts_collected_zip_bundle_json(capsys) -> None:
     assert collect_code == 0
     assert analyze_code == 0
     payload = json.loads(captured.out)
-    assert "event_count" in payload
-    assert "diagnosis" in payload or "run" in payload
+    assert payload["mode"] == "run_bundle"
+    assert "event_count" in payload["result"]
+    assert "diagnosis" in payload["result"] or "run" in payload["result"]
+
+
+def test_analyze_accepts_ptx_file_json(capsys) -> None:
+    out_dir = _test_out_dir("analyze-ptx")
+    ptx_path = out_dir / "kernel.ptx"
+    ptx_path.write_text(PTX_SPILL, encoding="utf-8")
+
+    exit_code = main(["analyze", str(ptx_path), "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "ptx"
+    assert payload["result"]["schema"] == "ptx_analysis_v1"
+    assert payload["result"]["primary_bottleneck"] == "ptx_register_spills"
+
+
+def test_analyze_accepts_cuda_source_file_json(capsys) -> None:
+    out_dir = _test_out_dir("analyze-cu")
+    source_path = out_dir / "kernel.cu"
+    source_path.write_text(CUDA_SOURCE, encoding="utf-8")
+
+    exit_code = main(["analyze", str(source_path), "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "cuda_source"
+    assert payload["result"]["schema_version"] == "cuda_static_v1"
+    assert payload["result"]["kernel_count"] == 1
+
+
+def test_analyze_accepts_ncu_csv_human_report(capsys) -> None:
+    out_dir = _test_out_dir("analyze-ncu")
+    csv_path = out_dir / "ncu.csv"
+    csv_path.write_text(NCU_MEMORY_BOUND, encoding="utf-8")
+
+    exit_code = main(["analyze", str(csv_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Nsight Compute Analysis" in captured.out
+    assert "Primary Bottleneck : memory_bandwidth_bound" in captured.out
+    assert "TOP RECOMMENDATIONS" in captured.out
+
+
+def test_analyze_compares_ncu_before_after_json(capsys) -> None:
+    out_dir = _test_out_dir("compare-ncu")
+    before = out_dir / "before.csv"
+    after = out_dir / "after.csv"
+    before.write_text(NCU_MEMORY_BOUND, encoding="utf-8")
+    after.write_text(NCU_OPTIMIZED, encoding="utf-8")
+
+    exit_code = main(["analyze", "--before", str(before), "--after", str(after), "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "comparison"
+    assert payload["result"]["schema"] == "ncu_comparison_v1"
+    assert payload["result"]["verdict"]["outcome"] == "improved"
+
+
+def test_analyze_compares_ptx_before_after_human_report(capsys) -> None:
+    out_dir = _test_out_dir("compare-ptx")
+    before = out_dir / "before.ptx"
+    after = out_dir / "after.ptx"
+    before.write_text(PTX_SPILL, encoding="utf-8")
+    after.write_text(PTX_SIMPLE, encoding="utf-8")
+
+    exit_code = main(["analyze", "--before", str(before), "--after", str(after)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "CUDA Before/After Comparison" in captured.out
+    assert "Winner" in captured.out
+    assert "Resolved: register_spills_detected" in captured.out
+
+
+def test_analyze_compares_layer_specific_inputs_json(capsys) -> None:
+    out_dir = _test_out_dir("compare-layered")
+    before = out_dir / "before.ptx"
+    after = out_dir / "after.ptx"
+    before.write_text(PTX_SPILL, encoding="utf-8")
+    after.write_text(PTX_SIMPLE, encoding="utf-8")
+
+    exit_code = main(["analyze", "--before-ptx", str(before), "--after-ptx", str(after), "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "comparison"
+    assert payload["result"]["schema"] == "comparison_v1"
+
+
+def test_analyze_rejects_unsupported_file(capsys) -> None:
+    out_dir = _test_out_dir("analyze-bad-input")
+    path = out_dir / "notes.txt"
+    path.write_text("not cuda", encoding="utf-8")
+
+    exit_code = main(["analyze", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "unsupported input file" in captured.err
+
+
+def test_ncu_command_prints_preset_command(capsys) -> None:
+    exit_code = main(["ncu-command", "memory", "--output", "ncu_memory.csv", "--", "./app", "--batch", "32"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Fournex NCU command" in captured.out
+    assert "dram__throughput.avg.pct_of_peak_sustained_elapsed" in captured.out
+    assert "ncu --csv" in captured.out
+    assert "> ncu_memory.csv" in captured.out
+
+
+def test_ncu_command_lists_presets_json(capsys) -> None:
+    exit_code = main(["ncu-command", "--list", "--json"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "ncu_presets"
+    names = {preset["name"] for preset in payload["result"]["presets"]}
+    assert {"memory", "tensor", "occupancy", "stalls", "full"} <= names
+
+
+def test_analyze_ncu_malformed_csv_returns_error(capsys) -> None:
+    out_dir = _test_out_dir("analyze-malformed-ncu")
+    path = out_dir / "bad.csv"
+    path.write_text("not,ncu\n1,2", encoding="utf-8")
+
+    exit_code = main(["analyze", str(path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "CSV VALIDATION" in captured.out
+    assert "missing a kernel name column" in captured.out
 
 
 def test_analyze_accepts_root_layout_zip_bundle(capsys) -> None:
