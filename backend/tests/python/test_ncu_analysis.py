@@ -220,7 +220,8 @@ def test_classify_memory_bandwidth_bound() -> None:
     bottlenecks = at.classify_ncu_bottlenecks(summary)
     labels = [b["label"] for b in bottlenecks]
     assert bottlenecks[0]["label"] == "memory_bandwidth_bound"
-    assert "cache_thrashing" in labels
+    assert "l1_cache_thrashing" in labels
+    assert "l2_cache_thrashing" in labels
     assert "warp_stall_memory" in labels
 
 
@@ -326,6 +327,83 @@ def test_classify_low_warp_scheduler_utilization() -> None:
     labels = [b["label"] for b in result["bottlenecks"]]
     assert "low_warp_scheduler_utilization" in labels
     assert result["ncu_run_summary"]["avg_eligible_warps_per_scheduler"] == 0.4
+
+
+def test_classify_l1_cache_thrashing_fires_independently() -> None:
+    summary = {
+        "kernel_count": 2,
+        "kernels_with_ncu_data": 2,
+        "avg_dram_throughput_pct": 30.0,
+        "avg_tensor_core_utilization_pct": 50.0,
+        "avg_l1_cache_hit_rate_pct": 25.0,  # below 40 → l1_cache_thrashing
+        "avg_l2_cache_hit_rate_pct": 65.0,  # above 50 → no l2_cache_thrashing
+        "avg_global_load_sectors_per_request": None,
+        "avg_issue_slot_utilization_pct": 70.0,
+        "avg_occupancy_pct": 75.0,
+        "dominant_warp_stall": "not_selected",
+        "dominant_warp_stall_pct": 5.0,
+        "warp_stall_breakdown": {},
+        "memory_stall_fraction": 0.0,
+        "compute_stall_fraction": 0.0,
+    }
+    labels = [b["label"] for b in at.classify_ncu_bottlenecks(summary)]
+    assert "l1_cache_thrashing" in labels
+    assert "l2_cache_thrashing" not in labels
+
+
+def test_classify_l2_cache_thrashing_fires_independently() -> None:
+    summary = {
+        "kernel_count": 2,
+        "kernels_with_ncu_data": 2,
+        "avg_dram_throughput_pct": 30.0,
+        "avg_tensor_core_utilization_pct": 50.0,
+        "avg_l1_cache_hit_rate_pct": 55.0,  # above 40 → no l1_cache_thrashing
+        "avg_l2_cache_hit_rate_pct": 35.0,  # below 50 → l2_cache_thrashing
+        "avg_global_load_sectors_per_request": None,
+        "avg_issue_slot_utilization_pct": 70.0,
+        "avg_occupancy_pct": 75.0,
+        "dominant_warp_stall": "not_selected",
+        "dominant_warp_stall_pct": 5.0,
+        "warp_stall_breakdown": {},
+        "memory_stall_fraction": 0.0,
+        "compute_stall_fraction": 0.0,
+    }
+    labels = [b["label"] for b in at.classify_ncu_bottlenecks(summary)]
+    assert "l2_cache_thrashing" in labels
+    assert "l1_cache_thrashing" not in labels
+
+
+def test_classify_uncoalesced_access_from_sectors_per_request() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld,sector/request,12.0",
+    ])
+    result = at.analyze_ncu_csv_text(text)
+    labels = [b["label"] for b in result["bottlenecks"]]
+    assert "uncoalesced_access" in labels
+    summary = result["ncu_run_summary"]
+    assert summary["avg_global_load_sectors_per_request"] == 12.0
+
+
+def test_classify_uncoalesced_access_not_fired_when_coalesced() -> None:
+    summary = {
+        "kernel_count": 1,
+        "kernels_with_ncu_data": 1,
+        "avg_dram_throughput_pct": 40.0,
+        "avg_tensor_core_utilization_pct": 50.0,
+        "avg_l1_cache_hit_rate_pct": 70.0,
+        "avg_l2_cache_hit_rate_pct": 80.0,
+        "avg_global_load_sectors_per_request": 2.0,  # ≤4 → no bottleneck
+        "avg_issue_slot_utilization_pct": 70.0,
+        "avg_occupancy_pct": 75.0,
+        "dominant_warp_stall": "not_selected",
+        "dominant_warp_stall_pct": 5.0,
+        "warp_stall_breakdown": {},
+        "memory_stall_fraction": 0.0,
+        "compute_stall_fraction": 0.0,
+    }
+    labels = [b["label"] for b in at.classify_ncu_bottlenecks(summary)]
+    assert "uncoalesced_access" not in labels
 
 
 def test_classify_insufficient_ncu_data() -> None:

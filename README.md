@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 
-Fournex helps developers find GPU performance bottlenecks and turn profiler evidence into ranked recommendations. It supports PyTorch training-loop telemetry, PTX static analysis, CUDA source inspection, Nsight Compute CSV ingestion, and before/after CUDA comparisons.
+Fournex finds GPU performance bottlenecks and turns profiler evidence into ranked, actionable recommendations. It supports PyTorch training-loop telemetry, PTX static analysis, CUDA source inspection, Nsight Compute CSV ingestion, and before/after CUDA comparisons.
 
 ---
 
@@ -16,11 +16,64 @@ Fournex helps developers find GPU performance bottlenecks and turn profiler evid
 pip install fournex
 ```
 
-Requires Python 3.10+. A CUDA-capable GPU is recommended for runtime profiling; PTX, CUDA source, and imported Nsight Compute CSV analysis can run without live GPU access.
+Requires Python 3.10+. A CUDA-capable GPU is needed for live profiling; PTX, CUDA source, and imported Nsight Compute CSV analysis run without one.
 
 ---
 
 ## 60-second demo
+
+### Profile a CUDA workload
+
+```bash
+# One command: run NCU and get a full detailed report
+frx profile -- ./my_kernel_app
+
+# Or analyze an existing NCU CSV
+frx profile --ncu ncu_report.csv
+```
+
+Example output:
+
+```text
+====================================================================
+  Fournex - CUDA Performance Profile
+  Source  : ncu_report.csv
+  Kernels : 3
+  Confidence: high
+====================================================================
+
+VERDICT
+  Primary bottleneck : memory_bandwidth_bound
+  Also detected      : l1_cache_thrashing, uncoalesced_access
+
+MEASURED METRICS
+  Status  Metric                           Value        Threshold hint
+  ----------------------------------------------------------------
+  [!!]  DRAM Throughput                  87.4%        high >= 80% -> memory bandwidth bound
+  [ok]  Tensor Core Utilization          62.1%        low < 10% -> underutilized TC units
+  [!!]  L1 Hit Rate                      31.2%        low < 40% -> L1 cache thrashing
+  [ok]  L2 Hit Rate                      72.8%        low < 50% -> L2 cache thrashing
+  [!!]  Load Sectors/Request             9.3          high > 4 -> uncoalesced global loads (ideal = 1)
+  [ok]  Issue Slot Utilization           78.4%        low < 40% -> low ILP / underutilized SMs
+
+RECOMMENDATIONS (3)
+
+  ----------------------------------------------------------------
+  1. [HIGH] Improve global memory access coalescing
+     Tier: advanced   Score: 0.84   Triggered by: rule_ncu_uncoalesced_access
+
+     Why:
+       Global load transactions average more than 4 sectors per request...
+
+     Actions:
+       1. Ensure adjacent threads access adjacent memory addresses (stride-1).
+       2. Restructure array-of-structs (AoS) layouts to struct-of-arrays (SoA).
+       3. Align buffers to 128-byte cache line boundaries.
+
+     Validation:
+       - DRAM throughput % should decrease after improving coalescing.
+       - L2 hit rate should improve as fewer cache lines are fetched.
+```
 
 ### Analyze a training run
 
@@ -43,28 +96,10 @@ VERDICT
   Confidence         : high (0.91)
   Reason             : DataLoader consumed 74% of average step time
 
-EVIDENCE
-  - avg_dataloader_fraction=0.74 exceeds threshold 0.20
-  - avg_step_wall_time_ns=482000000 (482 ms per step)
-
-PERFORMANCE SNAPSHOT
-  Avg GPU Utilization : 23.4%
-  Avg Step Time       : 482.000 ms
-  Throughput          : 2.1 steps/sec
-  Dominant Stall      : dataloader
-
 TOP RECOMMENDATIONS
   1. Increase DataLoader num_workers
   2. Tune prefetching / persistent workers
   3. Move expensive CPU transforms closer to the GPU path
-```
-
-### Analyze CUDA evidence directly
-
-```bash
-frx analyze kernel.ptx
-frx analyze kernel.cu
-frx analyze ncu_report.csv
 ```
 
 ### Compare before and after
@@ -74,20 +109,11 @@ frx analyze --before before.ptx --after after.ptx
 frx analyze --before before.csv --after after.csv
 ```
 
-Use JSON for automation:
+Use `--json` for automation:
 
 ```bash
-frx analyze ncu_report.csv --json
+frx profile --ncu ncu_report.csv --json
 frx analyze --before before.ptx --after after.ptx --json
-```
-
-JSON output is wrapped as:
-
-```json
-{
-  "mode": "ptx",
-  "result": {}
-}
 ```
 
 ---
@@ -107,21 +133,34 @@ JSON output is wrapped as:
 | `launch_bound` | Many small kernels / low utilization pattern |
 | `insufficient_telemetry` | Not enough trace data to make a reliable call |
 
-### CUDA / kernel-level bottlenecks
+### PTX static findings
+
+Reported by `frx analyze kernel.ptx` and `frx profile --ptx kernel.ptx`.
+
+| Code | Signal |
+|---|---|
+| `register_spills_detected` | PTX local-memory spill loads/stores detected |
+| `high_global_memory_ratio` | Global-memory-heavy instruction mix with little shared-memory use |
+| `fp64_detected` | FP64 arithmetic or data movement detected |
+
+### NCU kernel bottlenecks
+
+Reported by `frx profile` and `frx analyze ncu_report.csv`.
 
 | Label | Signal |
 |---|---|
-| `ptx_register_spills` | PTX local-memory spill loads/stores detected |
-| `ptx_high_register_pressure` | High per-thread register use |
-| `ptx_global_memory_heavy` | Global-memory-heavy PTX with little shared-memory use |
-| `ptx_fp64_usage` | FP64 arithmetic or FP64 data movement detected |
-| `ptx_branch_divergence_risk` | High conditional branch density |
-| `memory_bandwidth_bound` | High DRAM throughput plus memory stalls in Nsight Compute data |
+| `memory_bandwidth_bound` | High DRAM throughput plus memory stalls |
 | `warp_stall_memory` | Memory-related warp stalls dominate |
 | `warp_stall_sync` | Barrier/synchronization stalls dominate |
-| `cache_thrashing` | Low L1 or L2 cache hit rate |
-| `tensor_core_underutilized` | Tensor core utilization is low where tensor cores may apply |
+| `l1_cache_thrashing` | L1 cache hit rate below 40% |
+| `l2_cache_thrashing` | L2 cache hit rate below 50% |
+| `uncoalesced_access` | Global load sectors per request exceed 4 (ideal = 1) |
+| `tensor_core_underutilized` | Tensor core utilization is low |
 | `low_issue_efficiency` | Issue slot utilization is low |
+| `low_warp_scheduler_utilization` | Warp scheduler is underutilized |
+| `occupancy_limited_by_registers` | Occupancy is limited by register pressure |
+| `occupancy_limited_by_shared_memory` | Occupancy is limited by shared memory usage |
+| `occupancy_limited` | Occupancy is low (other cause) |
 | `insufficient_ncu_data` | NCU CSV had no parseable performance metrics |
 
 ---
@@ -129,6 +168,13 @@ JSON output is wrapped as:
 ## CLI Reference
 
 ```bash
+# CUDA profiling — one command from workload to full report
+frx profile -- ./my_kernel_app                               # run NCU + report
+frx profile --preset memory -- python train.py               # memory-focused preset
+frx profile --ncu ncu_report.csv                             # analyze saved CSV
+frx profile --ptx kernel.ptx                                 # PTX static analysis
+frx profile --ncu report.csv --json                          # JSON output
+
 # Collect and analyze PyTorch training telemetry
 frx collect --name <name> [--out <dir>] -- python train.py
 frx analyze <run-dir-or-zip> [--scope run|steady_state|auto] [--json]
@@ -138,7 +184,7 @@ frx analyze kernel.ptx [--json]
 frx analyze kernel.cu [--gpu-model A100] [--json]
 frx analyze ncu_report.csv [--json]
 
-# Generate Nsight Compute collection commands
+# Generate Nsight Compute commands (manual two-step alternative to frx profile)
 frx ncu-command --list
 frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
 frx ncu-command full --kernel-name regex:my_kernel --output ncu_full.csv -- ./my_kernel_app
@@ -150,17 +196,13 @@ frx analyze --before before.csv --after after.csv [--json]
 # Compare with multiple evidence layers per side
 frx analyze \
   --before-source before.cu --before-ptx before.ptx --before-ncu before.csv \
-  --after-source after.cu --after-ptx after.ptx --after-ncu after.csv
+  --after-source after.cu  --after-ptx after.ptx  --after-ncu after.csv
 
 # Utilities
 frx doctor
 frx smoke-test
 frx tune --safe --max-trials 12 -- python train.py
 ```
-
-`--baseline` and `--optimized` are still accepted as deprecated aliases for NCU before/after comparison. Prefer `--before` and `--after`.
-
-Full documentation: **[fournex.com/docs](https://fournex.com/docs)**
 
 ---
 
@@ -209,51 +251,45 @@ frx analyze runs/<run-id>
 
 ## CUDA Workflow
 
-### PTX analysis
+### frx profile — one-command bottleneck report
 
-Generate PTX with your CUDA toolchain, then analyze it:
+`frx profile` is the recommended entry point for kernel-level analysis. It runs Nsight Compute on your workload and immediately prints a structured report with evidence, ranked recommendations, and validation steps.
+
+```bash
+# Run NCU on a workload and report
+frx profile -- ./my_kernel_app
+frx profile --preset memory -- python train.py
+
+# Scope profiling to specific kernels
+frx profile --kernel-name gemm --launch-skip 2 --launch-count 10 -- ./app
+
+# Save the NCU CSV for later re-analysis
+frx profile --out ncu_report.csv -- ./my_kernel_app
+frx profile --ncu ncu_report.csv          # re-analyze without re-running
+```
+
+When `ncu` is not on PATH, `frx profile` prints the equivalent manual commands so you can collect and import the CSV separately.
+
+### Metric presets
+
+| Preset | Use when | Covers |
+|---|---|---|
+| `memory` | DRAM bandwidth, cache, or coalescing issues | DRAM throughput, L1/L2 hit rates, sectors/request, memory stalls |
+| `tensor` | GEMM/convolution/AMP performance | Tensor core utilization, issue utilization, occupancy |
+| `occupancy` | Launch config or resource limits reduce active warps | Achieved occupancy, registers/thread, shared memory |
+| `stalls` | Warp stall breakdown is needed | Memory, sync, scoreboard, dispatch, and scheduler stalls |
+| `full` | Broadest Fournex CUDA diagnosis | Union of all presets (default) |
+
+### PTX static analysis
+
+Generate PTX and analyze it without a GPU:
 
 ```bash
 nvcc -ptx kernel.cu -o kernel.ptx
 frx analyze kernel.ptx
+# or
+frx profile --ptx kernel.ptx
 ```
-
-PTX analysis is static. It flags likely risks such as register spills, high register pressure, global-memory-heavy instruction mix, FP64 use, branch divergence risk, and atomics.
-
-### Nsight Compute CSV analysis
-
-Export a CSV from Nsight Compute and pass it to Fournex:
-
-```bash
-frx ncu-command full --output ncu_report.csv -- ./my_kernel_app
-# prints:
-# ncu --csv --target-processes all --metrics <fournex metrics> ./my_kernel_app > ncu_report.csv
-
-frx analyze ncu_report.csv
-```
-
-NCU analysis uses measured runtime counters, so its confidence is higher when hardware counters are available. On some WSL2/WDDM setups, NCU hardware counters may be inaccessible.
-
-Fournex ships metric presets for common CUDA investigations:
-
-| Preset | Use when | Includes |
-|---|---|---|
-| `memory` | DRAM bandwidth, cache, or memory stalls are suspected | DRAM throughput, L1/L2 hit rates, memory stall reasons |
-| `tensor` | GEMM/convolution/AMP performance is suspected | Tensor core utilization, issue utilization, achieved occupancy |
-| `occupancy` | Launch config or resource pressure may limit active warps | Achieved occupancy, block size, registers/thread, shared memory |
-| `stalls` | You need warp stall reason breakdown | Memory, sync, scoreboard, dispatch, and scheduler stall metrics |
-| `full` | You want the broadest Fournex CUDA diagnosis | Union of all presets |
-
-Examples:
-
-```bash
-frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
-frx ncu-command tensor --kernel-name regex:gemm --output ncu_tensor.csv -- ./my_kernel_app
-frx ncu-command occupancy --launch-skip 5 --launch-count 20 --output ncu_occ.csv -- ./my_kernel_app
-frx ncu-command stalls --target-processes all --output ncu_stalls.csv -- python train.py
-```
-
-`frx analyze ncu_report.csv` validates the CSV before reporting. If key metrics are missing, Fournex prints warnings such as "Memory diagnosis may be incomplete" or "Occupancy diagnosis may be incomplete." Malformed CSVs fail with actionable errors for missing kernel, metric, or value columns.
 
 ### Before/after comparison
 
@@ -281,7 +317,7 @@ cd backend
 uvicorn api:app --reload
 ```
 
-### CUDA static inspection - `POST /cuda/static-inspect`
+### CUDA static inspection — `POST /cuda/static-inspect`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/cuda/static-inspect \
@@ -289,7 +325,7 @@ curl -X POST http://127.0.0.1:8000/cuda/static-inspect \
   -d '{"files": [{"filename": "kernel.cu", "content": "<source>"}], "gpu_model": "A100"}'
 ```
 
-### PTX analysis - `POST /ptx/analyze`
+### PTX analysis — `POST /ptx/analyze`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ptx/analyze \
@@ -297,7 +333,7 @@ curl -X POST http://127.0.0.1:8000/ptx/analyze \
   -d '{"content": "<ptx text>", "filename": "kernel.ptx"}'
 ```
 
-### Nsight Compute analysis - `POST /ncu/analyze`
+### Nsight Compute analysis — `POST /ncu/analyze`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ncu/analyze \
@@ -305,7 +341,7 @@ curl -X POST http://127.0.0.1:8000/ncu/analyze \
   -d '{"content": "<csv text>", "filename": "report.csv"}'
 ```
 
-### Implementation comparison - `POST /compare`
+### Implementation comparison — `POST /compare`
 
 ```bash
 curl -X POST http://127.0.0.1:8000/compare \
@@ -323,7 +359,7 @@ curl -X POST http://127.0.0.1:8000/compare \
 ```bash
 git clone https://github.com/jorgevee/fournex.git
 cd fournex
-pip install -e backend/python
+pip install fournex
 frx doctor
 frx smoke-test
 ```
@@ -341,14 +377,6 @@ pytest backend/tests/python/
 Pull requests are welcome. Open an issue first to discuss proposed changes.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
-
----
-
-## Coming Soon
-
-- `frx upload` - push run bundles to the cloud for shareable analysis URLs
-- Automated config optimization
-- Distributed and multi-GPU workload support
 
 ---
 

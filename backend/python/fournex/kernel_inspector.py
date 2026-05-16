@@ -66,6 +66,7 @@ class KernelLaunchSummary:
     tensor_core_utilization_pct: float | None = None
     l1_cache_hit_rate_pct: float | None = None
     l2_cache_hit_rate_pct: float | None = None
+    global_load_sectors_per_request: float | None = None
     issue_slot_utilization_pct: float | None = None
     achieved_occupancy_pct: float | None = None
     eligible_warps_per_scheduler: float | None = None
@@ -352,6 +353,7 @@ def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:
     summary.tensor_core_utilization_pct = m.get("tensor_core_utilization_pct")
     summary.l1_cache_hit_rate_pct = m.get("l1_cache_hit_rate_pct")
     summary.l2_cache_hit_rate_pct = m.get("l2_cache_hit_rate_pct")
+    summary.global_load_sectors_per_request = m.get("global_load_sectors_per_request")
     summary.issue_slot_utilization_pct = m.get("issue_slot_utilization_pct")
     summary.achieved_occupancy_pct = m.get("achieved_occupancy_pct")
     summary.eligible_warps_per_scheduler = m.get("eligible_warps_per_scheduler")
@@ -419,6 +421,11 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "l1/tex_cache_throughput": "l1_cache_hit_rate_pct",
         "lts__t_sector_hit_rate_pct": "l2_cache_hit_rate_pct",
         "l2_cache_hit_rate": "l2_cache_hit_rate_pct",
+        # Global memory coalescing (sectors issued per warp request; ideal = 1)
+        "l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld": "global_load_sectors_per_request",
+        "l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld_ratio": "global_load_sectors_per_request",
+        "gld_transactions_per_request": "global_load_sectors_per_request",
+        "global_load_sectors_per_request": "global_load_sectors_per_request",
         # Issue slot utilization (IPC proxy)
         "sm__issue_active_avg_pct_of_peak_sustained_active": "issue_slot_utilization_pct",
         "sm__issue_active_avg_pct_of_peak_sustained_elapsed": "issue_slot_utilization_pct",

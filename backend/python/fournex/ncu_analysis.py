@@ -20,6 +20,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
             "avg_tensor_core_utilization_pct": None,
             "avg_l1_cache_hit_rate_pct": None,
             "avg_l2_cache_hit_rate_pct": None,
+            "avg_global_load_sectors_per_request": None,
             "avg_issue_slot_utilization_pct": None,
             "avg_occupancy_pct": None,
             "avg_eligible_warps_per_scheduler": None,
@@ -45,6 +46,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     tc_utils = [s.tensor_core_utilization_pct for s in summaries]
     l1_hits = [s.l1_cache_hit_rate_pct for s in summaries]
     l2_hits = [s.l2_cache_hit_rate_pct for s in summaries]
+    load_sectors = [s.global_load_sectors_per_request for s in summaries]
     isus = [s.issue_slot_utilization_pct for s in summaries]
     eligible_warps = [s.eligible_warps_per_scheduler for s in summaries]
     scheduler_active = [s.scheduler_active_pct for s in summaries]
@@ -76,6 +78,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
             s.tensor_core_utilization_pct,
             s.l1_cache_hit_rate_pct,
             s.l2_cache_hit_rate_pct,
+            s.global_load_sectors_per_request,
             s.issue_slot_utilization_pct,
             s.achieved_occupancy_pct,
             s.eligible_warps_per_scheduler,
@@ -133,6 +136,7 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         "avg_tensor_core_utilization_pct": _avg(tc_utils),
         "avg_l1_cache_hit_rate_pct": _avg(l1_hits),
         "avg_l2_cache_hit_rate_pct": _avg(l2_hits),
+        "avg_global_load_sectors_per_request": _avg(load_sectors),
         "avg_issue_slot_utilization_pct": _avg(isus),
         "avg_occupancy_pct": _avg(occs),
         "avg_eligible_warps_per_scheduler": _avg(eligible_warps),
@@ -168,6 +172,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
     tc = ncu_summary.get("avg_tensor_core_utilization_pct")
     l1 = ncu_summary.get("avg_l1_cache_hit_rate_pct")
     l2 = ncu_summary.get("avg_l2_cache_hit_rate_pct")
+    load_sectors = ncu_summary.get("avg_global_load_sectors_per_request")
     isu = ncu_summary.get("avg_issue_slot_utilization_pct")
     occ = ncu_summary.get("avg_occupancy_pct")
     mem_frac = ncu_summary.get("memory_stall_fraction", 0.0)
@@ -212,14 +217,34 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if l1 is not None and l1 < 40.0 or (l2 is not None and l2 < 50.0):
-        hit_rate = l1 if l1 is not None else l2
+    if l1 is not None and l1 < 40.0:
         bottlenecks.append({
-            "label": "cache_thrashing",
-            "score": round(max(0.0, 1.0 - (hit_rate or 100.0) / 100.0), 4),
+            "label": "l1_cache_thrashing",
+            "score": round(max(0.0, 1.0 - l1 / 100.0), 4),
             "evidence": {
                 "avg_l1_cache_hit_rate_pct": l1,
                 "avg_l2_cache_hit_rate_pct": l2,
+            },
+            "worst_steps": [],
+        })
+
+    if l2 is not None and l2 < 50.0:
+        bottlenecks.append({
+            "label": "l2_cache_thrashing",
+            "score": round(max(0.0, 1.0 - l2 / 100.0), 4),
+            "evidence": {
+                "avg_l2_cache_hit_rate_pct": l2,
+                "avg_l1_cache_hit_rate_pct": l1,
+            },
+            "worst_steps": [],
+        })
+
+    if load_sectors is not None and load_sectors > 4.0:
+        bottlenecks.append({
+            "label": "uncoalesced_access",
+            "score": round(min(1.0, max(0.0, (load_sectors - 1.0) / 31.0)), 4),
+            "evidence": {
+                "avg_global_load_sectors_per_request": load_sectors,
             },
             "worst_steps": [],
         })

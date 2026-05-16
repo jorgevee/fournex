@@ -325,8 +325,8 @@
     DRAM throughput is elevated but warp stall data is unavailable. Improving
     memory coalescing is the safest first step.
 
-- id: rule_ncu_cache_thrashing
-  bottleneck: cache_thrashing
+- id: rule_ncu_l1_cache_thrashing
+  bottleneck: l1_cache_thrashing
   min_score: 0.35
   signals:
     l1_cache_miss_heavy: true
@@ -337,7 +337,38 @@
   priority_boost: 0.15
   explanation: >
     L1 cache hit rate is below 40%, indicating poor data locality. Shared-memory
-    tiling can dramatically reduce cache miss traffic.
+    tiling stages frequently reused data in on-chip memory and eliminates repeated
+    global memory fetches.
+
+- id: rule_ncu_l2_cache_thrashing
+  bottleneck: l2_cache_thrashing
+  min_score: 0.30
+  signals:
+    l2_cache_miss_heavy: true
+  suppressed_if:
+    l1_cache_miss_heavy: true
+  recommendations:
+    - rec_ncu_reduce_working_set
+    - rec_ncu_tiling_shared_mem
+  priority_boost: 0.10
+  explanation: >
+    L2 cache hit rate is below 50% without a corresponding L1 miss spike, suggesting
+    the kernel's working set exceeds the L2 capacity. Reducing per-kernel memory
+    footprint or splitting passes is the primary fix.
+
+- id: rule_ncu_uncoalesced_access
+  bottleneck: uncoalesced_access
+  min_score: 0.10
+  signals: {}
+  suppressed_if: {}
+  recommendations:
+    - rec_ncu_improve_coalescing
+  priority_boost: 0.20
+  explanation: >
+    Global load transactions average more than 4 sectors per request, meaning threads
+    in a warp are reading from non-contiguous memory addresses. Restructuring data
+    layouts to stride-1 access or using SoA instead of AoS will reduce wasted memory
+    bandwidth and improve cache efficiency.
 
 - id: rule_ncu_warp_stall_memory
   bottleneck: warp_stall_memory

@@ -449,7 +449,7 @@
 - id: rec_ncu_improve_coalescing
   title: Improve global memory access coalescing
   category: ncu_memory
-  applies_to: [memory_bandwidth_bound, warp_stall_memory]
+  applies_to: [memory_bandwidth_bound, warp_stall_memory, uncoalesced_access]
   prerequisites: {}
   impact: high
   effort: medium
@@ -470,7 +470,7 @@
 - id: rec_ncu_tiling_shared_mem
   title: Add shared-memory tiling to reduce DRAM traffic
   category: ncu_memory
-  applies_to: [memory_bandwidth_bound, cache_thrashing, warp_stall_memory]
+  applies_to: [memory_bandwidth_bound, l1_cache_thrashing, l2_cache_thrashing, warp_stall_memory, uncoalesced_access]
   prerequisites: {}
   impact: high
   effort: high
@@ -491,7 +491,7 @@
 - id: rec_ncu_reduce_working_set
   title: Reduce per-kernel working set to improve cache reuse
   category: ncu_memory
-  applies_to: [memory_bandwidth_bound, cache_thrashing]
+  applies_to: [memory_bandwidth_bound, l1_cache_thrashing, l2_cache_thrashing]
   prerequisites: {}
   impact: medium
   effort: high

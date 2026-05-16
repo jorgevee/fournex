@@ -350,11 +350,11 @@ def test_ncu_profile_of_global_heavy_detects_memory_bottleneck():
 
         bottleneck_labels = {b["label"] for b in ncu_result.get("bottlenecks", [])}
 
-        # cache_thrashing fires on L1 hit rate alone (no stall data needed).
+        # l1_cache_thrashing fires on L1 hit rate alone (no stall data needed).
         # memory_bandwidth_bound and warp_stall_memory need stall data too.
         # Accept any of the three as valid evidence of memory pressure.
         assert bottleneck_labels & {
-            "memory_bandwidth_bound", "warp_stall_memory", "cache_thrashing"
+            "memory_bandwidth_bound", "warp_stall_memory", "l1_cache_thrashing"
         }, (
             f"Expected a memory bottleneck from ncu profile of global_memory_heavy; "
             f"got {bottleneck_labels}. ncu_run_summary={ncu_result.get('ncu_run_summary')}"

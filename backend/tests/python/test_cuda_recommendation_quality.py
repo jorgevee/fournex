@@ -28,6 +28,7 @@ def _summary_with(
     tc: float | None = None,
     l1: float | None = None,
     l2: float | None = None,
+    load_sectors: float | None = None,
     isu: float | None = None,
     occ: float | None = 70.0,
     stall: str = "unknown",
@@ -50,6 +51,7 @@ def _summary_with(
         "avg_tensor_core_utilization_pct": tc,
         "avg_l1_cache_hit_rate_pct": l1,
         "avg_l2_cache_hit_rate_pct": l2,
+        "avg_global_load_sectors_per_request": load_sectors,
         "avg_issue_slot_utilization_pct": isu,
         "avg_occupancy_pct": occ,
         "dominant_warp_stall": stall,
@@ -134,7 +136,7 @@ def test_cache_and_warp_memory_not_amp_not_sync() -> None:
     result = _recs_for(ncu)
 
     ids = result["ids"]
-    assert "cache_thrashing" in result["bottlenecks"]
+    assert "l1_cache_thrashing" in result["bottlenecks"]
     assert "warp_stall_memory" in result["bottlenecks"]
     assert "rec_ncu_tiling_shared_mem" in ids
     assert "rec_ncu_improve_coalescing" in ids
@@ -232,15 +234,15 @@ def test_isu_threshold_low_issue_rule(isu: float, expect_block_size_rec: bool) -
     (39.9, True),   # 39.9 IS < 40.0
 ])
 def test_l1_threshold_cache_thrashing(l1: float, expect_cache_thrashing: bool) -> None:
-    """cache_thrashing requires l1 < 40.0 (strict). DRAM=35% keeps memory_bandwidth_bound quiet."""
+    """l1_cache_thrashing requires l1 < 40.0 (strict). DRAM=35% keeps memory_bandwidth_bound quiet."""
     ncu = _summary_with(l1=l1, dram=35.0)
     result = _recs_for(ncu)
 
     if expect_cache_thrashing:
-        assert "cache_thrashing" in result["bottlenecks"]
+        assert "l1_cache_thrashing" in result["bottlenecks"]
         assert "rec_ncu_tiling_shared_mem" in result["ids"]
     else:
-        assert "cache_thrashing" not in result["bottlenecks"]
+        assert "l1_cache_thrashing" not in result["bottlenecks"]
 
 
 # ── Section 3: False-positive clean kernel variants ───────────────────────────
@@ -279,13 +281,13 @@ def test_low_tc_blocked_by_low_occupancy() -> None:
 
 def test_low_l1_without_high_dram_triggers_cache_not_memory_bound() -> None:
     """L1=30% (poor locality) but DRAM=35% (low bandwidth pressure).
-    cache_thrashing should fire; memory_bandwidth_bound should not.
+    l1_cache_thrashing should fire; memory_bandwidth_bound should not.
     rec_ncu_improve_coalescing (memory-bound rec) should be absent.
     """
     ncu = _summary_with(l1=30.0, dram=35.0)
     result = _recs_for(ncu)
 
-    assert "cache_thrashing" in result["bottlenecks"]
+    assert "l1_cache_thrashing" in result["bottlenecks"]
     assert "memory_bandwidth_bound" not in result["bottlenecks"]
     assert "rec_ncu_tiling_shared_mem" in result["ids"]
     assert "rec_ncu_improve_coalescing" not in result["ids"]

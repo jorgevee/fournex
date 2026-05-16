@@ -91,6 +91,7 @@ def extract_ncu_signals(
     tc = ncu_summary.get("avg_tensor_core_utilization_pct") or 0.0
     l1 = ncu_summary.get("avg_l1_cache_hit_rate_pct")
     l2 = ncu_summary.get("avg_l2_cache_hit_rate_pct")
+    load_sectors = ncu_summary.get("avg_global_load_sectors_per_request")
     isu = ncu_summary.get("avg_issue_slot_utilization_pct") or 0.0
     occ = ncu_summary.get("avg_occupancy_pct") or 0.0
     eligible = ncu_summary.get("avg_eligible_warps_per_scheduler")
@@ -119,6 +120,9 @@ def extract_ncu_signals(
         "l2_cache_miss_heavy": l2 is not None and l2 < 50.0,
         "l1_cache_hit_rate_pct": l1 if l1 is not None else 100.0,
         "l2_cache_hit_rate_pct": l2 if l2 is not None else 100.0,
+        # ── Coalescing ────────────────────────────────────────────────────────
+        "uncoalesced_global_loads": load_sectors is not None and load_sectors > 4.0,
+        "avg_global_load_sectors_per_request": load_sectors if load_sectors is not None else 1.0,
 
         # ── Issue slot utilization (IPC proxy) ────────────────────────────────
         "issue_efficiency_low": isu < 60.0,

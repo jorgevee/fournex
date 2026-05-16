@@ -18,6 +18,7 @@ def _summary_with(
     tc: float | None = None,
     l1: float | None = None,
     l2: float | None = None,
+    load_sectors: float | None = None,
     isu: float | None = None,
     occ: float | None = 70.0,
     stall: str = "unknown",
@@ -43,6 +44,7 @@ def _summary_with(
         "avg_tensor_core_utilization_pct": tc,
         "avg_l1_cache_hit_rate_pct": l1,
         "avg_l2_cache_hit_rate_pct": l2,
+        "avg_global_load_sectors_per_request": load_sectors,
         "avg_issue_slot_utilization_pct": isu,
         "avg_occupancy_pct": occ,
         "avg_eligible_warps_per_scheduler": eligible,
@@ -196,8 +198,24 @@ def test_cache_thrashing_recommends_tiling() -> None:
     ncu = _summary_with(l1=25.0, l2=45.0, dram=50.0)
     result = _recs_for(ncu)
 
-    assert "cache_thrashing" in result["bottlenecks"]
+    assert "l1_cache_thrashing" in result["bottlenecks"]
+    assert "l2_cache_thrashing" in result["bottlenecks"]
     assert "rec_ncu_tiling_shared_mem" in result["ids"]
+
+
+def test_uncoalesced_access_recommends_improve_coalescing() -> None:
+    ncu = _summary_with(load_sectors=16.0, dram=40.0)
+    result = _recs_for(ncu)
+
+    assert "uncoalesced_access" in result["bottlenecks"]
+    assert "rec_ncu_improve_coalescing" in result["ids"]
+
+
+def test_coalesced_access_does_not_trigger_uncoalesced_bottleneck() -> None:
+    ncu = _summary_with(load_sectors=2.0)
+    result = _recs_for(ncu)
+
+    assert "uncoalesced_access" not in result["bottlenecks"]
 
 
 # ── Insufficient NCU data ─────────────────────────────────────────────────────

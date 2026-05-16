@@ -15,11 +15,12 @@ class NcuMetricPreset:
 NCU_METRIC_PRESETS: dict[str, NcuMetricPreset] = {
     "memory": NcuMetricPreset(
         name="memory",
-        description="DRAM bandwidth, cache hit rates, and memory-related stalls.",
+        description="DRAM bandwidth, cache hit rates, coalescing efficiency, and memory-related stalls.",
         metrics=(
             "dram__throughput.avg.pct_of_peak_sustained_elapsed",
             "l1tex__t_sector_hit_rate.pct",
             "lts__t_sector_hit_rate.pct",
+            "l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld",
             "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle",
             "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard",
             "smsp__pcsamplingdata_pct_of_utilization_issue_stalled_mio",

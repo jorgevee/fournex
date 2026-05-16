@@ -47,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
         args.workload_command = _normalize_workload_command(args.workload_command)
         args.workload_command = _resolve_workload_command(args.workload_command)
         return ncu_command(args)
+    elif args.command == "profile":
+        args.workload_command = _normalize_workload_command(args.workload_command)
+        args.workload_command = _resolve_workload_command(args.workload_command)
+        return profile(args)
     elif args.command == "tune":
         args.workload_command = _normalize_workload_command(args.workload_command)
         args.workload_command = _resolve_workload_command(args.workload_command)
@@ -307,6 +311,36 @@ def _build_parser() -> argparse.ArgumentParser:
     ncu_parser.add_argument("--json", dest="output_json", action="store_true", help="output command and metrics as JSON")
     ncu_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
+    profile_parser = subparsers.add_parser(
+        "profile",
+        help="run NCU and print a full detailed bottleneck + recommendation report",
+    )
+    profile_parser.add_argument(
+        "--ncu",
+        default=None,
+        metavar="CSV",
+        help="analyze an existing Nsight Compute CSV instead of running ncu",
+    )
+    profile_parser.add_argument(
+        "--ptx",
+        default=None,
+        metavar="PTX",
+        help="analyze a PTX file instead of running ncu",
+    )
+    profile_parser.add_argument(
+        "--preset",
+        default="full",
+        choices=["memory", "tensor", "occupancy", "stalls", "full"],
+        help="metric preset to collect when running ncu (default: full)",
+    )
+    profile_parser.add_argument("--out", default=None, metavar="FILE", help="save captured NCU CSV to this path")
+    profile_parser.add_argument("--kernel-name", default=None, help="Nsight Compute --kernel-name filter")
+    profile_parser.add_argument("--launch-skip", type=int, default=None, help="skip the first N kernel launches")
+    profile_parser.add_argument("--launch-count", type=int, default=None, help="profile at most N kernel launches")
+    profile_parser.add_argument("--gpu-model", default=None, help="GPU model hint for launch advisor")
+    profile_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
+    profile_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
+
     tune_parser = subparsers.add_parser(
         "tune",
         help="run safe autopilot: sweep configs and recommend the fastest one",
@@ -456,6 +490,94 @@ def ncu_command(args: argparse.Namespace) -> int:
     for metric in preset.metrics:
         print(f"  - {metric}")
     print()
+    return 0
+
+
+def profile(args: argparse.Namespace) -> int:
+    """Run NCU on a workload (or analyze existing data) and print a full detailed report."""
+    import fournex as at
+    from .ncu_presets import build_ncu_command, format_shell_command
+
+    environment = _detect_environment()
+    if args.gpu_model:
+        environment["gpu_model"] = args.gpu_model
+
+    ncu_csv_text: str | None = None
+    source_label: str = "live profiling"
+
+    if args.ncu:
+        ncu_path = Path(args.ncu)
+        if not ncu_path.exists():
+            print(f"Error: NCU CSV not found: {ncu_path}", file=sys.stderr)
+            return 1
+        ncu_csv_text = ncu_path.read_text()
+        source_label = str(ncu_path)
+
+    elif args.ptx:
+        ptx_path = Path(args.ptx)
+        if not ptx_path.exists():
+            print(f"Error: PTX file not found: {ptx_path}", file=sys.stderr)
+            return 1
+        result = at.analyze_ptx_text(ptx_path.read_text())
+        if args.output_json:
+            _print_json_result("profile", result)
+        else:
+            _print_ptx_report(result)
+        return 0
+
+    else:
+        workload = args.workload_command
+        if not workload:
+            print(
+                "Error: provide a workload command (-- python train.py), --ncu FILE, or --ptx FILE",
+                file=sys.stderr,
+            )
+            return 1
+
+        ncu_bin = shutil.which("ncu")
+        if not ncu_bin:
+            print("Error: 'ncu' not found on PATH.", file=sys.stderr)
+            print("  Install Nsight Compute, or use the manual two-step workflow:", file=sys.stderr)
+            print(f"    frx ncu-command --preset {args.preset} -- {' '.join(workload)}", file=sys.stderr)
+            print("    frx profile --ncu <output.csv>", file=sys.stderr)
+            return 1
+
+        try:
+            command = build_ncu_command(
+                args.preset,
+                workload,
+                output=None,
+                kernel_name=args.kernel_name,
+                launch_skip=args.launch_skip,
+                launch_count=args.launch_count,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"\nProfiling: {format_shell_command(command)}\n")
+        proc = subprocess.run(command, capture_output=True, text=True)
+        if proc.returncode != 0:
+            print(f"Error: ncu exited with code {proc.returncode}", file=sys.stderr)
+            if proc.stderr:
+                print(proc.stderr[:600], file=sys.stderr)
+            return 1
+
+        ncu_csv_text = proc.stdout
+        source_label = f"ncu {format_shell_command(workload)}"
+
+        if args.out:
+            out_path = Path(args.out)
+            out_path.write_text(ncu_csv_text)
+            print(f"NCU CSV saved → {out_path}")
+
+    result = at.analyze_ncu_csv_text(ncu_csv_text, environment=environment)
+
+    if args.output_json:
+        _print_json_result("profile", result)
+        return 0
+
+    _print_ncu_report_full(result, source=source_label, args=args)
     return 0
 
 
@@ -1816,6 +1938,180 @@ def _print_recommendation_list(recommendations: list[dict[str, Any]]) -> None:
         actions = rec.get("actions", [])
         if actions:
             print(f"     Action: {actions[0]}")
+
+
+def _print_wrapped(text: str, indent: str = "  ", width: int = 72) -> None:
+    import textwrap
+    lines = textwrap.wrap(text, width=width - len(indent))
+    for line in lines:
+        print(f"{indent}{line}")
+
+
+def _ncu_metric_status(value: float | None, warn: float, crit: float, low_is_bad: bool = True) -> str:
+    if value is None:
+        return "[--]"
+    bad = value < crit if low_is_bad else value > crit
+    warn_flag = value < warn if low_is_bad else value > warn
+    if bad:
+        return "[!!]"
+    if warn_flag:
+        return "[ !]"
+    return "[ok]"
+
+
+def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any = None) -> None:
+    import textwrap
+
+    sep = "=" * 68
+    thin = "-" * 68
+    summary = result.get("ncu_run_summary", {})
+    scope = result.get("diagnostic_scope", {})
+    bottlenecks = result.get("bottlenecks", [])
+    recommendations = result.get("recommendations", [])
+    kernel_count = result.get("kernel_count", 0)
+
+    print(f"\n{sep}")
+    print("  Fournex - CUDA Performance Profile")
+    if source:
+        print(f"  Source  : {source}")
+    print(f"  Kernels : {kernel_count}")
+    confidence = scope.get("confidence", "unknown")
+    print(f"  Confidence: {confidence}")
+    print(sep)
+
+    # ── VERDICT ────────────────────────────────────────────────────────────────
+    primary = result.get("primary_bottleneck") or "none"
+    print("\nVERDICT")
+    print(f"  Primary bottleneck : {primary}")
+    secondaries = [b["label"] for b in bottlenecks if b["label"] != primary]
+    if secondaries:
+        print(f"  Also detected      : {', '.join(secondaries)}")
+    scope_msg = scope.get("message")
+    if scope_msg:
+        print(f"  Note               : {scope_msg}")
+
+    _print_ncu_validation(result.get("validation", {}))
+
+    # ── MEASURED METRICS ───────────────────────────────────────────────────────
+    print(f"\nMEASURED METRICS")
+    print(f"  {'Status':<6}  {'Metric':<32} {'Value':<12} Threshold hint")
+    print(f"  {thin[:64]}")
+
+    dram = summary.get("avg_dram_throughput_pct")
+    st = _ncu_metric_status(dram, warn=60.0, crit=80.0, low_is_bad=False)
+    print(f"  {st}  {'DRAM Throughput':<32} {_fmt_optional_pct(dram):<12} high >= 80% -> memory bandwidth bound")
+
+    tc = summary.get("avg_tensor_core_utilization_pct")
+    st = _ncu_metric_status(tc, warn=20.0, crit=10.0, low_is_bad=True)
+    print(f"  {st}  {'Tensor Core Utilization':<32} {_fmt_optional_pct(tc):<12} low < 10% -> underutilized TC units")
+
+    l1 = summary.get("avg_l1_cache_hit_rate_pct")
+    st = _ncu_metric_status(l1, warn=60.0, crit=40.0, low_is_bad=True)
+    print(f"  {st}  {'L1 Hit Rate':<32} {_fmt_optional_pct(l1):<12} low < 40% -> L1 cache thrashing")
+
+    l2 = summary.get("avg_l2_cache_hit_rate_pct")
+    st = _ncu_metric_status(l2, warn=65.0, crit=50.0, low_is_bad=True)
+    print(f"  {st}  {'L2 Hit Rate':<32} {_fmt_optional_pct(l2):<12} low < 50% -> L2 cache thrashing")
+
+    load_sectors = summary.get("avg_global_load_sectors_per_request")
+    st = _ncu_metric_status(load_sectors, warn=4.0, crit=8.0, low_is_bad=False)
+    ls_str = f"{load_sectors:.1f}" if load_sectors is not None else "n/a"
+    print(f"  {st}  {'Load Sectors/Request':<32} {ls_str:<12} high > 4 -> uncoalesced global loads (ideal = 1)")
+
+    isu = summary.get("avg_issue_slot_utilization_pct")
+    st = _ncu_metric_status(isu, warn=55.0, crit=40.0, low_is_bad=True)
+    print(f"  {st}  {'Issue Slot Utilization':<32} {_fmt_optional_pct(isu):<12} low < 40% -> low ILP / underutilized SMs")
+
+    occ = summary.get("avg_occupancy_pct")
+    st = _ncu_metric_status(occ, warn=50.0, crit=30.0, low_is_bad=True)
+    print(f"  {st}  {'Occupancy':<32} {_fmt_optional_pct(occ):<12} low < 30% -> too few warps to hide latency")
+
+    eligible = summary.get("avg_eligible_warps_per_scheduler")
+    st = _ncu_metric_status(eligible, warn=1.0, crit=0.5, low_is_bad=True)
+    elig_str = f"{eligible:.2f}" if eligible is not None else "n/a"
+    print(f"  {st}  {'Eligible Warps/Scheduler':<32} {elig_str:<12} low < 0.5 -> warp scheduler starved")
+
+    sched_active = summary.get("avg_scheduler_active_pct")
+    st = _ncu_metric_status(sched_active, warn=50.0, crit=35.0, low_is_bad=True)
+    print(f"  {st}  {'Scheduler Active':<32} {_fmt_optional_pct(sched_active):<12} low < 35% -> warp scheduler underutilized")
+
+    dom_stall = summary.get("dominant_warp_stall", "unknown")
+    dom_pct = summary.get("dominant_warp_stall_pct", 0.0)
+    st = _ncu_metric_status(dom_pct, warn=20.0, crit=30.0, low_is_bad=False)
+    dom_str = f"{dom_stall} ({dom_pct:.1f}%)" if dom_stall != "unknown" else "unknown"
+    print(f"  {st}  {'Dominant Warp Stall':<32} {dom_str}")
+
+    causes = summary.get("occupancy_limit_causes") or []
+    if causes:
+        print(f"\n  Occupancy limited by: {', '.join(causes)}")
+
+    # ── BOTTLENECKS ────────────────────────────────────────────────────────────
+    if bottlenecks:
+        print(f"\nBOTTLENECKS DETECTED ({len(bottlenecks)})")
+        for b in bottlenecks:
+            score_bar = "#" * int(b.get("score", 0.0) * 10)
+            print(f"  [{score_bar:<10}] {b['label']:<36} score {float(b.get('score', 0.0)):.2f}")
+
+    # ── RECOMMENDATIONS ────────────────────────────────────────────────────────
+    if not recommendations:
+        print("\nRECOMMENDATIONS")
+        print("  No recommendations generated.")
+    else:
+        print(f"\nRECOMMENDATIONS ({len(recommendations)})")
+        for idx, rec in enumerate(recommendations, start=1):
+            priority = rec.get("priority", "low").upper()
+            tier = rec.get("tier", "next")
+            score = rec.get("score", 0.0)
+            title = rec.get("title", rec.get("id", "recommendation"))
+            print(f"\n  {'-' * 64}")
+            print(f"  {idx}. [{priority}] {title}")
+            print(f"     Tier: {tier}   Score: {score:.2f}   Triggered by: {rec.get('triggered_by', 'n/a')}")
+
+            why = rec.get("why")
+            if why:
+                print(f"\n     Why:")
+                _print_wrapped(why, indent="       ")
+
+            actions = rec.get("actions") or []
+            if actions:
+                print(f"\n     Actions:")
+                for i, action in enumerate(actions, start=1):
+                    lines = textwrap.wrap(action, width=60)
+                    print(f"       {i}. {lines[0]}")
+                    for continuation in lines[1:]:
+                        print(f"          {continuation}")
+
+            validation = rec.get("validation") or []
+            if validation:
+                print(f"\n     Validation:")
+                for v in validation:
+                    lines = textwrap.wrap(v, width=60)
+                    print(f"       - {lines[0]}")
+                    for continuation in lines[1:]:
+                        print(f"         {continuation}")
+
+            risks = rec.get("risks") or rec.get("caveats") or []
+            if isinstance(risks, str):
+                risks = [risks]
+            if risks:
+                print(f"\n     Risks/Caveats:")
+                for r in risks:
+                    lines = textwrap.wrap(r, width=60)
+                    print(f"       (!) {lines[0]}")
+                    for continuation in lines[1:]:
+                        print(f"         {continuation}")
+
+    # ── NEXT STEPS ─────────────────────────────────────────────────────────────
+    print(f"\n{thin}")
+    print("NEXT STEPS")
+    if source and not source.startswith("ncu ") and not source.startswith("live"):
+        print(f"  Re-run analysis:  frx profile --ncu {source}")
+    else:
+        print(f"  Re-run after changes:  frx profile -- <your_workload_command>")
+    if recommendations:
+        top = recommendations[0]
+        print(f"  Top priority fix:  {top.get('title', top.get('id', ''))}")
+    print()
 
 
 def _fmt_optional_pct(value: Any) -> str:
