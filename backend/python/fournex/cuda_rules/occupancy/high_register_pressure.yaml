@@ -1,0 +1,14 @@
+id: high_register_pressure
+scope: kernel
+category: occupancy
+severity: medium
+confidence: low
+message: "Kernel declares {local_var_count} local scalar variables; high local variable count increases register pressure and may reduce occupancy."
+conditions:
+  local_var_count_gt: 20
+recommendations:
+  - rec_ncu_reduce_register_pressure
+ncu_signals:
+  occupancy_limited_by_registers: true
+  registers_per_thread_gt: 64
+architecture_overrides: {}

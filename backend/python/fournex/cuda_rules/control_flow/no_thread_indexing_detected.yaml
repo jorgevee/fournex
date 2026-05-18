@@ -1,0 +1,11 @@
+id: no_thread_indexing_detected
+scope: kernel
+category: control_flow
+severity: low
+confidence: low
+message: "No threadIdx usage detected; verify this is intended."
+conditions:
+  has_thread_indexing: false
+recommendations: []
+ncu_signals: {}
+architecture_overrides: {}

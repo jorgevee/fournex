@@ -1,0 +1,16 @@
+id: fp32_only_matmul
+scope: kernel
+category: tensor_cores
+severity: medium
+confidence: medium
+message: "FP32 matrix multiply-accumulate detected without tensor core intrinsics; use half/bfloat16 with wmma:: or cuBLAS to engage tensor cores."
+conditions:
+  has_matmul: true
+  has_tc: false
+  has_fp16: false
+recommendations:
+  - rec_ncu_enable_amp
+  - rec_ncu_use_tensor_ops
+ncu_signals:
+  tensor_core_utilization_pct_lt: 10.0
+architecture_overrides: {}

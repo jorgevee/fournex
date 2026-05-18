@@ -1,0 +1,14 @@
+id: low_theoretical_occupancy
+scope: occupancy
+category: occupancy
+severity: low
+confidence: low
+message: "Estimated theoretical occupancy {occupancy_pct:.0f}% is below 25%; large shared memory allocation limits the number of resident blocks per SM."
+conditions:
+  occupancy_pct_lt: 25.0
+recommendations:
+  - rec_ncu_reduce_register_pressure
+  - rec_ncu_shared_mem_layout
+ncu_signals:
+  achieved_occupancy_pct_lt: 25.0
+architecture_overrides: {}

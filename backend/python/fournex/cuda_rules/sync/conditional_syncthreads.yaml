@@ -1,0 +1,13 @@
+id: conditional_syncthreads
+scope: kernel
+category: sync
+severity: high
+confidence: high
+message: "__syncthreads() appears inside a thread-dependent branch."
+conditions:
+  conditional_syncthreads_pattern: true
+recommendations:
+  - rec_ncu_reduce_syncthreads
+ncu_signals:
+  warp_stall_sync_pct_gt: 20.0
+architecture_overrides: {}

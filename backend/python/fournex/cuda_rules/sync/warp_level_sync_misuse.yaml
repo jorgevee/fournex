@@ -1,0 +1,14 @@
+id: warp_level_sync_misuse
+scope: kernel
+category: sync
+severity: medium
+confidence: high
+message: "__syncwarp() is used with shared memory but no __syncthreads(); shared memory written by one warp and read by another warp in the same block requires block-level synchronization."
+conditions:
+  has_syncwarp: true
+  has_shared: true
+  has_sync: false
+recommendations:
+  - rec_ncu_reduce_syncthreads
+ncu_signals: {}
+architecture_overrides: {}

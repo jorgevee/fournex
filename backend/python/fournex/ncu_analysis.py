@@ -242,7 +242,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
     if load_sectors is not None and load_sectors > 4.0:
         bottlenecks.append({
             "label": "uncoalesced_access",
-            "score": round(min(1.0, max(0.0, (load_sectors - 1.0) / 31.0)), 4),
+            "score": round(min(1.0, max(0.0, (load_sectors - 1.0) / 10.0)), 4),
             "evidence": {
                 "avg_global_load_sectors_per_request": load_sectors,
             },

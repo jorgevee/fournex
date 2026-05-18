@@ -1,0 +1,17 @@
+id: no_shared_memory_tiling
+scope: kernel
+category: memory
+severity: medium
+confidence: medium
+message: "Loop with multiple global memory accesses and no shared memory detected; consider staging reused data in shared memory to reduce DRAM traffic."
+conditions:
+  has_shared: false
+  for_count_gte: 1
+  global_access_count_gte: 3
+recommendations:
+  - rec_ncu_tiling_shared_mem
+  - rec_ncu_improve_coalescing
+ncu_signals:
+  dram_utilization_pct_gt: 60.0
+  l1_hit_rate_pct_lt: 50.0
+architecture_overrides: {}

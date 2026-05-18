@@ -385,6 +385,56 @@ def test_classify_uncoalesced_access_from_sectors_per_request() -> None:
     assert summary["avg_global_load_sectors_per_request"] == 12.0
 
 
+def _uncoalesced_summary(sectors: float) -> dict:
+    return {
+        "kernel_count": 1,
+        "kernels_with_ncu_data": 1,
+        "avg_dram_throughput_pct": 40.0,
+        "avg_tensor_core_utilization_pct": 50.0,
+        "avg_l1_cache_hit_rate_pct": 70.0,
+        "avg_l2_cache_hit_rate_pct": 80.0,
+        "avg_global_load_sectors_per_request": sectors,
+        "avg_issue_slot_utilization_pct": 70.0,
+        "avg_occupancy_pct": 75.0,
+        "dominant_warp_stall": "not_selected",
+        "dominant_warp_stall_pct": 5.0,
+        "warp_stall_breakdown": {},
+        "memory_stall_fraction": 0.0,
+        "compute_stall_fraction": 0.0,
+    }
+
+
+def _uncoalesced_score(sectors: float) -> float:
+    bottlenecks = at.classify_ncu_bottlenecks(_uncoalesced_summary(sectors))
+    hit = next((b for b in bottlenecks if b["label"] == "uncoalesced_access"), None)
+    assert hit is not None, f"uncoalesced_access not detected at sectors={sectors}"
+    return hit["score"]
+
+
+def test_uncoalesced_score_low_just_above_threshold() -> None:
+    # sectors=5 → (5-1)/10 = 0.40 — low but present
+    score = _uncoalesced_score(5.0)
+    assert score < 0.50, f"expected low score near threshold, got {score}"
+
+
+def test_uncoalesced_score_medium_high_at_8_sectors() -> None:
+    # sectors=8 → (8-1)/10 = 0.70 — should be clearly high-confidence
+    score = _uncoalesced_score(8.0)
+    assert score >= 0.65, f"expected score >= 0.65 at 8 sectors/request, got {score}"
+
+
+def test_uncoalesced_score_high_at_10_sectors() -> None:
+    # sectors=10.4 → (10.4-1)/10 = 0.94 — the motivating case from recalibration
+    score = _uncoalesced_score(10.4)
+    assert score >= 0.80, f"expected score >= 0.80 at 10.4 sectors/request, got {score}"
+
+
+def test_uncoalesced_score_capped_at_1_for_extreme_sectors() -> None:
+    # sectors=20 → saturates at 1.0
+    score = _uncoalesced_score(20.0)
+    assert score == 1.0, f"expected 1.0 for 20 sectors/request, got {score}"
+
+
 def test_classify_uncoalesced_access_not_fired_when_coalesced() -> None:
     summary = {
         "kernel_count": 1,

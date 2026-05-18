@@ -1,0 +1,16 @@
+id: missing_wmma_mma_path
+scope: kernel
+category: tensor_cores
+severity: medium
+confidence: medium
+message: "FP16/BF16 multiply-accumulate detected but no wmma:: or mma:: tensor core API found; use nvcuda::wmma to route through tensor cores."
+conditions:
+  has_matmul: true
+  has_tc: false
+  has_fp16: true
+recommendations:
+  - rec_ncu_use_tensor_ops
+  - rec_ncu_align_matmul_dims
+ncu_signals:
+  tensor_core_utilization_pct_lt: 10.0
+architecture_overrides: {}

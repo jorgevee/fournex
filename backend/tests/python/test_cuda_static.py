@@ -105,3 +105,298 @@ def test_parse_cuda_files_reads_cu_and_cuh(tmp_path: Path) -> None:
 
     assert report["kernel_count"] == 1
     assert report["kernels"][0]["filename"].endswith("kernels.cuh")
+
+
+# ── New antipattern rules ──────────────────────────────────────────────────────
+
+def _codes(source: str) -> set[str]:
+    return {f["code"] for f in at.inspect_cuda_source(source)["findings"]}
+
+
+# Memory: uncoalesced_access
+def test_uncoalesced_access_detected_for_strided_pattern() -> None:
+    src = """
+__global__ void bad(float* A, float* B, int stride) {
+    int i = threadIdx.x;
+    B[i] = A[i * stride];
+}
+"""
+    assert "uncoalesced_access" in _codes(src)
+
+
+def test_uncoalesced_access_not_fired_for_coalesced() -> None:
+    src = """
+__global__ void good(float* A, float* B) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    B[idx] = A[idx];
+}
+"""
+    assert "uncoalesced_access" not in _codes(src)
+
+
+# Memory: no_shared_memory_tiling
+def test_no_shared_memory_tiling_detected_for_nested_loops() -> None:
+    src = """
+__global__ void naive_gemm(float* A, float* B, float* C, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++) {
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+"""
+    codes = _codes(src)
+    assert "no_shared_memory_tiling" in codes
+
+
+def test_no_shared_memory_tiling_not_fired_when_shared_present() -> None:
+    src = """
+__global__ void tiled(float* A, float* B, float* C, int N) {
+    __shared__ float sA[16][16];
+    for (int t = 0; t < N; t++) {
+        for (int k = 0; k < 16; k++) {
+            sA[k][threadIdx.x] = A[t + k];
+        }
+        __syncthreads();
+    }
+}
+"""
+    assert "no_shared_memory_tiling" not in _codes(src)
+
+
+# Memory: missing_vectorized_loads
+def test_missing_vectorized_loads_detected_for_simple_float_kernel() -> None:
+    src = """
+__global__ void scale(float* out, float* in, float factor) {
+    int idx = threadIdx.x;
+    out[idx] = in[idx] * factor;
+}
+"""
+    assert "missing_vectorized_loads" in _codes(src)
+
+
+def test_missing_vectorized_loads_not_fired_when_float4_used() -> None:
+    src = """
+__global__ void scale4(float4* out, float4* in) {
+    int idx = threadIdx.x;
+    out[idx] = in[idx];
+}
+"""
+    assert "missing_vectorized_loads" not in _codes(src)
+
+
+# Synchronization: sync_inside_tight_loop
+def test_sync_inside_tight_loop_detected_for_many_syncthreads() -> None:
+    src = """
+__global__ void over_sync(float* A, int N) {
+    __shared__ float s[64];
+    for (int i = 0; i < N; i++) {
+        s[threadIdx.x] = A[i];
+        __syncthreads();
+        A[i] = s[threadIdx.x] + 1.0f;
+        __syncthreads();
+        s[threadIdx.x] = A[i] * 2.0f;
+        __syncthreads();
+    }
+}
+"""
+    assert "sync_inside_tight_loop" in _codes(src)
+
+
+def test_sync_inside_tight_loop_not_fired_for_two_syncs() -> None:
+    src = """
+__global__ void tiled(float* A, int N) {
+    __shared__ float sA[16][16];
+    __shared__ float sB[16][16];
+    for (int t = 0; t < N; t++) {
+        sA[threadIdx.y][threadIdx.x] = A[t];
+        sB[threadIdx.y][threadIdx.x] = A[t + N];
+        __syncthreads();
+        A[t] += sA[0][0] + sB[0][0];
+        __syncthreads();
+    }
+}
+"""
+    assert "sync_inside_tight_loop" not in _codes(src)
+
+
+# Synchronization: warp_level_sync_misuse
+def test_warp_level_sync_misuse_detected() -> None:
+    src = """
+__global__ void misuse(float* A) {
+    __shared__ float s[32];
+    s[threadIdx.x] = A[threadIdx.x];
+    __syncwarp();
+    A[threadIdx.x] = s[31 - threadIdx.x];
+}
+"""
+    assert "warp_level_sync_misuse" in _codes(src)
+
+
+# Control flow: warp_divergence
+def test_warp_divergence_detected_for_modulo_branch() -> None:
+    src = """
+__global__ void diverge(float* A) {
+    if (threadIdx.x % 2 == 0) {
+        A[threadIdx.x] = 1.0f;
+    } else {
+        A[threadIdx.x] = 0.0f;
+    }
+}
+"""
+    assert "warp_divergence" in _codes(src)
+
+
+def test_warp_divergence_detected_for_bitmask_branch() -> None:
+    src = """
+__global__ void bitmask(float* A) {
+    if (threadIdx.x & 1) {
+        A[threadIdx.x] = 1.0f;
+    }
+}
+"""
+    assert "warp_divergence" in _codes(src)
+
+
+def test_warp_divergence_not_fired_for_non_threadidx_branch() -> None:
+    src = """
+__global__ void safe_branch(float* A, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        A[idx] = 1.0f;
+    }
+}
+"""
+    assert "warp_divergence" not in _codes(src)
+
+
+# Control flow: excessive_branching
+def test_excessive_branching_detected_for_many_ifs() -> None:
+    src = """
+__global__ void branchy(float* A, int n) {
+    int idx = threadIdx.x;
+    if (A[0] > 0) A[idx] += 1;
+    if (A[1] > 0) A[idx] += 2;
+    if (A[2] > 0) A[idx] += 3;
+    if (A[3] > 0) A[idx] += 4;
+    if (A[4] > 0) A[idx] += 5;
+    if (A[5] > 0) A[idx] += 6;
+    if (A[6] > 0) A[idx] += 7;
+}
+"""
+    assert "excessive_branching" in _codes(src)
+
+
+# Occupancy: high_register_pressure
+def test_high_register_pressure_detected_for_many_locals() -> None:
+    src = """
+__global__ void heavy(float* A) {
+    float a0 = A[0]; float a1 = A[1]; float a2 = A[2]; float a3 = A[3];
+    float a4 = A[4]; float a5 = A[5]; float a6 = A[6]; float a7 = A[7];
+    float b0 = A[8]; float b1 = A[9]; float b2 = A[10]; float b3 = A[11];
+    float b4 = A[12]; float b5 = A[13]; float b6 = A[14]; float b7 = A[15];
+    float c0 = a0 + b0; float c1 = a1 + b1; float c2 = a2 + b2;
+    float c3 = a3 + b3; float c4 = a4 + b4; float c5 = a5 + b5;
+    A[threadIdx.x] = c0 + c1 + c2 + c3 + c4 + c5;
+}
+"""
+    assert "high_register_pressure" in _codes(src)
+
+
+# Tensor cores: fp32_only_matmul
+def test_fp32_only_matmul_detected_for_naive_gemm() -> None:
+    src = """
+__global__ void naive_gemm(float* A, float* B, float* C, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++) {
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+"""
+    assert "fp32_only_matmul" in _codes(src)
+
+
+def test_fp32_only_matmul_not_fired_when_wmma_present() -> None:
+    src = """
+#include <mma.h>
+using namespace nvcuda;
+__global__ void tc_gemm(half* A, half* B, float* C) {
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
+    wmma::load_matrix_sync(a_frag, A, 16);
+}
+"""
+    assert "fp32_only_matmul" not in _codes(src)
+
+
+# Tensor cores: missing_wmma_mma_path
+def test_missing_wmma_mma_path_detected_for_fp16_without_tc() -> None:
+    src = """
+__global__ void fp16_gemm(__half* A, __half* B, __half* C, int N) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    __half sum = __float2half(0.0f);
+    for (int k = 0; k < N; k++) {
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+"""
+    assert "missing_wmma_mma_path" in _codes(src)
+
+
+# Tensor cores: dimensions_not_tensor_core_friendly
+def test_dimensions_not_tc_friendly_detected_for_odd_tile() -> None:
+    src = """
+__global__ void odd_tile(float* A) {
+    __shared__ float tile[20][20];
+    tile[threadIdx.y][threadIdx.x] = A[threadIdx.x];
+    __syncthreads();
+    A[threadIdx.x] = tile[threadIdx.y][threadIdx.x];
+}
+"""
+    assert "dimensions_not_tensor_core_friendly" in _codes(src)
+
+
+def test_dimensions_tc_friendly_not_fired_for_16x16_tile() -> None:
+    src = """
+__global__ void tc_tile(float* A) {
+    __shared__ float tile[16][16];
+    tile[threadIdx.y][threadIdx.x] = A[threadIdx.x];
+    __syncthreads();
+    A[threadIdx.x] = tile[threadIdx.y][threadIdx.x];
+}
+"""
+    assert "dimensions_not_tensor_core_friendly" not in _codes(src)
+
+
+# Launch-level: poor_block_size_unaligned / poor_block_size_subwarp
+def test_poor_block_size_detected_for_non_warp_multiple() -> None:
+    src = """
+__global__ void kernel(float* A) { A[threadIdx.x] = 1.0f; }
+void launch(float* A) { kernel<<<1, 100>>>(A); }
+"""
+    assert "poor_block_size_unaligned" in _codes(src)
+
+
+def test_poor_block_size_high_severity_for_sub_warp_size() -> None:
+    src = """
+__global__ void kernel(float* A) { A[threadIdx.x] = 1.0f; }
+void launch(float* A) { kernel<<<1, 16>>>(A); }
+"""
+    findings = at.inspect_cuda_source(src)["findings"]
+    poor = [f for f in findings if f["code"] == "poor_block_size_subwarp"]
+    assert poor and poor[0]["severity"] == "high"
+
+
+def test_poor_block_size_not_fired_for_256_threads() -> None:
+    src = """
+__global__ void kernel(float* A) { A[threadIdx.x] = 1.0f; }
+void launch(float* A) { kernel<<<1, 256>>>(A); }
+"""
+    assert "poor_block_size_subwarp" not in _codes(src)
+    assert "poor_block_size_unaligned" not in _codes(src)

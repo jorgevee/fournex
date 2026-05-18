@@ -389,15 +389,23 @@ def _score_launch_efficiency(static: dict | None, ncu: dict | None) -> float | N
         kernels = static.get("kernels", [])
         findings = static.get("findings", [])
         codes = {f.get("code", "") for f in findings}
-        bank_penalty  = 0.20 if any(
+        bank_penalty = 0.20 if any(
             any(s.get("bank_conflict_risk", False) for s in k.get("shared_memory", []))
             for k in kernels
         ) else 0.0
-        cond_sync_pen = 0.30 if "conditional_syncthreads" in codes else 0.0
-        bounds_pen    = 0.10 if "missing_obvious_bounds_guard" in codes else 0.0
-        return _clamp(1.0 - bank_penalty - cond_sync_pen - bounds_pen, 0.0, 1.0)
+        bounds_pen   = 0.10 if "missing_obvious_bounds_guard" in codes else 0.0
+        return _clamp(1.0 - bank_penalty - bounds_pen, 0.0, 1.0)
 
     return None
+
+
+def _score_sync_efficiency(static: dict | None) -> float | None:
+    if static is None:
+        return None
+    codes = {f.get("code", "") for f in static.get("findings", [])}
+    cond_pen       = 0.40 if "conditional_syncthreads" in codes else 0.0
+    unnecessary_pen = 0.25 if "unnecessary_syncthreads" in codes else 0.0
+    return _clamp(1.0 - cond_pen - unnecessary_pen, 0.0, 1.0)
 
 
 def _build_scorecard(
@@ -412,6 +420,8 @@ def _build_scorecard(
     score_b_comp  = _score_compute_efficiency(ptx_b, ncu_b)
     score_a_launch= _score_launch_efficiency(static_a, ncu_a)
     score_b_launch= _score_launch_efficiency(static_b, ncu_b)
+    score_a_sync  = _score_sync_efficiency(static_a)
+    score_b_sync  = _score_sync_efficiency(static_b)
 
     def _dim(score_a: float | None, score_b: float | None, weight: float) -> dict:
         avail = score_a is not None or score_b is not None
@@ -432,10 +442,11 @@ def _build_scorecard(
         }
 
     return {
-        "register_efficiency": _dim(score_a_reg,    score_b_reg,    0.20),
-        "memory_efficiency":   _dim(score_a_mem,    score_b_mem,    0.30),
-        "compute_efficiency":  _dim(score_a_comp,   score_b_comp,   0.30),
-        "launch_efficiency":   _dim(score_a_launch, score_b_launch, 0.20),
+        "register_efficiency": _dim(score_a_reg,    score_b_reg,    0.15),
+        "memory_efficiency":   _dim(score_a_mem,    score_b_mem,    0.25),
+        "compute_efficiency":  _dim(score_a_comp,   score_b_comp,   0.25),
+        "launch_efficiency":   _dim(score_a_launch, score_b_launch, 0.15),
+        "sync_efficiency":     _dim(score_a_sync,   score_b_sync,   0.20),
     }
 
 

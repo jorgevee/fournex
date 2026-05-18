@@ -57,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.workload_command:
             parser.error("tune requires a workload command after --")
         return tune(args)
+    elif args.command == "compare":
+        return compare(args)
     else:
         parser.print_help()
         return 1
@@ -223,6 +225,411 @@ def tune(args: argparse.Namespace) -> int:
     return 0 if report.improved else 1
 
 
+def compare(args: argparse.Namespace) -> int:
+    """Compare two CUDA source files across available evidence layers."""
+    from .comparison import compare_implementations
+    from .cuda_static import inspect_cuda_source
+    from .reconciliation import reconcile_evidence
+
+    file_a = Path(args.file_a)
+    file_b = Path(args.file_b)
+
+    for path in (file_a, file_b):
+        if not path.exists():
+            print(f"Error: file not found: {path}", file=sys.stderr)
+            return 1
+        if path.suffix.lower() not in {".cu", ".cuh", ".cuda"}:
+            print(f"Error: expected a .cu source file, got: {path}", file=sys.stderr)
+            return 1
+
+    label_a = args.label_a or file_a.name
+    label_b = args.label_b or file_b.name
+
+    src_a = _read_text_file(file_a)
+    src_b = _read_text_file(file_b)
+
+    # PTX layer
+    ptx_a = ptx_b = None
+    if args.with_ptx or args.with_ncu:
+        nvcc = shutil.which("nvcc")
+        if not nvcc:
+            print("[warn] nvcc not found on PATH — skipping PTX compilation", file=sys.stderr)
+        else:
+            print(f"  Compiling PTX for {file_a.name} ...", end="", flush=True)
+            ptx_a = _compile_ptx_cu(file_a)
+            print(" ok" if ptx_a else " failed")
+            print(f"  Compiling PTX for {file_b.name} ...", end="", flush=True)
+            ptx_b = _compile_ptx_cu(file_b)
+            print(" ok" if ptx_b else " failed")
+
+    # NCU layer — pre-existing CSVs take priority over --with-ncu compilation
+    ncu_a_text = ncu_b_text = None
+    if args.ncu_a:
+        ncu_path = Path(args.ncu_a)
+        if not ncu_path.exists():
+            print(f"Error: NCU CSV not found: {ncu_path}", file=sys.stderr)
+            return 1
+        ncu_a_text = ncu_path.read_text(encoding="utf-8-sig", errors="replace")
+    if args.ncu_b:
+        ncu_path = Path(args.ncu_b)
+        if not ncu_path.exists():
+            print(f"Error: NCU CSV not found: {ncu_path}", file=sys.stderr)
+            return 1
+        ncu_b_text = ncu_path.read_text(encoding="utf-8-sig", errors="replace")
+
+    if args.with_ncu and not (ncu_a_text and ncu_b_text):
+        ncu_a_text, ncu_b_text = _run_ncu_compare(file_a, file_b, ptx_a, ptx_b, args)
+
+    # Determine evidence description for header
+    layers: list[str] = ["CUDA source"]
+    if ptx_a and ptx_b:
+        layers.append("PTX")
+    if ncu_a_text and ncu_b_text:
+        layers.append("NCU")
+    evidence_desc = " + ".join(layers)
+
+    # Build comparison inputs
+    input_a: dict[str, Any] = {
+        "label": label_a,
+        "cuda_source": src_a,
+        "cuda_filename": str(file_a),
+        "gpu_model": args.gpu_model,
+    }
+    input_b: dict[str, Any] = {
+        "label": label_b,
+        "cuda_source": src_b,
+        "cuda_filename": str(file_b),
+        "gpu_model": args.gpu_model,
+    }
+    if ptx_a:
+        input_a.update({"ptx": ptx_a, "ptx_filename": str(file_a.with_suffix(".ptx"))})
+    if ptx_b:
+        input_b.update({"ptx": ptx_b, "ptx_filename": str(file_b.with_suffix(".ptx"))})
+    if ncu_a_text:
+        input_a["ncu_csv"] = ncu_a_text
+    if ncu_b_text:
+        input_b["ncu_csv"] = ncu_b_text
+
+    result = compare_implementations(input_a, input_b)
+
+    # Reconciliation for the A (baseline) side
+    static_a = inspect_cuda_source(src_a, filename=str(file_a), gpu_model=args.gpu_model)
+    ptx_result_a = None
+    if ptx_a:
+        from .ptx_analysis import analyze_ptx_text
+        ptx_result_a = analyze_ptx_text(ptx_a, filename=str(file_a.with_suffix(".ptx")))
+    ncu_result_a = None
+    if ncu_a_text:
+        from .ncu_analysis import analyze_ncu_csv_text
+        ncu_result_a = analyze_ncu_csv_text(ncu_a_text, environment=_detect_environment())
+
+    rec = reconcile_evidence(static=static_a, ptx=ptx_result_a, ncu=ncu_result_a)
+
+    if args.output_json:
+        _print_json_result("compare", {"comparison": result, "reconciliation": rec})
+        return 0
+
+    _print_compare_report(result, rec, label_a, label_b, evidence_desc)
+    return 0
+
+
+def _compile_ptx_cu(cu_path: Path) -> str | None:
+    """Compile a .cu file to PTX text. Returns None on failure."""
+    nvcc = shutil.which("nvcc")
+    if not nvcc:
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".ptx", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        proc = subprocess.run(
+            [nvcc, "-ptx", "-o", str(tmp_path), str(cu_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if proc.returncode != 0:
+            return None
+        return tmp_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _run_ncu_compare(
+    file_a: Path, file_b: Path,
+    ptx_a: str | None, ptx_b: str | None,
+    args: argparse.Namespace,
+) -> tuple[str | None, str | None]:
+    """Compile both .cu files to executables and run NCU on each. Returns (csv_a, csv_b)."""
+    nvcc = shutil.which("nvcc")
+    ncu_bin = shutil.which("ncu")
+
+    if not nvcc:
+        print("[warn] --with-ncu: nvcc not found on PATH — skipping NCU", file=sys.stderr)
+        print("  Provide pre-existing CSVs with --ncu-a FILE --ncu-b FILE", file=sys.stderr)
+        return None, None
+    if not ncu_bin:
+        print("[warn] --with-ncu: ncu not found on PATH — skipping NCU", file=sys.stderr)
+        print("  Provide pre-existing CSVs with --ncu-a FILE --ncu-b FILE", file=sys.stderr)
+        return None, None
+
+    build_flags = args.build_flags.split() if args.build_flags.strip() else []
+
+    def _compile_exec(cu: Path) -> Path | None:
+        with tempfile.NamedTemporaryFile(suffix=".exe" if sys.platform == "win32" else "", delete=False) as tmp:
+            out_path = Path(tmp.name)
+        try:
+            cmd = [nvcc, str(cu), "-o", str(out_path)] + build_flags
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if proc.returncode != 0:
+                print(f"  [warn] nvcc failed for {cu.name}: {proc.stderr[:200]}", file=sys.stderr)
+                out_path.unlink(missing_ok=True)
+                return None
+            return out_path
+        except Exception as exc:
+            print(f"  [warn] nvcc error for {cu.name}: {exc}", file=sys.stderr)
+            return None
+
+    def _run_ncu_on(exe: Path) -> str | None:
+        try:
+            from .ncu_presets import build_ncu_command
+            cmd = build_ncu_command("full", [str(exe)])
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if proc.returncode != 0:
+                print(f"  [warn] ncu failed: {proc.stderr[:200]}", file=sys.stderr)
+                return None
+            return proc.stdout
+        except Exception as exc:
+            print(f"  [warn] ncu error: {exc}", file=sys.stderr)
+            return None
+
+    print(f"  Compiling {file_a.name} ...", end="", flush=True)
+    exe_a = _compile_exec(file_a)
+    print(" ok" if exe_a else " failed")
+
+    print(f"  Compiling {file_b.name} ...", end="", flush=True)
+    exe_b = _compile_exec(file_b)
+    print(" ok" if exe_b else " failed")
+
+    csv_a = csv_b = None
+    try:
+        if exe_a:
+            print(f"  Profiling {file_a.name} with ncu ...", end="", flush=True)
+            csv_a = _run_ncu_on(exe_a)
+            print(" ok" if csv_a else " failed")
+        if exe_b:
+            print(f"  Profiling {file_b.name} with ncu ...", end="", flush=True)
+            csv_b = _run_ncu_on(exe_b)
+            print(" ok" if csv_b else " failed")
+    finally:
+        if exe_a:
+            exe_a.unlink(missing_ok=True)
+        if exe_b:
+            exe_b.unlink(missing_ok=True)
+
+    if not csv_a or not csv_b:
+        print(
+            "  [hint] If your .cu files need a main(), compile with: --build-flags \"-DBUILD_EXECUTABLE\"",
+            file=sys.stderr,
+        )
+
+    return csv_a, csv_b
+
+
+# ── Finding / dimension name maps ──────────────────────────────────────────────
+
+_FINDING_NAMES: dict[str, str] = {
+    "unnecessary_syncthreads":      "spurious __syncthreads()",
+    "conditional_syncthreads":      "conditional __syncthreads() in divergent branch",
+    "missing_obvious_bounds_guard": "missing bounds guard",
+    "strided_or_pitched":           "strided/pitched memory access",
+    "bank_conflict_risk":           "shared memory bank conflict risk",
+    "register_spills_detected":     "register spills",
+    "high_register_count":          "high register count",
+    "very_high_register_count":     "very high register count",
+    "high_global_memory_ratio":     "high global-memory instruction ratio",
+    "no_shared_memory_usage":       "no shared memory usage",
+    "fp64_detected":                "FP64 operations detected",
+    "ptx_register_spills":          "register spills",
+    "ptx_register_pressure":        "high register pressure",
+    "ptx_global_memory_heavy":      "high global-memory instruction ratio",
+    "ptx_high_branch_density":      "high branch density",
+}
+
+_DIM_NAMES: dict[str, str] = {
+    "launch_efficiency":   "launch configuration",
+    "sync_efficiency":     "synchronization overhead",
+    "memory_efficiency":   "memory efficiency (DRAM / cache)",
+    "compute_efficiency":  "compute efficiency (IPC)",
+    "register_efficiency": "register usage / spills",
+}
+
+
+def _finding_label(code: str) -> str:
+    return _FINDING_NAMES.get(code, code.replace("_", " "))
+
+
+def _dim_label(dim: str) -> str:
+    return _DIM_NAMES.get(dim, dim.replace("_", " "))
+
+
+def _print_compare_report(
+    result: dict[str, Any],
+    rec: dict[str, Any],
+    label_a: str,
+    label_b: str,
+    evidence_desc: str,
+) -> None:
+    sep = "=" * 66
+    verdict = result.get("verdict", {})
+    winner = verdict.get("overall_winner", "tie")
+    winner_label = label_b if winner == "b" else (label_a if winner == "a" else "tie")
+    score_a = verdict.get("score_a")
+    score_b = verdict.get("score_b")
+
+    print()
+    print(sep)
+    print("  frx compare")
+    print(f"  A: {label_a}")
+    print(f"  B: {label_b}")
+    print(f"  Evidence: {evidence_desc}")
+    print(sep)
+
+    # Winner
+    print()
+    if winner == "tie":
+        print("Winner: tie")
+    else:
+        score_str = ""
+        if score_a is not None and score_b is not None:
+            score_str = f"  (score {score_b:.3f} vs {score_a:.3f})"
+        print(f"Winner: {winner_label}{score_str}")
+
+    # Resolved findings (A → B: gone)
+    resolved: list[str] = []
+    for key in ("static_diff", "ptx_diff"):
+        diff = result.get(key, {})
+        if diff.get("available"):
+            for code in diff.get("findings_diff", {}).get("resolved_in_b", []):
+                label = _finding_label(code)
+                if label not in resolved:
+                    resolved.append(label)
+    if resolved:
+        print()
+        print("Resolved in B:")
+        for item in resolved:
+            print(f"  {item}")
+
+    # Regressions (new findings in B)
+    regressions: list[str] = []
+    for key in ("static_diff", "ptx_diff"):
+        diff = result.get(key, {})
+        if diff.get("available"):
+            for code in diff.get("findings_diff", {}).get("new_in_b", []):
+                label = _finding_label(code)
+                if label not in regressions:
+                    regressions.append(label)
+    if regressions:
+        print()
+        print("Regressions in B (new findings):")
+        for item in regressions:
+            print(f"  {item}")
+
+    # Improved and regressed scorecard dimensions
+    dims_b = verdict.get("dimensions_won_by_b", [])
+    dims_a = verdict.get("dimensions_won_by_a", [])
+    sc = result.get("scorecard", {})
+
+    if dims_b:
+        print()
+        print("Improved in B:")
+        for dim in dims_b:
+            d = sc.get(dim, {})
+            sa, sb = d.get("score_a"), d.get("score_b")
+            delta = (sb - sa) if sa is not None and sb is not None else None
+            delta_str = f"  (+{delta:.2f})" if delta is not None and delta >= 0 else ""
+            print(f"  {_dim_label(dim)}{delta_str}")
+
+    if dims_a:
+        print()
+        print("Regressed in B:")
+        for dim in dims_a:
+            d = sc.get(dim, {})
+            sa, sb = d.get("score_a"), d.get("score_b")
+            delta = (sb - sa) if sa is not None and sb is not None else None
+            delta_str = f"  ({delta:.2f})" if delta is not None else ""
+            print(f"  {_dim_label(dim)}{delta_str}")
+
+    # Tradeoffs
+    tradeoffs = result.get("tradeoffs", [])
+    if tradeoffs:
+        print()
+        print("Tradeoffs:")
+        for t in tradeoffs[:3]:
+            print(f"  {t.get('label', 'tradeoff')}: {t.get('message', '')}")
+
+    # Root-cause diagnoses for A (from reconciliation)
+    if rec["diagnoses"]:
+        print()
+        print("Root causes in A:")
+        for d in rec["diagnoses"]:
+            sev_sym = {"high": "!!", "medium": "! "}.get(d["severity"], "  ")
+            conf = d["confidence"]
+            layers_str = " + ".join(d["layers_confirming"])
+            print(f"  {sev_sym} {d['display_name']}  [{conf} - {layers_str}]")
+
+    # Still unknown
+    unknown = _compare_unknown_items(result)
+    if unknown:
+        print()
+        print("Still unknown (need more evidence):")
+        for item in unknown:
+            print(f"  {item}")
+
+    # Upgrade hints
+    _print_compare_upgrade_hints(result)
+
+    print()
+    print(sep)
+    print()
+
+
+def _compare_unknown_items(result: dict[str, Any]) -> list[str]:
+    """List specific metrics that cannot be determined from available evidence."""
+    sc = result.get("scorecard", {})
+    has_ncu = result.get("ncu_diff", {}).get("available", False)
+    unknown: list[str] = []
+
+    if not sc.get("register_efficiency", {}).get("available"):
+        unknown.append("register usage and spills")
+
+    if not has_ncu:
+        unknown.append("DRAM bandwidth, L1/L2 cache hit rates")
+        unknown.append("tensor core utilization")
+        unknown.append("achieved occupancy (measured)")
+        unknown.append("runtime warp stall reasons")
+    else:
+        if not sc.get("compute_efficiency", {}).get("available"):
+            unknown.append("warp scheduler / issue slot utilization")
+
+    return unknown
+
+
+def _print_compare_upgrade_hints(result: dict[str, Any]) -> None:
+    has_ptx = result.get("ptx_diff", {}).get("available", False)
+    has_ncu = result.get("ncu_diff", {}).get("available", False)
+    sc = result.get("scorecard", {})
+
+    hints: list[str] = []
+    if not has_ptx and not sc.get("register_efficiency", {}).get("available"):
+        hints.append("--with-ptx to unlock register efficiency scores")
+    if not has_ncu:
+        hints.append("--with-ncu or --ncu-a/--ncu-b to measure runtime hardware behavior")
+
+    if hints:
+        print()
+        print("Run with " + ", ".join(hints) + ".")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     import sys
     _stem = Path(sys.argv[0]).stem.lower().replace(".exe", "")
@@ -374,6 +781,45 @@ def _build_parser() -> argparse.ArgumentParser:
     tune_parser.add_argument("--allow-nonfinite-loss", dest="require_finite_loss", action="store_false", default=True)
     tune_parser.add_argument("--sample-interval-ms", type=int, default=1000)
     tune_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
+
+    compare_parser = subparsers.add_parser(
+        "compare",
+        help="compare two CUDA source files and report what improved, regressed, and is still unknown",
+    )
+    compare_parser.add_argument("file_a", help="baseline CUDA source file (.cu)")
+    compare_parser.add_argument("file_b", help="optimized CUDA source file (.cu)")
+    compare_parser.add_argument(
+        "--with-ptx",
+        action="store_true",
+        help="compile both files with nvcc and include PTX analysis",
+    )
+    compare_parser.add_argument(
+        "--with-ncu",
+        action="store_true",
+        help="compile both files to executables and run Nsight Compute (requires nvcc + ncu)",
+    )
+    compare_parser.add_argument(
+        "--ncu-a",
+        default=None,
+        metavar="CSV",
+        help="pre-existing NCU CSV for file A (alternative to --with-ncu)",
+    )
+    compare_parser.add_argument(
+        "--ncu-b",
+        default=None,
+        metavar="CSV",
+        help="pre-existing NCU CSV for file B (alternative to --with-ncu)",
+    )
+    compare_parser.add_argument("--label-a", default=None, help="display label for file A (default: filename)")
+    compare_parser.add_argument("--label-b", default=None, help="display label for file B (default: filename)")
+    compare_parser.add_argument("--gpu-model", default=None, help="GPU model hint for launch advisor")
+    compare_parser.add_argument(
+        "--build-flags",
+        default="",
+        metavar="FLAGS",
+        help="extra nvcc flags for --with-ncu compilation (e.g. \"-DBUILD_EXECUTABLE\")",
+    )
+    compare_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
 
     return parser
 
@@ -1923,21 +2369,52 @@ def _print_bottleneck_list(bottlenecks: list[dict[str, Any]]) -> None:
 
 
 def _print_recommendation_list(recommendations: list[dict[str, Any]]) -> None:
+    import textwrap
     if not recommendations:
         print("\nRECOMMENDATIONS")
         print("  No recommendations generated.")
         return
-    print(f"\nTOP RECOMMENDATIONS ({min(len(recommendations), 3)} of {len(recommendations)})")
+    print(f"\nRECOMMENDATIONS ({min(len(recommendations), 3)} of {len(recommendations)})")
+    thin = "-" * 64
     for index, rec in enumerate(recommendations[:3], start=1):
         title = rec.get("title", rec.get("id", "recommendation"))
         priority = rec.get("priority", "low").upper()
+        score = rec.get("score", 0.0)
+        print(f"\n  {thin}")
         print(f"  {index}. [{priority}] {title}")
+        print(f"     Tier: {rec.get('tier', 'next')}   Score: {score:.2f}   Triggered by: {rec.get('triggered_by', 'n/a')}")
+
         why = rec.get("why")
         if why:
-            print(f"     Why: {why}")
+            print(f"\n     Why:")
+            for line in textwrap.wrap(why, width=60):
+                print(f"       {line}")
+
         actions = rec.get("actions", [])
         if actions:
-            print(f"     Action: {actions[0]}")
+            print(f"\n     Actions:")
+            for i, action in enumerate(actions[:3], start=1):
+                lines = textwrap.wrap(action, width=60)
+                print(f"       {i}. {lines[0]}")
+                for continuation in lines[1:]:
+                    print(f"          {continuation}")
+
+        validation_steps = rec.get("validation_steps") or []
+        if validation_steps:
+            metrics = ",".join(step["metric"] for step in validation_steps)
+            print(f"\n     Validate:")
+            print(f"       ncu --metrics {metrics} \\")
+            print(f"           --csv ./report.csv ./your_app")
+            for step in validation_steps:
+                direction_arrow = "<--" if step["direction"] == "decrease" else "-->" if step["direction"] == "increase" else "   "
+                label = step.get("label", step["metric"])
+                expected = step.get("expected", "")
+                threshold = step.get("threshold_good")
+                threshold_hint = f" (target: {threshold})" if threshold is not None else ""
+                lines = textwrap.wrap(f"{direction_arrow} {label}: {expected}{threshold_hint}", width=60)
+                print(f"       {lines[0]}")
+                for continuation in lines[1:]:
+                    print(f"           {continuation}")
 
 
 def _print_wrapped(text: str, indent: str = "  ", width: int = 72) -> None:
@@ -1990,7 +2467,13 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
     if scope_msg:
         print(f"  Note               : {scope_msg}")
 
-    _print_ncu_validation(result.get("validation", {}))
+    # Show errors immediately; warnings are deferred to the end of the report.
+    csv_validation = result.get("validation", {})
+    csv_errors = csv_validation.get("errors", [])
+    if csv_errors:
+        print("\nCSV VALIDATION")
+        for error in csv_errors:
+            print(f"  [ERROR] {error}")
 
     # ── MEASURED METRICS ───────────────────────────────────────────────────────
     print(f"\nMEASURED METRICS")
@@ -2045,6 +2528,10 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
     if causes:
         print(f"\n  Occupancy limited by: {', '.join(causes)}")
 
+    missing_count = sum(1 for v in [dram, tc, l1, l2, load_sectors, isu, occ, eligible, sched_active] if v is None)
+    if missing_count >= 4:
+        print(f"\n  Note: {missing_count} metrics not collected -- re-run with --preset full to capture all.")
+
     # ── BOTTLENECKS ────────────────────────────────────────────────────────────
     if bottlenecks:
         print(f"\nBOTTLENECKS DETECTED ({len(bottlenecks)})")
@@ -2081,8 +2568,24 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
                     for continuation in lines[1:]:
                         print(f"          {continuation}")
 
-            validation = rec.get("validation") or []
-            if validation:
+            validation_steps = rec.get("validation_steps") or []
+            if validation_steps:
+                metrics = ",".join(step["metric"] for step in validation_steps)
+                print(f"\n     Validate:")
+                print(f"       ncu --metrics {metrics} \\")
+                print(f"           --csv ./report.csv ./your_app")
+                for step in validation_steps:
+                    direction_arrow = "<--" if step["direction"] == "decrease" else "-->" if step["direction"] == "increase" else "   "
+                    label = step.get("label", step["metric"])
+                    expected = step.get("expected", "")
+                    threshold = step.get("threshold_good")
+                    threshold_hint = f" (target: {threshold})" if threshold is not None else ""
+                    lines = textwrap.wrap(f"{direction_arrow} {label}: {expected}{threshold_hint}", width=60)
+                    print(f"       {lines[0]}")
+                    for continuation in lines[1:]:
+                        print(f"           {continuation}")
+            elif rec.get("validation"):
+                validation = rec["validation"]
                 print(f"\n     Validation:")
                 for v in validation:
                     lines = textwrap.wrap(v, width=60)
@@ -2100,6 +2603,13 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
                     print(f"       (!) {lines[0]}")
                     for continuation in lines[1:]:
                         print(f"         {continuation}")
+
+    # ── DATA NOTES (deferred warnings) ────────────────────────────────────────
+    csv_warnings = csv_validation.get("warnings", [])
+    if csv_warnings:
+        print(f"\nDATA NOTES")
+        for w in csv_warnings:
+            print(f"  [warn] {w}")
 
     # ── NEXT STEPS ─────────────────────────────────────────────────────────────
     print(f"\n{thin}")

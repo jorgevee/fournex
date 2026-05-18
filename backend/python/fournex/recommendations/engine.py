@@ -133,6 +133,7 @@ def generate_recommendations(
             "prerequisites": entry.get("prerequisites", {}),
             "actions": entry.get("action_templates", []),
             "validation": entry.get("validation_templates", []),
+            "validation_steps": entry.get("validation_steps", []),
             "risks": entry.get("caveats", []),
             "triggered_by": rule["id"],
         }

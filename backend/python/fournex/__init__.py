@@ -107,6 +107,7 @@ from .ptx_analysis import (
     parse_ptx_text,
 )
 from .comparison import compare_implementations
+from .reconciliation import reconcile_evidence
 from .ncu_comparison import diff_ncu_runs
 from .cuda_static import (
     CudaKernelSource,
@@ -131,6 +132,7 @@ from .shapes import (
 
 __all__ = [
     "compare_implementations",
+    "reconcile_evidence",
     "diff_ncu_runs",
     "NCU_METRIC_PRESETS",
     "AnnotationRecord",

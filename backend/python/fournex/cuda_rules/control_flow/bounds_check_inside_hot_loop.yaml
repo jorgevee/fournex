@@ -1,0 +1,12 @@
+id: bounds_check_inside_hot_loop
+scope: kernel
+category: control_flow
+severity: low
+confidence: low
+message: "{bounds_check_count} bounds-check guards alongside loop patterns; pre-validating the thread assignment before the loop avoids per-iteration branch cost."
+conditions:
+  bounds_check_count_gte: 4
+  for_count_gte: 1
+recommendations: []
+ncu_signals: {}
+architecture_overrides: {}

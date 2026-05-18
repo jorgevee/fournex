@@ -1,0 +1,14 @@
+id: shared_memory_without_barrier
+scope: kernel
+category: sync
+severity: medium
+confidence: medium
+message: "Shared memory is used without a visible __syncthreads() barrier."
+conditions:
+  has_shared: true
+  has_sync: false
+recommendations:
+  - rec_ncu_reduce_syncthreads
+  - rec_ncu_shared_mem_layout
+ncu_signals: {}
+architecture_overrides: {}

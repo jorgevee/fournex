@@ -1,0 +1,13 @@
+id: possible_shared_memory_bank_conflict
+scope: kernel
+category: occupancy
+severity: medium
+confidence: medium
+message: "Shared memory tile dimensions are multiples of 32; consider padding one column."
+conditions:
+  bank_conflict_risk: true
+recommendations:
+  - rec_ncu_shared_mem_layout
+ncu_signals:
+  shared_bank_conflicts_gt: 0
+architecture_overrides: {}

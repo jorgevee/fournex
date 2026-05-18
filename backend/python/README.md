@@ -58,6 +58,88 @@ frx tune --resume runs/tune-<id> -- python train.py
 
 `--resume` reuses a trial only when the saved `config.yaml`, `benchmark_window.json`, and `metrics.json` match the current workload command and benchmark settings.
 
+## CUDA static analysis
+
+`frx analyze` accepts `.cu` and `.cuh` files directly and reports kernel-level antipatterns, launch configuration issues, and occupancy estimates without requiring a GPU:
+
+```bash
+frx analyze kernel.cu
+frx analyze kernel.cu --gpu-model RTX4090
+frx analyze kernel.cu --output-json
+```
+
+Detected antipatterns span five categories across 22 rules:
+
+| Category | Example findings |
+|---|---|
+| Memory | `uncoalesced_access`, `no_shared_memory_tiling`, `missing_vectorized_loads` |
+| Synchronization | `unnecessary_syncthreads`, `conditional_syncthreads`, `sync_inside_tight_loop` |
+| Control flow | `warp_divergence`, `excessive_branching`, `bounds_check_inside_hot_loop` |
+| Occupancy | `large_static_shared_memory`, `possible_shared_memory_bank_conflict`, `high_register_pressure` |
+| Tensor cores | `fp32_only_matmul`, `missing_wmma_mma_path`, `dimensions_not_tensor_core_friendly` |
+
+## PTX and Nsight Compute analysis
+
+`frx analyze` also accepts PTX assembly files and Nsight Compute CSV exports:
+
+```bash
+frx analyze kernel.ptx
+frx analyze profile.csv
+```
+
+## Kernel comparison
+
+Compare two CUDA source files across all available evidence layers:
+
+```bash
+# Source-only diff
+frx compare baseline.cu optimized.cu
+
+# With PTX and NCU profiling (requires nvcc + ncu on PATH)
+frx compare baseline.cu optimized.cu --with-ptx --with-ncu
+
+# Supply pre-collected NCU CSVs
+frx compare baseline.cu optimized.cu --ncu-a baseline.csv --ncu-b optimized.csv
+```
+
+The comparison report scores each kernel across memory, compute, occupancy, and instruction-mix dimensions, with a verdict and reconciled diagnosis from all available layers.
+
+## Recommendation validation commands
+
+Every recommendation includes an NCU command to confirm the fix worked:
+
+```
+Validate:
+  ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request \
+      --csv ./report.csv ./your_app
+  <-- Global load sectors/request: drops toward 1-4 (target: 4.0)
+```
+
+## Adding antipattern rules
+
+Rules live in `fournex/cuda_rules/` as YAML files, one per finding:
+
+```yaml
+id: my_new_rule
+scope: kernel          # kernel | launch | occupancy
+category: memory
+severity: medium       # high | medium | low
+confidence: medium
+message: "Description with optional {signal_name} interpolation."
+conditions:
+  strided_or_pitched: true    # bool equality
+  for_count_gte: 1            # numeric >=
+recommendations:
+  - rec_ncu_improve_coalescing
+ncu_signals:
+  sectors_per_request_gt: 4.0
+architecture_overrides: {}
+```
+
+Drop the file into the matching category subfolder — the engine picks it up automatically with no code changes required.
+
+Available signals for `scope: kernel` conditions include: `has_shared`, `has_sync`, `has_tc`, `has_fp16`, `has_matmul`, `has_loop`, `has_thread_indexing`, `has_bounds_guard`, `strided_or_pitched`, `likely_coalesced_1d`, `vectorized`, `bank_conflict_risk`, `tc_unfriendly_dims`, `warp_divergence_pattern`, `conditional_syncthreads_pattern`, `sync_count`, `for_count`, `global_access_count`, `branch_count`, `bounds_check_count`, `local_var_count`, `max_shared_bytes`.
+
 ## Links
 
 - [GitHub](https://github.com/jorgevee/fournex)

@@ -1,0 +1,15 @@
+id: uncoalesced_access
+scope: kernel
+category: memory
+severity: medium
+confidence: medium
+message: "Strided or pitched global memory access detected; adjacent threads likely access non-adjacent addresses, reducing DRAM transaction efficiency."
+conditions:
+  strided_or_pitched: true
+recommendations:
+  - rec_ncu_improve_coalescing
+  - rec_ncu_tiling_shared_mem
+ncu_signals:
+  sectors_per_request_gt: 4.0
+  dram_utilization_pct_gt: 70.0
+architecture_overrides: {}

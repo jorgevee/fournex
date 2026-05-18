@@ -189,7 +189,14 @@ frx ncu-command --list
 frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
 frx ncu-command full --kernel-name regex:my_kernel --output ncu_full.csv -- ./my_kernel_app
 
-# Compare two versions
+# Compare two CUDA source files (kernel review / before-after)
+frx compare baseline.cu optimized.cu                         # source-only
+frx compare baseline.cu optimized.cu --with-ptx              # + PTX (requires nvcc)
+frx compare baseline.cu optimized.cu --with-ncu              # + runtime NCU (requires nvcc + ncu)
+frx compare baseline.cu optimized.cu --ncu-a a.csv --ncu-b b.csv  # pre-existing NCU CSVs
+frx compare baseline.cu optimized.cu --json                  # JSON output
+
+# Compare two versions (lower-level, multi-file evidence)
 frx analyze --before before.ptx --after after.ptx [--json]
 frx analyze --before before.csv --after after.csv [--json]
 
@@ -304,6 +311,96 @@ For the strongest comparison, provide source, PTX, and NCU CSV for both sides:
 frx analyze \
   --before-source baseline.cu --before-ptx baseline.ptx --before-ncu baseline.csv \
   --after-source optimized.cu --after-ptx optimized.ptx --after-ncu optimized.csv
+```
+
+### Analysis depth
+
+Fournex's diagnostic confidence scales with the evidence available. At every level, metrics that cannot be confirmed are explicitly marked unavailable rather than omitted or fabricated.
+
+| Evidence level | What Fournex detects |
+|---|---|
+| Source only | Structural CUDA antipatterns: spurious sync, strided access patterns, missing bounds guards, bank conflict risk |
+| Source + PTX | Compiler-confirmed changes: global vs. shared load counts, register pressure, spill detection, instruction mix |
+| Source + NCU | Measured hardware bottlenecks: DRAM throughput, cache hit rates, warp stall breakdown, sectors per request |
+| Source + PTX + NCU | Cross-layer reconciliation: source intent vs. compiled code vs. runtime behavior, with per-finding confidence labels |
+
+### frx compare — kernel review in one command
+
+```bash
+frx compare bad_linear_layer.cu good_linear_layer.cu
+```
+
+```text
+==================================================================
+  frx compare
+  A: bad_linear_layer.cu
+  B: good_linear_layer.cu
+  Evidence: CUDA source
+==================================================================
+
+Winner: good_linear_layer.cu  (score 1.000 vs 0.814)
+
+Resolved in B:
+  missing bounds guard
+  spurious __syncthreads()
+
+Improved in B:
+  launch configuration  (+0.10)
+  synchronization overhead  (+0.25)
+
+Root causes in A:
+  !! Inefficient global memory access  [medium - source]
+  !  Excessive synchronization  [medium - source]
+
+Still unknown (need more evidence):
+  register usage and spills
+  DRAM bandwidth, L1/L2 cache hit rates
+  tensor core utilization
+  achieved occupancy (measured)
+  runtime warp stall reasons
+
+Run with --with-ptx to unlock register efficiency scores,
+--with-ncu or --ncu-a/--ncu-b to measure runtime hardware behavior.
+==================================================================
+```
+
+Add `--with-ptx` (requires `nvcc`) to unlock register efficiency scores. Add `--ncu-a`/`--ncu-b` with pre-existing NCU CSVs to measure runtime stalls, DRAM throughput, and tensor core utilization.
+
+### Demo: bad vs. good linear layer
+
+`backend/demos/` contains a runnable before/after comparison of a naive vs. tiled matrix-multiply kernel:
+
+```bash
+# Source-only (no GPU or compiler required)
+python backend/demos/demo_01_bad_vs_good_linear_layer.py
+
+# With PTX for compiler-level evidence (requires nvcc)
+python backend/demos/demo_01_bad_vs_good_linear_layer.py --with-ptx
+```
+
+Example output:
+
+```text
+FINDINGS RESOLVED IN B
+  !  [medium] missing_obvious_bounds_guard
+  !  [medium] unnecessary_syncthreads
+
+EVIDENCE TABLE
+  Finding                       Source  PTX   NCU   Confidence
+  missing_obvious_bounds_guard  yes     n/a   n/a   medium
+  unnecessary_syncthreads       yes     n/a   n/a   medium
+  strided_or_pitched (removed)  yes     n/a   n/a   medium
+  shared_memory_tiling (added)  yes     n/a   n/a   high
+
+SCORECARD
+  launch efficiency    A: [##################  ]  0.90
+                       B: [####################]  1.00  (+0.10)  <-- winner
+  sync efficiency      A: [###############     ]  0.75
+                       B: [####################]  1.00  (+0.25)  <-- winner
+
+VERDICT
+  Winner:   good_linear_layer.cu
+  Score A:  0.814    Score B:  1.000    Delta: +0.186
 ```
 
 ---

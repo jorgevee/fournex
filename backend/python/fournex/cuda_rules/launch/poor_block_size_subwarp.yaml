@@ -1,0 +1,15 @@
+id: poor_block_size_subwarp
+scope: launch
+category: launch
+severity: high
+confidence: high
+message: "Block size {block_size} is smaller than one warp (32 threads); GPU resources are allocated in warp granules, so sub-warp blocks waste 50–96 % of each warp slot."
+conditions:
+  block_size_known: true
+  block_size_gt: 0
+  block_size_lt: 32
+recommendations:
+  - rec_ncu_block_size
+ncu_signals:
+  achieved_occupancy_pct_lt: 50.0
+architecture_overrides: {}

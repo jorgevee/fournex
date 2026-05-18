@@ -170,7 +170,7 @@ def test_response_schema_and_required_fields() -> None:
                 "ptx_diff", "ncu_diff", "scorecard", "verdict"):
         assert key in result
     for dim in ("register_efficiency", "memory_efficiency",
-                "compute_efficiency", "launch_efficiency"):
+                "compute_efficiency", "launch_efficiency", "sync_efficiency"):
         assert dim in result["scorecard"]
 
 

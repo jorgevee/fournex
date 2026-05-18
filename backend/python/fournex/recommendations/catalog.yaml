@@ -463,6 +463,16 @@
     - "DRAM throughput % should decrease after improving coalescing."
     - "L2 hit rate should improve as fewer cache lines are fetched."
     - "Memory stall fraction should drop."
+  validation_steps:
+    - metric: l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request
+      label: "Global load sectors/request"
+      direction: decrease
+      expected: "drops toward 1-4 (ideal = 1; high values indicate uncoalesced warp loads)"
+      threshold_good: 4.0
+    - metric: dram__throughput.avg.pct_of_peak_sustained_elapsed
+      label: "DRAM throughput %"
+      direction: decrease
+      expected: "decreases as fewer cache lines are fetched per warp access"
   caveats:
     - "SoA restructuring may require changes to both CPU data preparation and GPU kernel code."
     - "Some access patterns (e.g., gather operations) are inherently non-coalesced."
@@ -484,6 +494,16 @@
     - "DRAM throughput % should decrease as shared memory absorbs repeated accesses."
     - "L1 cache hit rate should improve significantly."
     - "Kernel execution time should decrease."
+  validation_steps:
+    - metric: dram__throughput.avg.pct_of_peak_sustained_elapsed
+      label: "DRAM throughput %"
+      direction: decrease
+      expected: "decreases as shared memory absorbs repeated global accesses"
+    - metric: l1tex__t_sector_hit_rate.pct
+      label: "L1 cache hit rate %"
+      direction: increase
+      expected: "increases as shared-memory tiling reduces L1 misses"
+      threshold_good: 60.0
   caveats:
     - "Shared memory is limited per SM — large tiles can reduce occupancy."
     - "Incorrect padding can introduce correctness bugs; test thoroughly."
@@ -504,6 +524,17 @@
   validation_templates:
     - "L1/L2 cache hit rate should improve after reducing the working set."
     - "DRAM bandwidth pressure should decrease."
+  validation_steps:
+    - metric: l1tex__t_sector_hit_rate.pct
+      label: "L1 cache hit rate %"
+      direction: increase
+      expected: "increases as the working set fits better in L1"
+      threshold_good: 60.0
+    - metric: lts__t_sector_hit_rate.pct
+      label: "L2 cache hit rate %"
+      direction: increase
+      expected: "increases as fewer misses escalate to L2 and DRAM"
+      threshold_good: 70.0
   caveats:
     - "Splitting kernels adds launch overhead — benchmark the tradeoff."
     - "Reduced precision may affect model quality; validate numerics."
@@ -529,6 +560,12 @@
     - "Tensor core utilization in NCU should rise above 50% after enabling AMP."
     - "Step time should decrease, especially for transformer or GEMM-heavy workloads."
     - "Memory usage should decrease, potentially allowing a larger batch size."
+  validation_steps:
+    - metric: sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active
+      label: "Tensor core utilization %"
+      direction: increase
+      expected: "rises above 50% once FP16/BF16 paths activate tensor core execution units"
+      threshold_good: 50.0
   caveats:
     - "FP16 has limited dynamic range — watch for NaN/Inf in activations or gradients."
     - "BF16 has lower numerical precision than FP32; monitor validation metrics."
@@ -550,6 +587,12 @@
   validation_templates:
     - "Tensor core utilization should increase measurably in NCU after switching to cuBLAS/cuDNN."
     - "GEMM or convolution kernel time should decrease."
+  validation_steps:
+    - metric: sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active
+      label: "Tensor core utilization %"
+      direction: increase
+      expected: "rises measurably after routing GEMM/convolution through TC-capable library ops"
+      threshold_good: 40.0
   caveats:
     - "cuBLAS Tensor Core paths require inputs in FP16, BF16, or TF32 — FP32 inputs use SIMT."
     - "TF32 is enabled by default on Ampere for matmul; use torch.backends.cuda.matmul.allow_tf32."
@@ -570,6 +613,12 @@
   validation_templates:
     - "Tensor core utilization should improve after aligning dimensions."
     - "Wasted compute from partial tiles should decrease."
+  validation_steps:
+    - metric: sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active
+      label: "Tensor core utilization %"
+      direction: increase
+      expected: "improves as partial-tile wasted cycles decrease with aligned dimensions"
+      threshold_good: 40.0
   caveats:
     - "Padding increases memory consumption proportionally — measure memory headroom."
     - "Sequence padding in NLP requires attention masking to maintain correctness."
@@ -592,6 +641,16 @@
   validation_templates:
     - "Warp stall barrier fraction should decrease in NCU after reducing sync points."
     - "Issue slot utilization should improve as warps stall less on barriers."
+  validation_steps:
+    - metric: smsp__warp_issue_stalled_barrier_per_warp_active.pct
+      label: "Barrier warp stall %"
+      direction: decrease
+      expected: "decreases as fewer warps block on __syncthreads() barriers"
+    - metric: sm__issue_active.avg.pct_of_peak_sustained_active
+      label: "Issue slot utilization %"
+      direction: increase
+      expected: "improves as warps that previously stalled on barriers become schedulable"
+      threshold_good: 55.0
   caveats:
     - "Removing a necessary __syncthreads() causes race conditions and silent data corruption."
     - "Always verify correctness with test inputs before and after any sync changes."
@@ -613,6 +672,15 @@
   validation_templates:
     - "Shared memory bank conflict count should decrease in NCU."
     - "Warp stall barrier fraction should decrease."
+  validation_steps:
+    - metric: l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum
+      label: "Shared memory load bank conflicts"
+      direction: decrease
+      expected: "drops significantly after padding or restructuring the shared-memory layout"
+    - metric: smsp__warp_issue_stalled_barrier_per_warp_active.pct
+      label: "Barrier warp stall %"
+      direction: decrease
+      expected: "decreases as bank-conflict serialization no longer backs up warp queues"
   caveats:
     - "Padding increases shared memory consumption — ensure occupancy is not impacted."
 
@@ -634,6 +702,17 @@
   validation_templates:
     - "Achieved occupancy in NCU should increase after tuning block size."
     - "Issue slot utilization should improve as more warps are available to hide latency."
+  validation_steps:
+    - metric: sm__warps_active.avg.pct_of_peak_sustained_active
+      label: "Achieved occupancy %"
+      direction: increase
+      expected: "increases as more warps become resident on each SM with the tuned block size"
+      threshold_good: 50.0
+    - metric: sm__issue_active.avg.pct_of_peak_sustained_active
+      label: "Issue slot utilization %"
+      direction: increase
+      expected: "improves as additional resident warps hide memory latency for the scheduler"
+      threshold_good: 55.0
   caveats:
     - "Larger blocks consume more shared memory and registers per SM, potentially reducing occupancy."
     - "Very large blocks can cause register spilling if the compiler runs out of register file space."
@@ -654,6 +733,16 @@
   validation_templates:
     - "Issue slot utilization in NCU should increase after applying ILP."
     - "Warp stall fractions for compute reasons should decrease."
+  validation_steps:
+    - metric: sm__issue_active.avg.pct_of_peak_sustained_active
+      label: "Issue slot utilization %"
+      direction: increase
+      expected: "increases as unrolled instructions expose more independent work to the scheduler"
+      threshold_good: 55.0
+    - metric: smsp__warp_issue_stalled_math_pipe_throttle_per_warp_active.pct
+      label: "Math pipe throttle stall %"
+      direction: decrease
+      expected: "decreases as the arithmetic pipeline stays more consistently saturated"
   caveats:
     - "Aggressive unrolling increases register usage and can reduce occupancy."
     - "The compiler may unroll automatically at -O3; verify with cuobjdump before manual unrolling."
@@ -677,6 +766,16 @@
     - "Registers per thread should decrease."
     - "Achieved occupancy or active warps per SM should increase."
     - "Local memory load/store traffic should not increase materially."
+  validation_steps:
+    - metric: sm__warps_active.avg.pct_of_peak_sustained_active
+      label: "Achieved occupancy %"
+      direction: increase
+      expected: "increases as more warps fit on each SM with reduced register usage"
+      threshold_good: 50.0
+    - metric: l1tex__t_bytes_pipe_lsu_mem_local_op_ld.sum
+      label: "Local memory load bytes (spills)"
+      direction: decrease
+      expected: "drops toward zero if register capping was causing spills to local memory"
   caveats:
     - "Too much register capping can introduce spills and make the kernel slower."
     - "Lower occupancy can still be fine for compute-heavy kernels with high ILP."
@@ -698,6 +797,16 @@
     - "Shared memory per block should decrease."
     - "More active blocks per SM should become possible."
     - "Cache hit rate and DRAM traffic should not regress enough to offset occupancy gains."
+  validation_steps:
+    - metric: sm__warps_active.avg.pct_of_peak_sustained_active
+      label: "Achieved occupancy %"
+      direction: increase
+      expected: "increases as more blocks fit per SM with the reduced shared-memory footprint"
+      threshold_good: 50.0
+    - metric: dram__throughput.avg.pct_of_peak_sustained_elapsed
+      label: "DRAM throughput %"
+      direction: stable
+      expected: "should not increase significantly — smaller tiles must not defeat data reuse"
   caveats:
     - "Smaller tiles can reduce data reuse and increase DRAM traffic."
     - "Changing shared layout can introduce bank conflicts; validate stall reasons."

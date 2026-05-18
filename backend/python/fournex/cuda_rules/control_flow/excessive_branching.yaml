@@ -1,0 +1,13 @@
+id: excessive_branching
+scope: kernel
+category: control_flow
+severity: low
+confidence: low
+message: "Kernel contains {branch_count} conditional branches; high branch density increases warp divergence risk and reduces SIMT efficiency."
+conditions:
+  branch_count_gt: 6
+recommendations:
+  - rec_ncu_instruction_level_parallelism
+ncu_signals:
+  issue_slot_utilization_pct_lt: 50.0
+architecture_overrides: {}

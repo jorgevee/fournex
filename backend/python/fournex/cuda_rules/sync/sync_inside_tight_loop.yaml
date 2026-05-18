@@ -1,0 +1,15 @@
+id: sync_inside_tight_loop
+scope: kernel
+category: sync
+severity: medium
+confidence: medium
+message: "Kernel contains {sync_count} __syncthreads() barriers with loop patterns; excessive synchronization serializes all warps on every loop iteration."
+conditions:
+  sync_count_gte: 3
+  has_loop: true
+recommendations:
+  - rec_ncu_reduce_syncthreads
+ncu_signals:
+  warp_stall_sync_pct_gt: 20.0
+  barrier_stall_pct_gt: 10.0
+architecture_overrides: {}

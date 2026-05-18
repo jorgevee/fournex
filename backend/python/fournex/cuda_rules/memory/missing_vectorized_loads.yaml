@@ -1,0 +1,17 @@
+id: missing_vectorized_loads
+scope: kernel
+category: memory
+severity: low
+confidence: low
+message: "1D coalesced access with scalar element type and no shared memory detected; vectorized loads (float4, int4, half2) can improve throughput for aligned data."
+conditions:
+  likely_coalesced_1d: true
+  vectorized: false
+  has_shared: false
+  global_access_count_gte: 2
+  has_scalar_params: true
+recommendations:
+  - rec_ncu_improve_coalescing
+ncu_signals:
+  dram_utilization_pct_gt: 50.0
+architecture_overrides: {}

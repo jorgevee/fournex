@@ -1,0 +1,15 @@
+id: poor_block_size_unaligned
+scope: launch
+category: launch
+severity: medium
+confidence: high
+message: "Block size {block_size} is not a multiple of 32; partial warps are scheduled but only partially active, reducing warp efficiency."
+conditions:
+  block_size_known: true
+  block_size_gte: 32
+  block_size_warp_aligned: false
+recommendations:
+  - rec_ncu_block_size
+ncu_signals:
+  warp_execution_efficiency_pct_lt: 90.0
+architecture_overrides: {}

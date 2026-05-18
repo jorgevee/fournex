@@ -358,7 +358,7 @@
 
 - id: rule_ncu_uncoalesced_access
   bottleneck: uncoalesced_access
-  min_score: 0.10
+  min_score: 0.30
   signals: {}
   suppressed_if: {}
   recommendations:

@@ -5,6 +5,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .cuda_rules.engine import (
+    extract_launch_signals,
+    extract_source_signals,
+    format_finding,
+    load_rules,
+    match_rules,
+)
 from .kernel_inspector import device_limits_for_gpu, estimate_occupancy
 
 
@@ -80,6 +87,8 @@ def build_static_cuda_report(
             all_findings.append({**finding, "kernel_name": kernel.name, "filename": kernel.filename, "line": kernel.line})
         kernel_payloads.append(kernel.to_dict())
 
+    all_findings.extend(_launch_findings(kernels, launch_by_kernel, gpu_model=gpu_model))
+
     launch_payloads = [launch.to_dict() for launch in launches]
     advisor = _launch_advice(kernels, launch_by_kernel, gpu_model=gpu_model)
     return {
@@ -148,28 +157,13 @@ def parse_cuda_launches(source: str, *, filename: str = "<memory>") -> list[Cuda
 
 def _annotate_kernel(kernel: CudaKernelSource) -> None:
     body = kernel.body
-    lowered = body.lower()
     kernel.indexing_patterns = _indexing_patterns(body)
     kernel.memory_access_styles = _memory_access_styles(body)
     kernel.atomics = sorted(set(re.findall(r"\batomic[A-Za-z_0-9]*\s*\(", body)))
     kernel.reductions = _reduction_patterns(body)
     kernel.shared_memory = _shared_memory_allocations(body)
-    kernel.findings = []
-
-    if "__syncthreads()" in body and "__shared__" not in body and "cooperative_groups" not in lowered:
-        kernel.findings.append(_finding("medium", "unnecessary_syncthreads", "Kernel uses __syncthreads() without visible shared memory or cooperative groups."))
-    if "__syncthreads()" in body and re.search(r"if\s*\([^)]*(threadIdx|idx|tid)[^)]*\)\s*\{[^{}]*__syncthreads\s*\(", body, re.DOTALL):
-        kernel.findings.append(_finding("high", "conditional_syncthreads", "__syncthreads() appears inside a thread-dependent branch."))
-    if any(item["bytes"] and item["bytes"] >= 49152 for item in kernel.shared_memory):
-        kernel.findings.append(_finding("medium", "large_static_shared_memory", "Static shared memory allocation may constrain occupancy."))
-    if any(item["bank_conflict_risk"] for item in kernel.shared_memory):
-        kernel.findings.append(_finding("medium", "possible_shared_memory_bank_conflict", "Shared memory tile dimensions are multiples of 32; consider padding one column."))
-    if "__shared__" in body and "__syncthreads()" not in body:
-        kernel.findings.append(_finding("medium", "shared_memory_without_barrier", "Shared memory is used without a visible __syncthreads() barrier."))
-    if "threadIdx.x" in body and not re.search(r"if\s*\([^)]*(<|<=)\s*[^)]*\)", body) and re.search(r"\w+\s*\[[^\]]*(idx|i|tid)[^\]]*\]", body):
-        kernel.findings.append(_finding("medium", "missing_obvious_bounds_guard", "Global indexing is used but no obvious upper-bound guard was found."))
-    if "threadIdx.x" not in body and "threadIdx.y" not in body and "threadIdx.z" not in body:
-        kernel.findings.append(_finding("low", "no_thread_indexing_detected", "No threadIdx usage detected; verify this is intended."))
+    signals = extract_source_signals(kernel)
+    kernel.findings = [format_finding(rule, signals) for rule in match_rules(signals, load_rules("kernel"))]
 
 
 def _indexing_patterns(body: str) -> list[str]:
@@ -235,6 +229,49 @@ def _shared_memory_allocations(body: str) -> list[dict[str, Any]]:
     if re.search(r"extern\s+__shared__\s+", body):
         allocations.append({"name": "extern_dynamic_shared", "type": "extern", "dims": [], "bytes": None, "bank_conflict_risk": False})
     return allocations
+
+
+def _launch_findings(
+    kernels: list[CudaKernelSource],
+    launch_by_kernel: dict[str, list[CudaLaunchConfig]],
+    *,
+    gpu_model: str | None,
+) -> list[dict[str, Any]]:
+    limits = device_limits_for_gpu(gpu_model)
+    findings: list[dict[str, Any]] = []
+    launch_rules = load_rules("launch")
+    occupancy_rules = load_rules("occupancy")
+
+    for lcs in launch_by_kernel.values():
+        for launch in lcs:
+            signals = extract_launch_signals(launch.block_size_hint)
+            for rule in match_rules(signals, launch_rules):
+                findings.append({
+                    **format_finding(rule, signals),
+                    "kernel_name": launch.kernel_name,
+                    "filename": launch.filename,
+                    "line": launch.line,
+                })
+
+    for kernel in kernels:
+        shared_bytes = max((item["bytes"] or 0 for item in kernel.shared_memory), default=0)
+        occ = estimate_occupancy(
+            registers_per_thread=None,
+            shared_memory_per_block_bytes=shared_bytes,
+            threads_per_block=256,
+            device_limits=limits,
+        )
+        occ_pct = occ.get("occupancy_pct", 100.0)
+        signals = extract_launch_signals(None, occupancy_pct=occ_pct)
+        for rule in match_rules(signals, occupancy_rules):
+            findings.append({
+                **format_finding(rule, signals),
+                "kernel_name": kernel.name,
+                "filename": kernel.filename,
+                "line": kernel.line,
+            })
+
+    return findings
 
 
 def _launch_advice(
@@ -315,10 +352,6 @@ def _block_size_hint(expr: str) -> int | None:
 
 def _line_number(source: str, index: int) -> int:
     return source.count("\n", 0, index) + 1
-
-
-def _finding(severity: str, code: str, message: str) -> dict[str, str]:
-    return {"severity": severity, "code": code, "message": message}
 
 
 def _severity_rank(severity: str) -> int:

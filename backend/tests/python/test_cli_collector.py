@@ -307,7 +307,7 @@ def test_analyze_accepts_ncu_csv_human_report(capsys) -> None:
     assert exit_code == 0
     assert "Nsight Compute Analysis" in captured.out
     assert "Primary Bottleneck : memory_bandwidth_bound" in captured.out
-    assert "TOP RECOMMENDATIONS" in captured.out
+    assert "RECOMMENDATIONS" in captured.out
 
 
 def test_analyze_compares_ncu_before_after_json(capsys) -> None:

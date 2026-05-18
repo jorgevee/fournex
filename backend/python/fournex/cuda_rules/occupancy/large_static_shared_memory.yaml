@@ -1,0 +1,17 @@
+id: large_static_shared_memory
+scope: kernel
+category: occupancy
+severity: medium
+confidence: high
+message: "Static shared memory allocation may constrain occupancy."
+conditions:
+  max_shared_bytes_gte: 49152
+recommendations:
+  - rec_ncu_reduce_shared_memory_footprint
+ncu_signals:
+  occupancy_pct_lt: 50.0
+architecture_overrides:
+  # Ampere+ (sm_80+) supports up to 164 KB shared memory per SM
+  # sm_80:
+  #   conditions:
+  #     max_shared_bytes_gte: 98304

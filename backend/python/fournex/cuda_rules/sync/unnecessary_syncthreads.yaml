@@ -1,0 +1,15 @@
+id: unnecessary_syncthreads
+scope: kernel
+category: sync
+severity: medium
+confidence: medium
+message: "Kernel uses __syncthreads() without visible shared memory or cooperative groups."
+conditions:
+  has_sync: true
+  has_shared: false
+  uses_cooperative_groups: false
+recommendations:
+  - rec_ncu_reduce_syncthreads
+ncu_signals:
+  warp_stall_sync_pct_gt: 15.0
+architecture_overrides: {}

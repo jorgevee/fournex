@@ -18,6 +18,7 @@ from fournex.comparison import compare_implementations
 from fournex.cuda_static import inspect_cuda_source
 from fournex.ncu_analysis import analyze_ncu_csv_text
 from fournex.ptx_analysis import analyze_ptx_text
+from fournex.reconciliation import reconcile_evidence
 
 app = FastAPI(title="Fournex API", version="0.1.0")
 
@@ -80,6 +81,13 @@ class CompareRequest(BaseModel):
     b: ComparisonSide
 
 
+class ReconcileRequest(BaseModel):
+    static: dict[str, Any] | None = None
+    ptx: dict[str, Any] | None = None
+    ncu: dict[str, Any] | None = None
+    profiler: dict[str, Any] | None = None
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -137,6 +145,19 @@ def compare(request: CompareRequest) -> dict[str, Any]:
                 "ncu_csv": request.b.ncu_csv,
                 "gpu_model": request.b.gpu_model,
             },
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/reconcile")
+def reconcile(request: ReconcileRequest) -> dict[str, Any]:
+    try:
+        return reconcile_evidence(
+            static=request.static,
+            ptx=request.ptx,
+            ncu=request.ncu,
+            profiler=request.profiler,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

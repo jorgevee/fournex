@@ -1,0 +1,13 @@
+id: warp_divergence
+scope: kernel
+category: control_flow
+severity: medium
+confidence: medium
+message: "Conditional branch on threadIdx.x modulo or bitwise-AND detected; threads in the same 32-thread warp take different execution paths, serializing SIMT."
+conditions:
+  warp_divergence_pattern: true
+recommendations:
+  - rec_ncu_increase_block_size
+ncu_signals:
+  issue_slot_utilization_pct_lt: 50.0
+architecture_overrides: {}

@@ -1,0 +1,13 @@
+id: missing_obvious_bounds_guard
+scope: kernel
+category: control_flow
+severity: medium
+confidence: medium
+message: "Global indexing is used but no obvious upper-bound guard was found."
+conditions:
+  has_thread_indexing: true
+  has_bounds_guard: false
+  has_indexed_global: true
+recommendations: []
+ncu_signals: {}
+architecture_overrides: {}

@@ -1,0 +1,15 @@
+id: dimensions_not_tensor_core_friendly
+scope: kernel
+category: tensor_cores
+severity: low
+confidence: medium
+message: "Shared memory tile dimension(s) {tc_unfriendly_dims_str} not multiples of 16; WMMA and MMA instructions require tile alignment to 16 (or 32 on Hopper and later)."
+conditions:
+  tc_unfriendly_dims: true
+recommendations:
+  - rec_ncu_align_matmul_dims
+ncu_signals:
+  tensor_core_utilization_pct_lt: 30.0
+architecture_overrides:
+  # sm_90 (Hopper) wgmma requires multiples of 64 in M/N dimensions
+  # sm_80 (Ampere) requires multiples of 16 for all WMMA variants
