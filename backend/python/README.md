@@ -144,4 +144,4 @@ Available signals for `scope: kernel` conditions include: `has_shared`, `has_syn
 
 - [GitHub](https://github.com/jorgevee/fournex)
 - [Documentation](https://fournex.com/docs)
-- [Website](https://fournex.com)
+- [Website](https://www.fournex.com)
