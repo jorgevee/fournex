@@ -3,7 +3,7 @@ scope: kernel
 category: occupancy
 severity: medium
 confidence: high
-message: "Static shared memory allocation may constrain occupancy."
+message: "Static shared memory allocation ≥ 48 KB may constrain occupancy on this architecture."
 conditions:
   max_shared_bytes_gte: 49152
 recommendations:
@@ -11,7 +11,16 @@ recommendations:
 ncu_signals:
   occupancy_pct_lt: 50.0
 architecture_overrides:
-  # Ampere+ (sm_80+) supports up to 164 KB shared memory per SM
-  # sm_80:
-  #   conditions:
-  #     max_shared_bytes_gte: 98304
+  # Hopper H100 has 228 KB shared memory per SM and 32 blocks/SM.
+  # 96 KB per block → 2 blocks → ~50% occupancy at 1024 threads/block.
+  # Flag above 96 KB rather than 48 KB to avoid false positives on Hopper.
+  sm_90:
+    conditions:
+      max_shared_bytes_gte: 98304
+  # Blackwell — preliminary, same threshold as Hopper
+  sm_100:
+    conditions:
+      max_shared_bytes_gte: 131072
+  sm_120:
+    conditions:
+      max_shared_bytes_gte: 131072

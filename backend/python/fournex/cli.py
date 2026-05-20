@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import uuid
 import zipfile
@@ -472,6 +473,33 @@ def _dim_label(dim: str) -> str:
     return _DIM_NAMES.get(dim, dim.replace("_", " "))
 
 
+def _print_missing_evidence(diagnoses: list[dict[str, Any]]) -> None:
+    actionable = [d for d in diagnoses if d.get("missing_evidence")]
+    if not actionable:
+        return
+    print()
+    print("── Missing evidence " + "─" * 47)
+    for diag in actionable:
+        me = diag["missing_evidence"]
+        conf_now = diag["confidence"]
+        conf_after = me["confidence_if_confirmed"]
+        print(f"\n  {diag['display_name']}  [{conf_now} → {conf_after} if confirmed]")
+        for m in me["metrics"]:
+            print(f"    · {m['label']}")
+            print(f"        {m['metric']}")
+            lines = textwrap.wrap(m["why"], width=56)
+            print(f"        {lines[0]}")
+            for continuation in lines[1:]:
+                print(f"        {continuation}")
+        if me.get("ncu_command"):
+            print(f"\n    Run:")
+            cmd_parts = me["ncu_command"].split(" --csv ")
+            print(f"      ncu --metrics {cmd_parts[0].replace('ncu --metrics ', '')} \\")
+            print(f"          --csv ./report.csv ./your_kernel")
+        print(f"\n    Or collect everything:")
+        print(f"      ncu --set full --csv ./report.csv ./your_kernel")
+
+
 def _print_compare_report(
     result: dict[str, Any],
     rec: dict[str, Any],
@@ -587,6 +615,10 @@ def _print_compare_report(
 
     # Upgrade hints
     _print_compare_upgrade_hints(result)
+
+    # Missing evidence
+    if rec.get("diagnoses"):
+        _print_missing_evidence(rec["diagnoses"])
 
     print()
     print(sep)
@@ -2411,7 +2443,9 @@ def _print_recommendation_list(recommendations: list[dict[str, Any]]) -> None:
                 expected = step.get("expected", "")
                 threshold = step.get("threshold_good")
                 threshold_hint = f" (target: {threshold})" if threshold is not None else ""
-                lines = textwrap.wrap(f"{direction_arrow} {label}: {expected}{threshold_hint}", width=60)
+                current = step.get("current_value")
+                was_hint = f"was {current}; " if current is not None else ""
+                lines = textwrap.wrap(f"{direction_arrow} {label}: {was_hint}{expected}{threshold_hint}", width=60)
                 print(f"       {lines[0]}")
                 for continuation in lines[1:]:
                     print(f"           {continuation}")
@@ -2580,7 +2614,9 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
                     expected = step.get("expected", "")
                     threshold = step.get("threshold_good")
                     threshold_hint = f" (target: {threshold})" if threshold is not None else ""
-                    lines = textwrap.wrap(f"{direction_arrow} {label}: {expected}{threshold_hint}", width=60)
+                    current = step.get("current_value")
+                    was_hint = f"was {current}; " if current is not None else ""
+                    lines = textwrap.wrap(f"{direction_arrow} {label}: {was_hint}{expected}{threshold_hint}", width=60)
                     print(f"       {lines[0]}")
                     for continuation in lines[1:]:
                         print(f"           {continuation}")

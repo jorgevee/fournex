@@ -643,3 +643,56 @@ def test_parse_ncu_csv_combined_prof_prefix_and_extra_columns() -> None:
     assert s.dram_throughput_pct == 88.0
     assert s.l1_cache_hit_rate_pct == 28.0
     assert s.dominant_warp_stall == "memory_throttle"
+
+
+def test_parse_ncu_wide_format_single_launch() -> None:
+    """NCU 2026.x wide format: one row per kernel launch, metrics as columns."""
+    text = "\n".join([
+        '"Kernel Name","dram__throughput.avg.pct_of_peak_sustained_elapsed","l1tex__t_sector_hit_rate.pct","lts__t_sector_hit_rate.pct","sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active","sm__issue_active.avg.pct_of_peak_sustained_active"',
+        '"Kernel Name","%","%","%","%","%"',
+        '"strided_read","94.73","0.0","0.03","0.0","3.73"',
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert s.kernel_name == "strided_read"
+    assert abs(s.dram_throughput_pct - 94.73) < 0.01
+    assert s.l1_cache_hit_rate_pct == 0.0
+    assert abs(s.l2_cache_hit_rate_pct - 0.03) < 0.01
+    assert s.tensor_core_utilization_pct == 0.0
+    assert abs(s.issue_slot_utilization_pct - 3.73) < 0.01
+
+
+def test_parse_ncu_wide_format_averages_multiple_launches() -> None:
+    """Wide format with multiple launches of the same kernel must be averaged."""
+    text = "\n".join([
+        '"Kernel Name","dram__throughput.avg.pct_of_peak_sustained_elapsed","l1tex__t_sector_hit_rate.pct"',
+        '"Kernel Name","%","%"',
+        '"my_kernel","80.0","10.0"',
+        '"my_kernel","90.0","20.0"',
+        '"my_kernel","100.0","30.0"',
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert abs(s.dram_throughput_pct - 90.0) < 0.01   # avg(80, 90, 100)
+    assert abs(s.l1_cache_hit_rate_pct - 20.0) < 0.01  # avg(10, 20, 30)
+
+
+def test_parse_ncu_wide_format_with_done_line_leakage() -> None:
+    """Binary stdout ('done') leaking into NCU CSV output must be filtered out."""
+    text = "\n".join([
+        "==PROF== Connected to process 55555 (/bin/app)",
+        '"Kernel Name","dram__throughput.avg.pct_of_peak_sustained_elapsed","sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active"',
+        '"Kernel Name","%","%"',
+        "done",
+        '"my_kernel","88.0","5.0"',
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert abs(s.dram_throughput_pct - 88.0) < 0.01
+    assert s.tensor_core_utilization_pct == 5.0

@@ -13,4 +13,10 @@ recommendations:
   - rec_ncu_align_matmul_dims
 ncu_signals:
   tensor_core_utilization_pct_lt: 10.0
-architecture_overrides: {}
+architecture_overrides:
+  sm_90:
+    message: "FP16/BF16 multiply-accumulate detected but no wmma:: or wgmma:: tensor core API found; on Hopper prefer nvcuda::experimental::wgmma for peak throughput."
+  sm_100:
+    message: "FP16/BF16 multiply-accumulate detected but no wmma:: or wgmma:: tensor core API found; on Blackwell prefer the wgmma API for peak throughput."
+  sm_120:
+    message: "FP16/BF16 multiply-accumulate detected but no wmma:: or wgmma:: tensor core API found; on Blackwell prefer the wgmma API for peak throughput."

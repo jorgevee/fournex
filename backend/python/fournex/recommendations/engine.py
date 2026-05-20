@@ -25,6 +25,19 @@ _EQUIVALENT_RECOMMENDATIONS = {
     "rec_copy_pinned_memory": ("rec_input_pinned_memory",),
 }
 
+_VALIDATION_METRIC_TO_SIGNAL: dict[str, str] = {
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request": "avg_global_load_sectors_per_request",
+    "dram__throughput.avg.pct_of_peak_sustained_elapsed": "dram_throughput_pct",
+    "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active": "tensor_core_utilization_pct",
+    "smsp__warp_issue_stalled_barrier_per_warp_active.pct": "avg_barrier_stall_pct",
+    "sm__issue_active.avg.pct_of_peak_sustained_active": "issue_slot_utilization_pct",
+    "sm__warps_active.avg.pct_of_peak_sustained_active": "avg_occupancy_pct",
+    "l1tex__t_sector_hit_rate.pct": "l1_cache_hit_rate_pct",
+    "lts__t_sector_hit_rate.pct": "l2_cache_hit_rate_pct",
+    "smsp__warp_issue_stalled_math_pipe_throttle_per_warp_active.pct": "avg_math_throttle_stall_pct",
+    "launch__registers_per_thread": "avg_registers_per_thread",
+}
+
 _BUNDLE_LABELS = {
     "input_pipeline": "Input Pipeline Optimization",
     "copy": "Host-to-Device Transfer Optimization",
@@ -133,7 +146,7 @@ def generate_recommendations(
             "prerequisites": entry.get("prerequisites", {}),
             "actions": entry.get("action_templates", []),
             "validation": entry.get("validation_templates", []),
-            "validation_steps": entry.get("validation_steps", []),
+            "validation_steps": _attach_current_values(entry.get("validation_steps", []), signals),
             "risks": entry.get("caveats", []),
             "triggered_by": rule["id"],
         }
@@ -346,6 +359,19 @@ def _dedupe_equivalent_recommendations(scored_by_id: dict[str, tuple[float, dict
             continue
         for duplicate_id in duplicate_ids:
             scored_by_id.pop(duplicate_id, None)
+
+
+def _attach_current_values(
+    validation_steps: list[dict[str, Any]],
+    signals: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Copy each validation step and add current_value from the signal dict if available."""
+    result = []
+    for step in validation_steps:
+        signal_key = _VALIDATION_METRIC_TO_SIGNAL.get(step["metric"])
+        current = signals.get(signal_key) if signal_key else None
+        result.append({**step, "current_value": current})
+    return result
 
 
 def _clamp(value: float) -> float:

@@ -70,9 +70,15 @@ RECOMMENDATIONS (3)
        2. Restructure array-of-structs (AoS) layouts to struct-of-arrays (SoA).
        3. Align buffers to 128-byte cache line boundaries.
 
-     Validation:
-       - DRAM throughput % should decrease after improving coalescing.
-       - L2 hit rate should improve as fewer cache lines are fetched.
+     Validate:
+       ncu --metrics l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request,\
+                     dram__throughput.avg.pct_of_peak_sustained_elapsed \
+           --csv ./report.csv ./your_app
+       <-- Load sectors/request: was 9.3; drops toward 1-4 after coalescing
+       <-- DRAM throughput %: was 87.4%; decreases as fewer lines fetched
+
+NEXT STEPS
+  Re-run after changes:  frx profile -- <your_workload_command>
 ```
 
 ### Analyze a training run
@@ -190,11 +196,12 @@ frx ncu-command memory --output ncu_memory.csv -- ./my_kernel_app
 frx ncu-command full --kernel-name regex:my_kernel --output ncu_full.csv -- ./my_kernel_app
 
 # Compare two CUDA source files (kernel review / before-after)
-frx compare baseline.cu optimized.cu                         # source-only
-frx compare baseline.cu optimized.cu --with-ptx              # + PTX (requires nvcc)
-frx compare baseline.cu optimized.cu --with-ncu              # + runtime NCU (requires nvcc + ncu)
+frx compare baseline.cu optimized.cu                              # source-only
+frx compare baseline.cu optimized.cu --gpu-model H100             # architecture-aware thresholds
+frx compare baseline.cu optimized.cu --with-ptx                   # + PTX (requires nvcc)
+frx compare baseline.cu optimized.cu --with-ncu                   # + runtime NCU (requires nvcc + ncu)
 frx compare baseline.cu optimized.cu --ncu-a a.csv --ncu-b b.csv  # pre-existing NCU CSVs
-frx compare baseline.cu optimized.cu --json                  # JSON output
+frx compare baseline.cu optimized.cu --json                       # JSON output
 
 # Compare two versions (lower-level, multi-file evidence)
 frx analyze --before before.ptx --after after.ptx [--json]
@@ -319,10 +326,11 @@ Fournex's diagnostic confidence scales with the evidence available. At every lev
 
 | Evidence level | What Fournex detects |
 |---|---|
-| Source only | Structural CUDA antipatterns: spurious sync, strided access patterns, missing bounds guards, bank conflict risk |
+| Source only | Structural CUDA antipatterns: spurious sync, strided access patterns (including via alias variables), missing bounds guards, bank conflict risk |
+| Source + `--gpu-model` | Architecture-aware thresholds: shared memory limits, register pressure cutoffs, and tensor core alignment requirements tuned to the target SM generation (Turing through Blackwell) |
 | Source + PTX | Compiler-confirmed changes: global vs. shared load counts, register pressure, spill detection, instruction mix |
-| Source + NCU | Measured hardware bottlenecks: DRAM throughput, cache hit rates, warp stall breakdown, sectors per request |
-| Source + PTX + NCU | Cross-layer reconciliation: source intent vs. compiled code vs. runtime behavior, with per-finding confidence labels |
+| Source + NCU | Measured hardware bottlenecks: DRAM throughput, cache hit rates, warp stall breakdown, sectors per request — with current values shown in each validation step |
+| Source + PTX + NCU | Cross-layer reconciliation: source intent vs. compiled code vs. runtime behavior, with per-finding confidence labels and specific NCU metrics needed to upgrade low-confidence diagnoses |
 
 ### frx compare — kernel review in one command
 
@@ -352,15 +360,23 @@ Root causes in A:
   !! Inefficient global memory access  [medium - source]
   !  Excessive synchronization  [medium - source]
 
-Still unknown (need more evidence):
-  register usage and spills
-  DRAM bandwidth, L1/L2 cache hit rates
-  tensor core utilization
-  achieved occupancy (measured)
-  runtime warp stall reasons
+── Missing evidence ────────────────────────────────────────────
 
-Run with --with-ptx to unlock register efficiency scores,
---with-ncu or --ncu-a/--ncu-b to measure runtime hardware behavior.
+  Inefficient global memory access  [low-medium → medium-high if confirmed]
+    · Global load sectors per request
+        l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request
+        > 4 sectors/request confirms uncoalesced access
+    · DRAM throughput
+        dram__throughput.avg.pct_of_peak_sustained_elapsed
+        high % confirms memory bandwidth pressure
+
+    Run:
+      ncu --metrics l1tex__t_sectors...,dram__throughput... \
+          --csv ./report.csv ./your_kernel
+
+    Or collect everything:
+      ncu --set full --csv ./report.csv ./your_kernel
+
 ==================================================================
 ```
 
@@ -401,6 +417,26 @@ SCORECARD
 VERDICT
   Winner:   good_linear_layer.cu
   Score A:  0.814    Score B:  1.000    Delta: +0.186
+```
+
+### CUDA antipattern zoo
+
+`demos/cuda_zoo/` contains four pairs of bad/good kernels, each isolating one classic GPU performance antipattern. No GPU or compiler required — `frx compare` runs static analysis only.
+
+| Pair | Antipattern | Static rule triggered |
+|---|---|---|
+| `01_uncoalesced` | Strided global memory access | `uncoalesced_access` |
+| `02_matmul_notiled` | Naive FP32 GEMM, no shared memory | `fp32_only_matmul`, `no_shared_memory_tiling` |
+| `03_excess_sync` | Redundant `__syncthreads()` inside loop | `sync_inside_tight_loop` |
+| `04_register_pressure` | 32 live local scalars in one kernel | `high_register_pressure` |
+
+```bash
+# Analyse all pairs
+cd demos/cuda_zoo
+.\run_zoo.ps1          # PowerShell
+
+# Or analyse a single pair
+frx compare 01_uncoalesced/bad.cu 01_uncoalesced/good.cu
 ```
 
 ---

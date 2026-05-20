@@ -11,4 +11,15 @@ recommendations:
 ncu_signals:
   occupancy_limited_by_registers: true
   registers_per_thread_gt: 64
-architecture_overrides: {}
+architecture_overrides:
+  # Hopper SM supports 2048 threads; with 65536 regs/SM the per-thread register
+  # budget before occupancy drops is larger. Raise threshold to reduce false positives.
+  sm_90:
+    conditions:
+      local_var_count_gt: 32
+  sm_100:
+    conditions:
+      local_var_count_gt: 32
+  sm_120:
+    conditions:
+      local_var_count_gt: 32

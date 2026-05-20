@@ -192,3 +192,79 @@ def test_profile_ncu_not_on_path_exits_one(capsys, monkeypatch) -> None:
     err = capsys.readouterr().err
     assert "ncu" in err.lower()
     assert "frx ncu-command" in err
+
+
+# ── compare: missing evidence section ────────────────────────────────────────
+
+_STRIDED_KERNEL = """\
+__global__ void strided(float* A, int stride) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < 1024) A[tid * stride] = 1.0f;
+}
+"""
+
+_SIMPLE_KERNEL = """\
+__global__ void simple(float* A) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < 1024) A[tid] = 1.0f;
+}
+"""
+
+
+def test_compare_shows_missing_evidence_section(capsys) -> None:
+    pa = _write_temp(_STRIDED_KERNEL, ".cu")
+    pb = _write_temp(_SIMPLE_KERNEL, ".cu")
+    try:
+        rc = main(["compare", str(pa), str(pb)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Missing evidence" in out
+    finally:
+        pa.unlink(missing_ok=True)
+        pb.unlink(missing_ok=True)
+
+
+def test_compare_missing_evidence_shows_ncu_command(capsys) -> None:
+    pa = _write_temp(_STRIDED_KERNEL, ".cu")
+    pb = _write_temp(_SIMPLE_KERNEL, ".cu")
+    try:
+        main(["compare", str(pa), str(pb)])
+        out = capsys.readouterr().out
+        assert "ncu --metrics" in out
+        assert "ncu --set full" in out
+    finally:
+        pa.unlink(missing_ok=True)
+        pb.unlink(missing_ok=True)
+
+
+# ── Validation step current_value in CLI output ───────────────────────────────
+
+def test_profile_ncu_validate_shows_was_current_value(capsys) -> None:
+    # NCU CSV with tensor core utilization — should show "was 7.0" in Validate block
+    p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
+    try:
+        main(["profile", "--ncu", str(p)])
+        out = capsys.readouterr().out
+        assert "was 7.0" in out  # tensor_core_utilization_pct from CSV
+    finally:
+        p.unlink(missing_ok=True)
+
+
+def test_profile_ncu_json_validation_steps_have_current_value_field(capsys) -> None:
+    p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
+    try:
+        main(["profile", "--ncu", str(p), "--json"])
+        data = json.loads(capsys.readouterr().out)
+        recs = data["result"]["recommendations"]
+        steps_with_current = [
+            step for rec in recs
+            for step in rec.get("validation_steps", [])
+            if step.get("current_value") is not None
+        ]
+        assert len(steps_with_current) > 0, "At least one validation step should have a current_value"
+        # All validation_steps must have the current_value key (may be None)
+        for rec in recs:
+            for step in rec.get("validation_steps", []):
+                assert "current_value" in step
+    finally:
+        p.unlink(missing_ok=True)

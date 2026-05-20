@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from fournex.reconciliation import reconcile_evidence
+from fournex.reconciliation import reconcile_evidence, what_evidence_is_missing
 
 
 # ── Fixture builders ──────────────────────────────────────────────────────────
@@ -440,6 +440,129 @@ def test_api_reconcile_endpoint() -> None:
     body = response.json()
     assert body["schema"] == "reconciliation_v1"
     assert body["diagnoses"] == []
+
+
+# ── Missing evidence ──────────────────────────────────────────────────────────
+
+def test_missing_evidence_present_when_ncu_not_confirming() -> None:
+    # Source confirms inefficient_global_memory_access; NCU not provided
+    result = reconcile_evidence(static=_static(["strided_or_pitched"], ["strided_or_pitched"]))
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    assert d["missing_evidence"] is not None
+
+
+def test_missing_evidence_none_when_all_confirming() -> None:
+    # Source + NCU both confirm excessive_synchronization + profiler → "confirmed"
+    ncu = _ncu_result(["warp_stall_sync"], {"stall": "barrier"})
+    result = reconcile_evidence(
+        static=_static(["unnecessary_syncthreads"]),
+        ncu=ncu,
+        profiler=_profiler_result(["sync_bound"]),
+    )
+    d = next(d for d in result["diagnoses"] if d["label"] == "excessive_synchronization")
+    # All 3 layers confirm, so missing_evidence should be None
+    assert d["missing_evidence"] is None
+
+
+def test_missing_evidence_contains_ncu_command() -> None:
+    result = reconcile_evidence(static=_static(["strided_or_pitched"], ["strided_or_pitched"]))
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    me = d["missing_evidence"]
+    assert me["ncu_command"] is not None
+    assert me["ncu_command"].startswith("ncu --metrics ")
+
+
+def test_missing_evidence_full_collection_command() -> None:
+    result = reconcile_evidence(static=_static(["strided_or_pitched"], ["strided_or_pitched"]))
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    assert d["missing_evidence"]["full_collection_command"] == (
+        "ncu --set full --csv ./report.csv ./your_kernel"
+    )
+
+
+def test_missing_evidence_confidence_if_confirmed_upgrades() -> None:
+    # With source only (1/2 available), confidence is "low-medium"
+    result = reconcile_evidence(
+        static=_static(["strided_or_pitched"], ["strided_or_pitched"]),
+        ncu=_ncu_result([]),  # ncu present but not confirming
+    )
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    assert d["confidence"] == "low-medium"
+    # If NCU confirms, confidence would upgrade
+    conf_after = d["missing_evidence"]["confidence_if_confirmed"]
+    assert conf_after in ("high", "medium-high", "confirmed")
+
+
+def test_missing_evidence_metric_names_for_tensor_core() -> None:
+    ncu = _ncu_result(["tensor_core_underutilized"], {"tc": 5.0})
+    result = reconcile_evidence(ncu=ncu)
+    d = next(d for d in result["diagnoses"] if d["label"] == "tensor_core_underutilization")
+    me = d["missing_evidence"]
+    # NCU already confirmed but missing_evidence checks evidence_needed for non-confirming layers
+    # tensor_core_underutilization has only ncu_check, so if ncu confirms → missing_evidence is None
+    assert me is None
+
+
+def test_missing_evidence_metrics_for_inefficient_global_access() -> None:
+    # Source confirms; NCU not provided → NCU metrics should be listed
+    result = reconcile_evidence(static=_static(["strided_or_pitched"], ["strided_or_pitched"]))
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    metric_names = [m["metric"] for m in d["missing_evidence"]["metrics"]]
+    assert any("l1tex" in name for name in metric_names)
+    assert any("dram" in name for name in metric_names)
+
+
+def test_missing_evidence_metrics_for_register_pressure() -> None:
+    # PTX confirms register_pressure; NCU not provided
+    result = reconcile_evidence(ptx=_ptx_result(_PTX_SPILL))
+    d = next(d for d in result["diagnoses"] if d["label"] == "register_pressure")
+    metric_names = [m["metric"] for m in d["missing_evidence"]["metrics"]]
+    assert any("warps_active" in name for name in metric_names)
+    assert any("registers_per_thread" in name for name in metric_names)
+
+
+def test_what_evidence_is_missing_returns_only_actionable() -> None:
+    # inefficient_global_memory_access fires (source), tensor_core does not fire
+    result = what_evidence_is_missing(
+        static=_static(["strided_or_pitched"], ["strided_or_pitched"])
+    )
+    labels = {d["label"] for d in result}
+    assert "inefficient_global_memory_access" in labels
+    # All returned diagnoses must have non-None missing_evidence
+    for d in result:
+        assert d["missing_evidence"] is not None
+
+
+def test_what_evidence_is_missing_empty_when_all_confirmed() -> None:
+    ncu = _ncu_result(["warp_stall_sync"], {"stall": "barrier"})
+    result = what_evidence_is_missing(
+        static=_static(["unnecessary_syncthreads"]),
+        ncu=ncu,
+        profiler=_profiler_result(["sync_bound"]),
+    )
+    # excessive_synchronization is confirmed by 3 layers → not returned
+    labels = {d["label"] for d in result}
+    assert "excessive_synchronization" not in labels
+
+
+def test_what_evidence_is_missing_with_ncu_absent() -> None:
+    # No NCU provided; warp_divergence fires via PTX
+    result = what_evidence_is_missing(ptx=_ptx_result(_PTX_BRANCH))
+    labels = {d["label"] for d in result}
+    assert "warp_divergence_risk" in labels
+    d = next(d for d in result if d["label"] == "warp_divergence_risk")
+    metric_names = [m["metric"] for m in d["missing_evidence"]["metrics"]]
+    assert any("thread_inst_executed" in name for name in metric_names)
+
+
+def test_missing_evidence_each_metric_has_required_fields() -> None:
+    result = reconcile_evidence(static=_static(["strided_or_pitched"], ["strided_or_pitched"]))
+    d = next(d for d in result["diagnoses"] if d["label"] == "inefficient_global_memory_access")
+    for m in d["missing_evidence"]["metrics"]:
+        assert "metric" in m
+        assert "label" in m
+        assert "why" in m
+        assert "layer" in m
 
 
 # ── Helpers imported at module level to avoid name confusion ──────────────────

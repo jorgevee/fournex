@@ -21,6 +21,23 @@ DEFAULT_DEVICE_LIMITS = {
 
 
 GPU_DEVICE_LIMITS = {
+    # ── Product names ─────────────────────────────────────────────────────────
+    # Turing (sm_75)
+    "t4": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1024,
+        "max_blocks_per_sm": 16,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 65536,
+    },
+    "rtx2080": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1024,
+        "max_blocks_per_sm": 16,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 65536,
+    },
+    # Ampere A-class (sm_80)
     "a100": {
         "warp_size": 32,
         "max_threads_per_sm": 2048,
@@ -28,13 +45,29 @@ GPU_DEVICE_LIMITS = {
         "registers_per_sm": 65536,
         "shared_memory_per_sm_bytes": 163840,
     },
-    "h100": {
+    "a30": {
         "warp_size": 32,
         "max_threads_per_sm": 2048,
         "max_blocks_per_sm": 32,
         "registers_per_sm": 65536,
-        "shared_memory_per_sm_bytes": 233472,
+        "shared_memory_per_sm_bytes": 163840,
     },
+    # Ampere GA10x consumer (sm_86)
+    "rtx3090": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1536,
+        "max_blocks_per_sm": 16,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 102400,
+    },
+    "rtx3080": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1536,
+        "max_blocks_per_sm": 16,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 102400,
+    },
+    # Ada Lovelace (sm_89)
     "l4": {
         "warp_size": 32,
         "max_threads_per_sm": 1536,
@@ -42,12 +75,77 @@ GPU_DEVICE_LIMITS = {
         "registers_per_sm": 65536,
         "shared_memory_per_sm_bytes": 102400,
     },
-    "t4": {
+    "rtx4090": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1536,
+        "max_blocks_per_sm": 24,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 102400,
+    },
+    # Hopper (sm_90)
+    "h100": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 233472,
+    },
+    "h200": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 233472,
+    },
+    # ── SM version aliases ────────────────────────────────────────────────────
+    "sm_75": {
         "warp_size": 32,
         "max_threads_per_sm": 1024,
         "max_blocks_per_sm": 16,
         "registers_per_sm": 65536,
         "shared_memory_per_sm_bytes": 65536,
+    },
+    "sm_80": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 163840,
+    },
+    "sm_86": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1536,
+        "max_blocks_per_sm": 16,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 102400,
+    },
+    "sm_89": {
+        "warp_size": 32,
+        "max_threads_per_sm": 1536,
+        "max_blocks_per_sm": 24,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 102400,
+    },
+    "sm_90": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 233472,
+    },
+    "sm_100": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 262144,   # Blackwell — preliminary estimate
+    },
+    "sm_120": {
+        "warp_size": 32,
+        "max_threads_per_sm": 2048,
+        "max_blocks_per_sm": 32,
+        "registers_per_sm": 65536,
+        "shared_memory_per_sm_bytes": 262144,
     },
 }
 
@@ -136,7 +234,18 @@ def estimate_occupancy(
 def device_limits_for_gpu(gpu_model: str | None) -> dict[str, int]:
     if not gpu_model:
         return dict(DEFAULT_DEVICE_LIMITS)
-    normalized = gpu_model.lower().replace("nvidia", "").replace("tesla", "").strip()
+    normalized = (
+        gpu_model.lower()
+        .replace("nvidia", "")
+        .replace("tesla", "")
+        .replace(" ", "")
+        .replace("-", "")
+        .strip()
+    )
+    # Exact match first (handles sm_XX strings and product names without ambiguity)
+    if normalized in GPU_DEVICE_LIMITS:
+        return {**DEFAULT_DEVICE_LIMITS, **GPU_DEVICE_LIMITS[normalized]}
+    # Substring match for partial names (e.g. "NVIDIA A100-SXM4" → "a100")
     for key, limits in GPU_DEVICE_LIMITS.items():
         if key in normalized:
             return {**DEFAULT_DEVICE_LIMITS, **limits}
@@ -344,7 +453,102 @@ def _text_to_csv_rows(text: str) -> list[dict[str, str]]:
     ]
     if not lines:
         return []
+
+    # When any non-empty line starts with '"', keep only quoted lines.
+    # This strips profiled-binary stdout leakage (e.g. bare "done") from NCU CSV output.
+    if any(line.lstrip().startswith('"') for line in lines):
+        lines = [line for line in lines if line.lstrip().startswith('"')]
+    if not lines:
+        return []
+
+    all_rows = list(csv.reader(lines))
+    if not all_rows:
+        return []
+
+    headers = [h.strip() for h in all_rows[0]]
+    header_set = {h.lower() for h in headers}
+
+    tall_indicators = {"metric name", "metric value", "value", "avg", "average"}
+    kernel_indicators = {"kernel name", "kernel name demangled", "kernel", "name"}
+
+    has_kernel_col = bool(header_set & kernel_indicators)
+    has_tall_cols  = bool(header_set & tall_indicators)
+
+    # NCU wide format: one row per launch, metrics spread across columns.
+    # Detected by: has a kernel-name column, but no "Metric Name"/"Metric Value" column,
+    # and at least one additional metric column beyond the kernel name.
+    if has_kernel_col and not has_tall_cols and len(headers) >= 2:
+        return _wide_ncu_to_tall_rows(all_rows)
+
     return list(csv.DictReader(lines))
+
+
+def _wide_ncu_to_tall_rows(all_rows: list[list[str]]) -> list[dict[str, str]]:
+    """Convert NCU 2026.x wide-format CSV to synthetic tall-format DictReader rows.
+
+    Wide format layout:
+      row 0 — column headers (metric names)
+      row 1 — units row (skipped)
+      rows 2+ — one data row per kernel launch
+    """
+    if len(all_rows) < 3:
+        return []
+
+    headers = [h.strip() for h in all_rows[0]]
+
+    kernel_col_idx = next(
+        (
+            i for i, h in enumerate(headers)
+            if h.lower() in {"kernel name", "kernel name demangled", "kernel"}
+        ),
+        0,
+    )
+
+    # Row 1 is the units row in every NCU wide export (first cell is typically
+    # "Kernel Name" repeated, not an actual kernel). Skip it unconditionally.
+    data_rows = [
+        row for row in all_rows[2:]
+        if row and len(row) > kernel_col_idx and row[kernel_col_idx].strip()
+        and row[kernel_col_idx].strip().lower() not in {"kernel name", "kernel", "kernel name demangled"}
+    ]
+
+    # Average numeric values across multiple launches of the same kernel.
+    from collections import defaultdict
+    sums: dict[tuple[str, str], float]  = defaultdict(float)
+    counts: dict[tuple[str, str], int]  = defaultdict(int)
+    kernel_order: list[str] = []
+    seen_kernels: set[str] = set()
+
+    for row in data_rows:
+        kernel_name = row[kernel_col_idx].strip() if kernel_col_idx < len(row) else ""
+        if not kernel_name:
+            continue
+        if kernel_name not in seen_kernels:
+            kernel_order.append(kernel_name)
+            seen_kernels.add(kernel_name)
+        for col_idx, metric_name in enumerate(headers):
+            if col_idx == kernel_col_idx or col_idx >= len(row):
+                continue
+            val_str = row[col_idx].strip().replace(",", "")
+            try:
+                sums[(kernel_name, metric_name)] += float(val_str)
+                counts[(kernel_name, metric_name)] += 1
+            except ValueError:
+                pass
+
+    tall_rows: list[dict[str, str]] = []
+    for kernel_name in kernel_order:
+        for metric_name in headers:
+            key = (kernel_name, metric_name)
+            if counts[key]:
+                avg_val = sums[key] / counts[key]
+                tall_rows.append({
+                    "Kernel Name": kernel_name,
+                    "Metric Name": metric_name,
+                    "Metric Value": str(avg_val),
+                })
+
+    return tall_rows
 
 
 def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:

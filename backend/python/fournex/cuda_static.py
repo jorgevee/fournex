@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .arch_profiles import resolve_sm_version
 from .cuda_rules.engine import (
     extract_launch_signals,
     extract_source_signals,
@@ -79,15 +80,16 @@ def build_static_cuda_report(
     for launch in launches:
         launch_by_kernel.setdefault(launch.kernel_name, []).append(launch)
 
+    sm_version = resolve_sm_version(gpu_model)
     kernel_payloads: list[dict[str, Any]] = []
     all_findings: list[dict[str, Any]] = []
     for kernel in kernels:
-        _annotate_kernel(kernel)
+        _annotate_kernel(kernel, sm_version=sm_version)
         for finding in kernel.findings:
             all_findings.append({**finding, "kernel_name": kernel.name, "filename": kernel.filename, "line": kernel.line})
         kernel_payloads.append(kernel.to_dict())
 
-    all_findings.extend(_launch_findings(kernels, launch_by_kernel, gpu_model=gpu_model))
+    all_findings.extend(_launch_findings(kernels, launch_by_kernel, gpu_model=gpu_model, sm_version=sm_version))
 
     launch_payloads = [launch.to_dict() for launch in launches]
     advisor = _launch_advice(kernels, launch_by_kernel, gpu_model=gpu_model)
@@ -155,7 +157,7 @@ def parse_cuda_launches(source: str, *, filename: str = "<memory>") -> list[Cuda
     return launches
 
 
-def _annotate_kernel(kernel: CudaKernelSource) -> None:
+def _annotate_kernel(kernel: CudaKernelSource, *, sm_version: str | None = None) -> None:
     body = kernel.body
     kernel.indexing_patterns = _indexing_patterns(body)
     kernel.memory_access_styles = _memory_access_styles(body)
@@ -163,7 +165,10 @@ def _annotate_kernel(kernel: CudaKernelSource) -> None:
     kernel.reductions = _reduction_patterns(body)
     kernel.shared_memory = _shared_memory_allocations(body)
     signals = extract_source_signals(kernel)
-    kernel.findings = [format_finding(rule, signals) for rule in match_rules(signals, load_rules("kernel"))]
+    kernel.findings = [
+        format_finding(rule, signals)
+        for rule in match_rules(signals, load_rules("kernel"), sm_version=sm_version)
+    ]
 
 
 def _indexing_patterns(body: str) -> list[str]:
@@ -181,11 +186,41 @@ def _indexing_patterns(body: str) -> list[str]:
     return patterns
 
 
+_STRIDE_WORDS = r"(?:stride|pitch|ld|width)"
+
+# Typed variable declarations (int/size_t/auto/…) whose right-hand side
+# contains a multiplication with a stride-like keyword.
+_STRIDED_ALIAS_RE = re.compile(
+    r"\b(?:int|unsigned|long|size_t|auto|ptrdiff_t|u?int(?:32|64)_t)\s+(\w+)\s*=([^;]+);"
+)
+
+
+def _strided_aliases(body: str) -> set[str]:
+    """Return names of variables assigned a strided-keyword expression."""
+    aliases: set[str] = set()
+    for m in _STRIDED_ALIAS_RE.finditer(body):
+        rhs = m.group(2)
+        if re.search(rf"\*[^*]*\b{_STRIDE_WORDS}\b|\b{_STRIDE_WORDS}\b[^*]*\*", rhs):
+            aliases.add(m.group(1))
+    return aliases
+
+
 def _memory_access_styles(body: str) -> list[str]:
     styles: list[str] = []
     if re.search(r"\w+\s*\[\s*(idx|i|tid)\s*\]", body):
         styles.append("likely_coalesced_1d")
-    if re.search(r"\w+\s*\[[^\]]*\*\s*(stride|pitch|ld|width)[^\]]*\]", body):
+
+    # Direct: multiplication with stride keyword appears inside the subscript
+    direct = bool(re.search(
+        rf"\w+\s*\[[^\]]*\*\s*{_STRIDE_WORDS}[^\]]*\]", body
+    ))
+    # Alias: int idx = tid * stride;  …  src[idx]
+    aliases = _strided_aliases(body)
+    alias_hit = any(
+        re.search(rf"\w+\s*\[[^\]]*\b{re.escape(a)}\b[^\]]*\]", body)
+        for a in aliases
+    )
+    if direct or alias_hit:
         styles.append("strided_or_pitched")
     if "__shared__" in body:
         styles.append("shared_memory_tiling")
@@ -236,6 +271,7 @@ def _launch_findings(
     launch_by_kernel: dict[str, list[CudaLaunchConfig]],
     *,
     gpu_model: str | None,
+    sm_version: str | None = None,
 ) -> list[dict[str, Any]]:
     limits = device_limits_for_gpu(gpu_model)
     findings: list[dict[str, Any]] = []
@@ -245,7 +281,7 @@ def _launch_findings(
     for lcs in launch_by_kernel.values():
         for launch in lcs:
             signals = extract_launch_signals(launch.block_size_hint)
-            for rule in match_rules(signals, launch_rules):
+            for rule in match_rules(signals, launch_rules, sm_version=sm_version):
                 findings.append({
                     **format_finding(rule, signals),
                     "kernel_name": launch.kernel_name,
@@ -263,7 +299,7 @@ def _launch_findings(
         )
         occ_pct = occ.get("occupancy_pct", 100.0)
         signals = extract_launch_signals(None, occupancy_pct=occ_pct)
-        for rule in match_rules(signals, occupancy_rules):
+        for rule in match_rules(signals, occupancy_rules, sm_version=sm_version):
             findings.append({
                 **format_finding(rule, signals),
                 "kernel_name": kernel.name,

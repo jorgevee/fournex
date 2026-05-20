@@ -99,6 +99,10 @@ def extract_ncu_signals(
     causes = set(ncu_summary.get("occupancy_limit_causes") or [])
     stall = ncu_summary.get("dominant_warp_stall") or "unknown"
     mem_frac = ncu_summary.get("memory_stall_fraction") or 0.0
+    regs_per_thread = ncu_summary.get("avg_registers_per_thread")
+    stall_breakdown = ncu_summary.get("warp_stall_breakdown") or {}
+    barrier_stall = stall_breakdown.get("barrier", 0.0)
+    math_throttle_stall = stall_breakdown.get("math_pipe_throttle", 0.0)
 
     _MEMORY_STALLS = frozenset({"memory_throttle", "long_scoreboard", "mio", "lg", "texture"})
     _SYNC_STALLS = frozenset({"barrier", "wait"})
@@ -118,11 +122,11 @@ def extract_ncu_signals(
         # ── Cache hit rates ───────────────────────────────────────────────────
         "l1_cache_miss_heavy": l1 is not None and l1 < 40.0,
         "l2_cache_miss_heavy": l2 is not None and l2 < 50.0,
-        "l1_cache_hit_rate_pct": l1 if l1 is not None else 100.0,
-        "l2_cache_hit_rate_pct": l2 if l2 is not None else 100.0,
+        "l1_cache_hit_rate_pct": l1,   # None when not in NCU data; avoids misleading "was 100.0"
+        "l2_cache_hit_rate_pct": l2,   # None when not in NCU data
         # ── Coalescing ────────────────────────────────────────────────────────
         "uncoalesced_global_loads": load_sectors is not None and load_sectors > 4.0,
-        "avg_global_load_sectors_per_request": load_sectors if load_sectors is not None else 1.0,
+        "avg_global_load_sectors_per_request": load_sectors,   # None when not in NCU data
 
         # ── Issue slot utilization (IPC proxy) ────────────────────────────────
         "issue_efficiency_low": isu < 60.0,
@@ -147,6 +151,9 @@ def extract_ncu_signals(
         "warp_stall_is_compute": stall in _COMPUTE_STALLS,
         "dominant_warp_stall": stall,
         "memory_stall_fraction": mem_frac,
+        "avg_barrier_stall_pct": round(barrier_stall, 2),
+        "avg_math_throttle_stall_pct": round(math_throttle_stall, 2),
+        "avg_registers_per_thread": round(regs_per_thread, 1) if regs_per_thread is not None else None,
 
         # ── Environment ──────────────────────────────────────────────────────
         "framework_pytorch": str(env.get("framework", "")).lower() == "pytorch",

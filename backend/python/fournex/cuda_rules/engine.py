@@ -57,6 +57,42 @@ def load_rules(scope: str = "kernel") -> list[dict[str, Any]]:
     return _load_all_rules().get(scope, [])
 
 
+def _count_syncs_in_loops(body: str) -> int:
+    """Count __syncthreads() calls that appear inside for/while loop bodies.
+
+    Each loop's body is extracted by matching braces. Syncs in inner loops
+    are counted once per enclosing loop level — the result reflects whether
+    barriers are entangled with loop structure, not how many runtime calls occur.
+    """
+    count = 0
+    for m in re.finditer(r"\b(?:for|while)\s*\(", body):
+        # Skip past the loop condition (balanced parens)
+        depth = 1
+        i = m.end()
+        while i < len(body) and depth > 0:
+            if body[i] == "(":
+                depth += 1
+            elif body[i] == ")":
+                depth -= 1
+            i += 1
+        # Skip whitespace to reach the opening brace
+        while i < len(body) and body[i] in " \t\n\r":
+            i += 1
+        if i >= len(body) or body[i] != "{":
+            continue  # single-statement loop body — ignore
+        # Extract the braced body
+        depth = 1
+        j = i + 1
+        while j < len(body) and depth > 0:
+            if body[j] == "{":
+                depth += 1
+            elif body[j] == "}":
+                depth -= 1
+            j += 1
+        count += body[i + 1 : j - 1].count("__syncthreads()")
+    return count
+
+
 def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
     """Compute a flat signal dict from a parsed CudaKernelSource."""
     body = kernel.body
@@ -66,6 +102,7 @@ def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
     for_count = len(re.findall(r"\bfor\s*\(", body))
     global_access_count = len(re.findall(r"\w+\s*\[[^\]]+\]", body))
     sync_count = body.count("__syncthreads()")
+    sync_in_loop_count = _count_syncs_in_loops(body)
     branch_count = len(re.findall(r"\bif\s*\(", body))
     bounds_check_count = len(re.findall(r"\bif\s*\([^)]*(<|<=)[^)]*\)", body))
     local_var_count = len(re.findall(
@@ -76,6 +113,11 @@ def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
         dim for item in kernel.shared_memory
         for dim in item["dims"]
         if dim.isdigit() and int(dim) > 8 and int(dim) % 16 != 0
+    ]
+    tc_unfriendly_hopper = [
+        dim for item in kernel.shared_memory
+        for dim in item["dims"]
+        if dim.isdigit() and int(dim) > 8 and int(dim) % 64 != 0
     ]
 
     return {
@@ -120,6 +162,7 @@ def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
 
         # ── Counts ──────────────────────────────────────────────────────────
         "sync_count": sync_count,
+        "sync_in_loop_count": sync_in_loop_count,
         "for_count": for_count,
         "global_access_count": global_access_count,
         "branch_count": branch_count,
@@ -129,6 +172,12 @@ def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
 
         # ── String values for message interpolation ─────────────────────────
         "tc_unfriendly_dims_str": ", ".join(dict.fromkeys(tc_unfriendly)) if tc_unfriendly else "",
+
+        # ── Hopper+ specific: wgmma requires M/N tile alignment to 64 ───────
+        "tc_unfriendly_dims_hopper": bool(tc_unfriendly_hopper),
+        "tc_unfriendly_dims_hopper_str": (
+            ", ".join(dict.fromkeys(tc_unfriendly_hopper)) if tc_unfriendly_hopper else ""
+        ),
     }
 
 
@@ -144,9 +193,36 @@ def extract_launch_signals(block_size_hint: int | None, occupancy_pct: float = 1
     }
 
 
-def match_rules(signals: dict[str, Any], rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return every rule whose conditions all match signals (AND logic)."""
-    return [rule for rule in rules if _conditions_match(rule.get("conditions", {}), signals)]
+def match_rules(
+    signals: dict[str, Any],
+    rules: list[dict[str, Any]],
+    *,
+    sm_version: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return every rule whose conditions all match signals (AND logic).
+
+    When ``sm_version`` is provided, per-architecture condition overrides and
+    message overrides from ``architecture_overrides`` are merged in before matching.
+    Override condition values replace the base value for the same key; other base
+    conditions remain unchanged.
+    """
+    result = []
+    for rule in rules:
+        conditions = rule.get("conditions", {})
+        arch_message: str | None = None
+        if sm_version:
+            override = rule.get("architecture_overrides", {}).get(sm_version, {})
+            if override.get("conditions"):
+                # Full replacement: arch override defines exactly which conditions
+                # apply for this architecture, enabling signal substitution (not
+                # just threshold adjustment).
+                conditions = override["conditions"]
+            arch_message = override.get("message")
+        if _conditions_match(conditions, signals):
+            if arch_message:
+                rule = {**rule, "message": arch_message}
+            result.append(rule)
+    return result
 
 
 def format_finding(rule: dict[str, Any], signals: dict[str, Any]) -> dict[str, str]:

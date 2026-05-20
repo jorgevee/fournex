@@ -11,5 +11,17 @@ recommendations:
 ncu_signals:
   tensor_core_utilization_pct_lt: 30.0
 architecture_overrides:
-  # sm_90 (Hopper) wgmma requires multiples of 64 in M/N dimensions
-  # sm_80 (Ampere) requires multiples of 16 for all WMMA variants
+  # Hopper wgmma requires M/N tile dimensions to be multiples of 64.
+  # Use tc_unfriendly_dims_hopper signal (checks % 64 instead of % 16).
+  sm_90:
+    message: "Shared memory tile dimension(s) {tc_unfriendly_dims_hopper_str} not multiples of 64; wgmma on Hopper (sm_90) requires M/N tile alignment to 64."
+    conditions:
+      tc_unfriendly_dims_hopper: true
+  sm_100:
+    message: "Shared memory tile dimension(s) {tc_unfriendly_dims_hopper_str} not multiples of 64; wgmma on Blackwell requires M/N tile alignment to 64."
+    conditions:
+      tc_unfriendly_dims_hopper: true
+  sm_120:
+    message: "Shared memory tile dimension(s) {tc_unfriendly_dims_hopper_str} not multiples of 64; wgmma on Blackwell requires M/N tile alignment to 64."
+    conditions:
+      tc_unfriendly_dims_hopper: true

@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
@@ -229,6 +231,68 @@ def test_insufficient_ncu_data_recommends_collect_metrics() -> None:
 
 
 # ── Full pipeline smoke test ──────────────────────────────────────────────────
+
+# ── Validation step current_value population ──────────────────────────────────
+
+def test_coalescing_rec_validation_step_has_current_value() -> None:
+    ncu = _summary_with(load_sectors=10.4, dram=82.0, stall="memory_throttle", stall_pct=38.0, mem_frac=0.8)
+    result = _recs_for(ncu)
+    rec = next(r for r in result["recommendations"] if r["id"] == "rec_ncu_improve_coalescing")
+    sectors_step = next(s for s in rec["validation_steps"]
+                        if "sectors" in s["metric"])
+    assert sectors_step["current_value"] == pytest.approx(10.4)
+
+
+def test_tensor_core_rec_validation_step_has_current_value() -> None:
+    ncu = _summary_with(tc=7.0, occ=65.0)
+    result = _recs_for(ncu, {"mixed_precision": False})
+    rec = next(r for r in result["recommendations"] if r["id"] == "rec_ncu_enable_amp")
+    tc_step = next(s for s in rec["validation_steps"]
+                   if "tensor" in s["metric"])
+    assert tc_step["current_value"] == pytest.approx(7.0)
+
+
+def test_occupancy_rec_validation_step_has_current_value() -> None:
+    ncu = _summary_with(occ=28.0, occupancy_causes=["registers"])
+    result = _recs_for(ncu)
+    rec = next(r for r in result["recommendations"] if r["id"] == "rec_ncu_reduce_register_pressure")
+    occ_step = next(s for s in rec["validation_steps"]
+                    if "warps_active" in s["metric"])
+    assert occ_step["current_value"] == pytest.approx(28.0)
+
+
+def test_validation_step_current_value_none_when_signal_absent() -> None:
+    # bank conflicts metric has no signal mapping → current_value should be None
+    ncu = _summary_with(stall="barrier", stall_pct=30.0)
+    result = _recs_for(ncu)
+    rec = next((r for r in result["recommendations"] if r["id"] == "rec_ncu_shared_mem_layout"), None)
+    if rec:
+        bank_conflict_step = next(
+            (s for s in rec["validation_steps"] if "bank_conflict" in s["metric"]), None
+        )
+        if bank_conflict_step:
+            assert bank_conflict_step["current_value"] is None
+
+
+def test_barrier_stall_current_value_populated_from_warp_breakdown() -> None:
+    ncu = _summary_with(stall="barrier", stall_pct=28.0)
+    result = _recs_for(ncu)
+    rec = next((r for r in result["recommendations"] if r["id"] == "rec_ncu_reduce_syncthreads"), None)
+    if rec:
+        barrier_step = next(
+            (s for s in rec["validation_steps"] if "barrier" in s["metric"]), None
+        )
+        if barrier_step:
+            assert barrier_step["current_value"] == pytest.approx(28.0)
+
+
+def test_validation_steps_all_have_current_value_key() -> None:
+    ncu = _summary_with(load_sectors=8.0, dram=75.0, stall="memory_throttle", stall_pct=30.0, mem_frac=0.7)
+    result = _recs_for(ncu)
+    for rec in result["recommendations"]:
+        for step in rec.get("validation_steps", []):
+            assert "current_value" in step, f"Missing current_value in step for {rec['id']}: {step['metric']}"
+
 
 def test_full_pipeline_scores_and_priorities_are_valid() -> None:
     text = "\n".join([

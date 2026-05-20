@@ -62,6 +62,34 @@ def _compute_confidence(n_confirming: int, n_available: int) -> str:
     return "medium" if n_available <= 1 else "low-medium"
 
 
+def _missing_evidence_for(
+    entry: dict[str, Any],
+    layers_confirming: list[str],
+    layers_available: list[str],
+) -> dict[str, Any] | None:
+    """Return missing-evidence block for a diagnosis, or None if nothing actionable is missing."""
+    needed = entry.get("evidence_needed", {})
+    metrics: list[dict[str, Any]] = []
+    for layer, layer_metrics in needed.items():
+        if layer not in layers_confirming:
+            for m in layer_metrics:
+                metrics.append({**m, "layer": layer})
+    if not metrics:
+        return None
+    ncu_metrics = [m["metric"] for m in metrics if m["layer"] == "ncu"]
+    n_confirming = len(layers_confirming)
+    n_available = max(len(layers_available), n_confirming)
+    return {
+        "metrics": metrics,
+        "ncu_command": (
+            "ncu --metrics " + ",".join(ncu_metrics) + " --csv ./report.csv ./your_kernel"
+            if ncu_metrics else None
+        ),
+        "full_collection_command": "ncu --set full --csv ./report.csv ./your_kernel",
+        "confidence_if_confirmed": _compute_confidence(n_confirming + 1, n_available),
+    }
+
+
 # ── Diagnosis catalog ──────────────────────────────────────────────────────────
 
 _CATALOG: list[dict[str, Any]] = [
@@ -82,6 +110,20 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": ("avg_global_load_sectors_per_request",),
         "profiler_check": None,
         "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum_per_request",
+                    "label": "Global load sectors/request",
+                    "why": "> 4 confirms non-coalesced warp loads (ideal = 1)",
+                },
+                {
+                    "metric": "dram__throughput.avg.pct_of_peak_sustained_elapsed",
+                    "label": "DRAM throughput %",
+                    "why": "high % confirms memory bandwidth is a bottleneck",
+                },
+            ],
+        },
     },
     {
         "label": "excessive_synchronization",
@@ -99,6 +141,15 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": ("memory_stall_fraction",),
         "profiler_check": lambda s: bool(s.get("sync_bound")),
         "profiler_claims": frozenset({"sync_bound"}),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "smsp__warp_issue_stalled_barrier_per_warp_active.pct",
+                    "label": "Warp stall on barrier %",
+                    "why": "high % confirms warps are stalling at __syncthreads() barriers",
+                },
+            ],
+        },
     },
     {
         "label": "register_pressure",
@@ -116,6 +167,20 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": ("avg_occupancy_pct",),
         "profiler_check": None,
         "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "sm__warps_active.avg.pct_of_peak_sustained_active",
+                    "label": "Achieved occupancy %",
+                    "why": "low % confirms register pressure is limiting resident warps",
+                },
+                {
+                    "metric": "launch__registers_per_thread",
+                    "label": "Registers per thread",
+                    "why": "> 64 is the typical threshold where occupancy starts dropping",
+                },
+            ],
+        },
     },
     {
         "label": "tensor_core_underutilization",
@@ -133,6 +198,30 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": ("tensor_core_utilization_pct",),
         "profiler_check": None,
         "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active",
+                    "label": "Tensor pipe utilization %",
+                    "why": "< 30% confirms tensor cores are idle despite eligible workload",
+                },
+                {
+                    "metric": "smsp__inst_executed_pipe_tensor.sum",
+                    "label": "HMMA instruction count",
+                    "why": "near-zero confirms no HMMA instructions were issued",
+                },
+                {
+                    "metric": "sm__warps_active.avg.pct_of_peak_sustained_active",
+                    "label": "Achieved occupancy %",
+                    "why": "low occupancy amplifies tensor core underutilization",
+                },
+                {
+                    "metric": "smsp__inst_executed_pipe_fma.sum",
+                    "label": "FP32 FMA instruction count",
+                    "why": "high FMA vs HMMA ratio confirms the kernel is taking the FP32 path",
+                },
+            ],
+        },
     },
     {
         "label": "memory_bandwidth_saturation",
@@ -150,6 +239,20 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": ("dram_throughput_pct",),
         "profiler_check": None,
         "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "dram__throughput.avg.pct_of_peak_sustained_elapsed",
+                    "label": "DRAM throughput %",
+                    "why": "> 80% confirms memory bandwidth is saturated",
+                },
+                {
+                    "metric": "lts__t_bytes.sum.pct_of_peak_sustained_elapsed",
+                    "label": "L2 cache throughput %",
+                    "why": "high L2 % alongside high DRAM % confirms cache hierarchy pressure",
+                },
+            ],
+        },
     },
     {
         "label": "warp_divergence_risk",
@@ -167,6 +270,20 @@ _CATALOG: list[dict[str, Any]] = [
         "ncu_metric_keys": (),
         "profiler_check": None,
         "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "smsp__thread_inst_executed_per_inst_executed.ratio",
+                    "label": "Thread execution efficiency",
+                    "why": "< 1.0 confirms threads in the same warp took different paths",
+                },
+                {
+                    "metric": "smsp__inst_executed_op_branch.sum",
+                    "label": "Branch instruction count",
+                    "why": "high count relative to total instructions confirms branch-heavy code",
+                },
+            ],
+        },
     },
 ]
 
@@ -289,15 +406,17 @@ def reconcile_evidence(
             if layer_sigs[layer] is not None and entry.get(check_key) is not None
         )
 
+        confidence = _compute_confidence(len(confirming), n_available)
         diagnoses.append({
             "label": entry["label"],
             "display_name": entry["display_name"],
-            "confidence": _compute_confidence(len(confirming), n_available),
+            "confidence": confidence,
             "severity": entry["severity"],
             "layers_confirming": confirming,
             "evidence": evidence,
             "fix_summary": entry["fix_summary"],
             "recommendation_ids": entry["recommendation_ids"],
+            "missing_evidence": _missing_evidence_for(entry, confirming, layers_available),
         })
 
         if "source" in confirming:
@@ -334,3 +453,15 @@ def reconcile_evidence(
         "diagnoses": diagnoses,
         "unreconciled": unreconciled,
     }
+
+
+def what_evidence_is_missing(
+    *,
+    static: dict | None = None,
+    ptx: dict | None = None,
+    ncu: dict | None = None,
+    profiler: dict | None = None,
+) -> list[dict[str, Any]]:
+    """Reconcile all layers and return only diagnoses that have actionable missing evidence."""
+    result = reconcile_evidence(static=static, ptx=ptx, ncu=ncu, profiler=profiler)
+    return [d for d in result["diagnoses"] if d.get("missing_evidence")]

@@ -393,6 +393,94 @@ void launch(float* A) { kernel<<<1, 16>>>(A); }
     assert poor and poor[0]["severity"] == "high"
 
 
+# ── Strided alias detection ────────────────────────────────────────────────────
+
+def test_uncoalesced_detected_via_alias_variable() -> None:
+    # int idx = tid * stride; src[idx]  — stride keyword inside assignment, idx in subscript
+    src = """
+__global__ void strided_via_alias(const float* src, float* dst, int stride, int n) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = tid * stride;
+    if (idx < n)
+        dst[tid] = src[idx];
+}
+"""
+    assert "uncoalesced_access" in _codes(src), (
+        "Alias idx=tid*stride should trigger uncoalesced_access"
+    )
+
+
+def test_uncoalesced_detected_via_offset_alias() -> None:
+    # size_t offset = row * pitch + col  — pitch keyword, subscript uses offset
+    src = """
+__global__ void pitched_read(const float* A, float* B, int pitch, int n) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t offset = row * pitch + col;
+    B[row * n + col] = A[offset];
+}
+"""
+    assert "uncoalesced_access" in _codes(src), (
+        "Alias offset=row*pitch+col should trigger uncoalesced_access"
+    )
+
+
+def test_uncoalesced_not_fired_for_unrelated_alias() -> None:
+    # Variable named 'idx' but assigned from non-strided expression
+    src = """
+__global__ void coalesced_alias(const float* src, float* dst, int n) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = tid;           // no stride keyword in RHS
+    if (idx < n)
+        dst[idx] = src[idx];
+}
+"""
+    assert "uncoalesced_access" not in _codes(src), (
+        "idx=tid (no stride) should not trigger uncoalesced_access"
+    )
+
+
+# ── sync_in_loop accurate detection ───────────────────────────────────────────
+
+def test_sync_in_loop_false_positive_prevented() -> None:
+    # 3 syncs in setup (before any loop) + loop with no syncs inside — should NOT fire
+    src = """
+__global__ void three_setup_syncs(float* A, int N) {
+    __shared__ float s[64];
+    s[threadIdx.x] = 0.0f;
+    __syncthreads();
+    s[threadIdx.x] = A[threadIdx.x];
+    __syncthreads();
+    __syncthreads();    // extra "safety" init sync
+
+    for (int i = 0; i < N; i++) {
+        A[i] += s[threadIdx.x];   // no sync inside
+    }
+}
+"""
+    assert "sync_inside_tight_loop" not in _codes(src), (
+        "3 setup syncs + loop-without-sync should not fire sync_inside_tight_loop"
+    )
+
+
+def test_sync_in_loop_fires_for_three_in_loop_body() -> None:
+    # 3 __syncthreads() inside the for loop body — the paranoid pattern
+    src = """
+__global__ void oversync(float* s, int N) {
+    for (int stride = N / 2; stride > 0; stride >>= 1) {
+        __syncthreads();
+        float v = s[threadIdx.x + stride];
+        __syncthreads();
+        if (threadIdx.x < stride) s[threadIdx.x] += v;
+        __syncthreads();
+    }
+}
+"""
+    assert "sync_inside_tight_loop" in _codes(src), (
+        "3 syncs inside for loop body should fire sync_inside_tight_loop"
+    )
+
+
 def test_poor_block_size_not_fired_for_256_threads() -> None:
     src = """
 __global__ void kernel(float* A) { A[threadIdx.x] = 1.0f; }

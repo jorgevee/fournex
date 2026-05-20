@@ -5,8 +5,7 @@ severity: medium
 confidence: medium
 message: "Kernel contains {sync_count} __syncthreads() barriers with loop patterns; excessive synchronization serializes all warps on every loop iteration."
 conditions:
-  sync_count_gte: 3
-  has_loop: true
+  sync_in_loop_count_gte: 3
 recommendations:
   - rec_ncu_reduce_syncthreads
 ncu_signals:
