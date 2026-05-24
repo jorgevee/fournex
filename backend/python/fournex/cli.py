@@ -60,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
         return tune(args)
     elif args.command == "compare":
         return compare(args)
+    elif args.command == "explain":
+        return explain_cmd(args)
+    elif args.command == "bench":
+        return bench_cmd(args)
     else:
         parser.print_help()
         return 1
@@ -227,7 +231,21 @@ def tune(args: argparse.Namespace) -> int:
 
 
 def compare(args: argparse.Namespace) -> int:
-    """Compare two CUDA source files across available evidence layers."""
+    """Compare two CUDA source files or evidence files across available layers."""
+    # Evidence-comparison mode: --before/--after or layer-specific flags
+    if _has_comparison_args(args):
+        return _analyze_comparison(args)
+
+    # Source-comparison mode: two positional .cu files
+    if not args.file_a or not args.file_b:
+        print(
+            "frx compare: provide two source files  OR  use --before/--after for evidence comparison.\n"
+            "  frx compare baseline.cu optimized.cu\n"
+            "  frx compare --before before.csv --after after.csv",
+            file=sys.stderr,
+        )
+        return 1
+
     from .comparison import compare_implementations
     from .cuda_static import inspect_cuda_source
     from .reconciliation import reconcile_evidence
@@ -662,6 +680,208 @@ def _print_compare_upgrade_hints(result: dict[str, Any]) -> None:
         print("Run with " + ", ".join(hints) + ".")
 
 
+def explain_cmd(args: argparse.Namespace) -> int:
+    from pathlib import Path
+    from .explain import build_explain_result, render_summary_txt, render_llm_prompt_txt, render_evidence_json
+    from .ncu_analysis import analyze_ncu_csv_text
+    from .cuda_static import inspect_cuda_source
+
+    ncu_path = Path(args.ncu_path) if args.ncu_path else None
+    if ncu_path is None or not ncu_path.exists():
+        print(f"error: NCU CSV file not found: {args.ncu_path}", file=sys.stderr)
+        return 1
+
+    csv_text = ncu_path.read_text(encoding="utf-8", errors="replace")
+    env = _detect_environment()
+    if args.gpu_model:
+        env["gpu_model"] = args.gpu_model
+
+    ncu_result = analyze_ncu_csv_text(csv_text, environment=env)
+
+    static_result = None
+    kernel_source: str | None = None
+    src_path = Path(args.src_path) if args.src_path else None
+    if src_path is not None:
+        if not src_path.exists():
+            print(f"warning: source file not found: {src_path}", file=sys.stderr)
+        else:
+            kernel_source = src_path.read_text(encoding="utf-8", errors="replace")
+            static_result = inspect_cuda_source(kernel_source, filename=src_path.name)
+
+    result = build_explain_result(
+        ncu_result=ncu_result,
+        static_result=static_result,
+        environment=env,
+    )
+
+    if args.prompt_only:
+        print(render_llm_prompt_txt(
+            result,
+            kernel_source=kernel_source,
+            src_filename=src_path.name if src_path else None,
+        ))
+        return 0
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path  = out_dir / "frx_summary.txt"
+    prompt_path   = out_dir / "frx_llm_prompt.txt"
+    evidence_path = out_dir / "frx_evidence.json"
+
+    summary_path.write_text(
+        render_summary_txt(
+            result,
+            ncu_filename=ncu_path.name,
+            src_filename=src_path.name if src_path else None,
+        ),
+        encoding="utf-8",
+    )
+    prompt_path.write_text(
+        render_llm_prompt_txt(
+            result,
+            kernel_source=kernel_source,
+            src_filename=src_path.name if src_path else None,
+        ),
+        encoding="utf-8",
+    )
+    evidence_path.write_text(render_evidence_json(result), encoding="utf-8")
+
+    primary = result.get("primary_diagnosis") or "(none)"
+    diagnoses = result.get("diagnoses", [])
+    conf = next(
+        (d["confidence"] for d in diagnoses if d["label"] == primary),
+        "",
+    )
+
+    print()
+    print("  frx explain complete")
+    print()
+    print(f"  frx_summary.txt     ->  {summary_path}")
+    print(f"  frx_llm_prompt.txt  ->  {prompt_path}")
+    print(f"  frx_evidence.json   ->  {evidence_path}")
+    print()
+    if conf:
+        print(f"  Primary issue  : {primary.replace('_', ' ')}  ({conf})")
+    else:
+        print(f"  Primary issue  : {primary.replace('_', ' ')}")
+    print("  Paste frx_llm_prompt.txt into your preferred LLM for optimization suggestions.")
+    print()
+    return 0
+
+
+def bench_cmd(args: argparse.Namespace) -> int:
+    from pathlib import Path
+    from .bench import bench_compare
+
+    before_src = Path(args.before)
+    after_src  = Path(args.after)
+    for p in (before_src, after_src):
+        if not p.exists():
+            print(f"error: file not found: {p}", file=sys.stderr)
+            return 1
+
+    if args.with_ncu and not args.arch:
+        print(
+            "warning: --with-ncu without --arch may profile JIT-compiled code "
+            "(NCU cannot capture JIT kernels; pass --arch sm_120 or similar)",
+            file=sys.stderr,
+        )
+
+    out_dir = Path(args.out) if args.out else None
+
+    try:
+        result = bench_compare(
+            before_src,
+            after_src,
+            warmup=args.warmup,
+            runs=args.runs,
+            with_ncu=args.with_ncu,
+            arch=args.arch,
+            build_flags=args.build_flags,
+            out_dir=out_dir,
+            preset="full",
+        )
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        print(json.dumps(result, indent=2))
+        return 0 if not result["compile_errors"] else 1
+
+    _print_bench_report(result)
+    return 0 if not result["compile_errors"] else 1
+
+
+def _print_bench_report(result: dict[str, Any]) -> None:
+    before_name = Path(result["before"]["src"]).name
+    after_name  = Path(result["after"]["src"]).name
+    header = f"BENCH: {before_name} -> {after_name}"
+    sep    = "=" * len(header)
+    print()
+    print(header)
+    print(sep)
+
+    if result["compile_errors"]:
+        for err in result["compile_errors"]:
+            print(f"\nCompile error ({err['side']}): {err['src']}")
+            print(err["error"].strip())
+        return
+
+    arch_str = f" ({result['arch']})" if result.get("arch") else ""
+    print(f"\nCompile:   OK{arch_str}")
+
+    bt = result["before"]["timing"]
+    at = result["after"]["timing"]
+    runs   = bt["runs"]
+    warmup = bt["warmup"]
+    print(f"\nTiming ({runs} runs, {warmup} warmup, wall-clock):")
+    print(f"  Before:  {bt['median_ms']:.1f} ms  [min {bt['min_ms']:.1f}  max {bt['max_ms']:.1f}  sd {bt['stdev_ms']:.1f}]")
+    print(f"  After:   {at['median_ms']:.1f} ms  [min {at['min_ms']:.1f}  max {at['max_ms']:.1f}  sd {at['stdev_ms']:.1f}]")
+
+    sx = result.get("speedup_x")
+    if sx is not None:
+        print(f"  Speedup: {sx:.2f}x")
+
+    ncu_diff = result.get("ncu_diff")
+    if ncu_diff:
+        bd = ncu_diff["bottleneck_diff"]
+        baseline_bottlenecks  = ncu_diff["baseline"].get("bottlenecks", [])
+        optimized_bottlenecks = ncu_diff["optimized"].get("bottlenecks", [])
+        print("\nBottleneck changes (NCU):")
+
+        for label in bd.get("resolved", []):
+            old_score = next((b["score"] for b in baseline_bottlenecks if b["label"] == label), None)
+            score_str = f"  (was {old_score:.2f})" if old_score is not None else ""
+            print(f"  RESOLVED:  {label}{score_str}")
+
+        new_labels = bd.get("new", [])
+        for label in new_labels:
+            new_score = next((b["score"] for b in optimized_bottlenecks if b["label"] == label), None)
+            score_str = f"  (score {new_score:.2f})" if new_score is not None else ""
+            print(f"! NEW BOTTLENECK:  {label}{score_str}")
+
+        for label in bd.get("persistent", []):
+            bs = next((b["score"] for b in baseline_bottlenecks  if b["label"] == label), None)
+            as_ = next((b["score"] for b in optimized_bottlenecks if b["label"] == label), None)
+            if bs is not None and as_ is not None:
+                print(f"  UNCHANGED: {label}  ({bs:.2f} -> {as_:.2f})")
+
+        if new_labels:
+            print()
+        else:
+            print("\nNo new bottlenecks introduced.")
+
+        verdict  = ncu_diff.get("verdict", {})
+        outcome  = verdict.get("outcome", "")
+        n_res    = verdict.get("bottlenecks_resolved", 0)
+        n_new    = verdict.get("bottlenecks_new", 0)
+        print(f"\nVerdict: {outcome}  ({n_res} resolved, {n_new} new)")
+
+    print()
+
+
 def _build_parser() -> argparse.ArgumentParser:
     import sys
     _stem = Path(sys.argv[0]).stem.lower().replace(".exe", "")
@@ -816,10 +1036,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     compare_parser = subparsers.add_parser(
         "compare",
-        help="compare two CUDA source files and report what improved, regressed, and is still unknown",
+        help="compare CUDA source files or evidence files and report what improved, regressed, and is still unknown",
     )
-    compare_parser.add_argument("file_a", help="baseline CUDA source file (.cu)")
-    compare_parser.add_argument("file_b", help="optimized CUDA source file (.cu)")
+    # Source-comparison mode: two positional .cu files (optional so --before/--after can be used alone)
+    compare_parser.add_argument("file_a", nargs="?", default=None, help="baseline CUDA source file (.cu)")
+    compare_parser.add_argument("file_b", nargs="?", default=None, help="optimized CUDA source file (.cu)")
     compare_parser.add_argument(
         "--with-ptx",
         action="store_true",
@@ -852,6 +1073,73 @@ def _build_parser() -> argparse.ArgumentParser:
         help="extra nvcc flags for --with-ncu compilation (e.g. \"-DBUILD_EXECUTABLE\")",
     )
     compare_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
+
+    # Evidence-comparison mode: --before/--after (type auto-detected from extension)
+    compare_parser.add_argument("--before", default=None, metavar="FILE",
+        help="baseline evidence file for before/after comparison (.cu, .ptx, or .csv — type auto-detected)")
+    compare_parser.add_argument("--after", default=None, metavar="FILE",
+        help="optimized evidence file for before/after comparison (.cu, .ptx, or .csv)")
+    compare_parser.add_argument("--before-label", default=None, help="display label for the baseline side")
+    compare_parser.add_argument("--after-label", default=None, help="display label for the optimized side")
+    compare_parser.add_argument("--before-source", default=None, metavar="CU", help="baseline CUDA source file")
+    compare_parser.add_argument("--after-source", default=None, metavar="CU", help="optimized CUDA source file")
+    compare_parser.add_argument("--before-ptx", default=None, metavar="PTX", help="baseline PTX file")
+    compare_parser.add_argument("--after-ptx", default=None, metavar="PTX", help="optimized PTX file")
+    compare_parser.add_argument("--before-ncu", default=None, metavar="CSV", help="baseline Nsight Compute CSV")
+    compare_parser.add_argument("--after-ncu", default=None, metavar="CSV", help="optimized Nsight Compute CSV")
+    # Hidden aliases for _analyze_comparison() compatibility
+    compare_parser.add_argument("--baseline", default=None, help=argparse.SUPPRESS)
+    compare_parser.add_argument("--optimized", default=None, help=argparse.SUPPRESS)
+
+    explain_parser = subparsers.add_parser(
+        "explain",
+        help="generate LLM-ready optimization brief from profiler output",
+    )
+    explain_parser.add_argument(
+        "ncu_path",
+        metavar="NCU_CSV",
+        nargs="?",
+        default=None,
+        help="Nsight Compute CSV file to analyze",
+    )
+    explain_parser.add_argument(
+        "--src",
+        metavar="CU",
+        dest="src_path",
+        default=None,
+        help="CUDA source file for static analysis layer",
+    )
+    explain_parser.add_argument(
+        "--out",
+        metavar="DIR",
+        default=".",
+        help="output directory for generated files (default: current directory)",
+    )
+    explain_parser.add_argument(
+        "--gpu-model",
+        default=None,
+        metavar="MODEL",
+        help="GPU model for arch-aware scoring (e.g. h100, a100)",
+    )
+    explain_parser.add_argument(
+        "--prompt-only",
+        action="store_true",
+        help="print frx_llm_prompt.txt to stdout only (for piping/clipboard)",
+    )
+
+    bench_parser = subparsers.add_parser(
+        "bench",
+        help="compile and benchmark two .cu kernels side-by-side",
+    )
+    bench_parser.add_argument("before", help="baseline .cu source file")
+    bench_parser.add_argument("after", help="optimized .cu source file")
+    bench_parser.add_argument("--warmup", type=int, default=2, help="warmup runs to discard (default: 2)")
+    bench_parser.add_argument("--runs", type=int, default=5, help="timed runs (default: 5)")
+    bench_parser.add_argument("--with-ncu", action="store_true", help="also profile with NCU and report bottleneck changes")
+    bench_parser.add_argument("--arch", default=None, metavar="SM", help="nvcc -arch flag, e.g. sm_120 (required for --with-ncu)")
+    bench_parser.add_argument("--build-flags", default="-DBUILD_EXECUTABLE", metavar="FLAGS", help="extra nvcc flags (default: -DBUILD_EXECUTABLE)")
+    bench_parser.add_argument("--out", default=None, metavar="DIR", help="directory for compiled exes and NCU CSVs")
+    bench_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
 
     return parser
 
@@ -2537,7 +2825,7 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
 
     isu = summary.get("avg_issue_slot_utilization_pct")
     st = _ncu_metric_status(isu, warn=55.0, crit=40.0, low_is_bad=True)
-    print(f"  {st}  {'Issue Slot Utilization':<32} {_fmt_optional_pct(isu):<12} low < 40% -> low ILP / underutilized SMs")
+    print(f"  {st}  {'Issue Slot Utilization':<32} {_fmt_optional_pct(isu):<12} low < 60% -> low ILP / underutilized SMs")
 
     occ = summary.get("avg_occupancy_pct")
     st = _ncu_metric_status(occ, warn=50.0, crit=30.0, low_is_bad=True)
@@ -2558,8 +2846,8 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
     dom_str = f"{dom_stall} ({dom_pct:.1f}%)" if dom_stall != "unknown" else "unknown"
     print(f"  {st}  {'Dominant Warp Stall':<32} {dom_str}")
 
-    causes = summary.get("occupancy_limit_causes") or []
-    if causes:
+    causes = [c for c in (summary.get("occupancy_limit_causes") or []) if c != "unknown_threads_per_block"]
+    if causes and occ is not None and occ < 50.0:
         print(f"\n  Occupancy limited by: {', '.join(causes)}")
 
     missing_count = sum(1 for v in [dram, tc, l1, l2, load_sectors, isu, occ, eligible, sched_active] if v is None)
@@ -2641,11 +2929,32 @@ def _print_ncu_report_full(result: dict[str, Any], source: str = "", args: Any =
                         print(f"         {continuation}")
 
     # ── DATA NOTES (deferred warnings) ────────────────────────────────────────
+    # Only show preset-completeness warnings when the corresponding bottleneck
+    # family was actually detected. Suppressing irrelevant missing-metric warnings
+    # keeps the output focused — a kernel diagnosed as sync-bound doesn't need
+    # a warning about missing tensor core metrics.
     csv_warnings = csv_validation.get("warnings", [])
     if csv_warnings:
-        print(f"\nDATA NOTES")
-        for w in csv_warnings:
-            print(f"  [warn] {w}")
+        _MEMORY_BN = {"memory_bandwidth_bound", "warp_stall_memory", "l1_cache_thrashing", "l2_cache_thrashing", "uncoalesced_access"}
+        _STALL_BN  = {"warp_stall_memory", "warp_stall_sync"}
+        _TC_BN     = {"tensor_core_underutilized"}
+        _OCC_BN    = {"occupancy_limited", "occupancy_limited_by_registers", "occupancy_limited_by_shared_memory", "occupancy_limited_by_block_size", "low_warp_scheduler_utilization"}
+        _bn_labels = {b["label"] for b in bottlenecks}
+        _WARNING_GATES = {
+            "Memory diagnosis":     bool(_MEMORY_BN & _bn_labels),
+            "Warp stall diagnosis": bool(_STALL_BN  & _bn_labels),
+            "Tensor core diagnosis":bool(_TC_BN     & _bn_labels),
+            "Occupancy diagnosis":  bool(_OCC_BN    & _bn_labels),
+        }
+        relevant = [
+            w for w in csv_warnings
+            if not any(w.startswith(prefix) for prefix in _WARNING_GATES)
+            or any(w.startswith(prefix) and active for prefix, active in _WARNING_GATES.items())
+        ]
+        if relevant:
+            print(f"\nDATA NOTES")
+            for w in relevant:
+                print(f"  [warn] {w}")
 
     # ── NEXT STEPS ─────────────────────────────────────────────────────────────
     print(f"\n{thin}")
@@ -2709,6 +3018,65 @@ def _analyze_ncu_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_validation_delta_table(
+    deltas: dict[str, Any],
+    verdict: dict[str, Any],
+    label_before: str,
+    label_after: str,
+) -> None:
+    if not deltas:
+        return
+
+    _OUTCOME_RESULT = {
+        "improved":  "optimization validated",
+        "regressed": "regression detected",
+        "mixed":     "mixed results",
+        "neutral":   "no significant change",
+    }
+    _DIR_TAG = {"improved": "[+]", "regressed": "[-]", "neutral": "[=]"}
+
+    col_metric  = 30
+    col_val     = 10
+
+    before_hdr = label_before[:col_val].rjust(col_val)
+    after_hdr  = label_after[:col_val].rjust(col_val)
+    print(f"\nBEFORE / AFTER VALIDATION")
+    print(f"\n  {'Metric':<{col_metric}}  {before_hdr}  {after_hdr}  Change")
+    print(f"  {'-' * (col_metric + col_val * 2 + 24)}")
+
+    for info in deltas.values():
+        lbl  = info["label"]
+        unit = info["unit"]
+        a    = info["baseline"]
+        b    = info["optimized"]
+        d    = info["delta"]
+        direction = info["direction"] or "n/a"
+        tag  = _DIR_TAG.get(direction, "   ")
+
+        def _fmt(v: Any) -> str:
+            if v is None:
+                return "n/a"
+            return f"{float(v):.1f}{unit}"
+
+        a_str = _fmt(a).rjust(col_val)
+        b_str = _fmt(b).rjust(col_val)
+
+        if d is not None and abs(d) >= 0.001:
+            delta_str = f"{d:+.1f}{unit}"
+            change = f"{tag} {direction}  ({delta_str})"
+        else:
+            change = f"{tag} {direction}"
+
+        print(f"  {lbl:<{col_metric}}  {a_str}  {b_str}  {change}")
+
+    outcome      = verdict.get("outcome", "neutral")
+    resolved     = verdict.get("bottlenecks_resolved", 0)
+    new_count    = verdict.get("bottlenecks_new", 0)
+    result_label = _OUTCOME_RESULT.get(outcome, outcome)
+    detail       = f"({resolved} bottleneck{'s' if resolved != 1 else ''} resolved, {new_count} new)"
+    print(f"\n  Result: {result_label}  {detail}")
+
+
 def _print_ncu_comparison_report(result: dict[str, Any]) -> None:
     sep = "-" * 60
     label_b = result["label_baseline"]
@@ -2754,30 +3122,15 @@ def _print_ncu_comparison_report(result: dict[str, Any]) -> None:
             tag = "  (score improved)" if label in improved_set else ""
             print(f"  [~]  {label:<42}  score {d:+.2f}{tag}")
 
-    if deltas:
-        print(f"\nMETRIC DELTAS")
-        for key, info in deltas.items():
-            a = info["baseline"]
-            b = info["optimized"]
-            d = info["delta"]
-            direction = info["direction"] or "n/a"
-            tag = {"improved": "[+]", "regressed": "[-]", "neutral": "[=]"}.get(direction, "[ ]")
-            d_str = f"{d:+.4f}" if d is not None else "  N/A "
-            print(f"  {tag}  {key:<44}  {a!r:>8} -> {b!r:<8}  ({d_str})")
-
-    b_primary = result["baseline"]["primary_bottleneck"]
-    o_primary = result["optimized"]["primary_bottleneck"]
-    print(f"\nPRIMARY BOTTLENECK")
-    print(f"  Before : {b_primary or 'none'}")
-    print(f"  After  : {o_primary or 'none'}")
+    _print_validation_delta_table(deltas, verdict, label_b, label_o)
 
     baseline_validation = result.get("baseline", {}).get("validation", {})
     optimized_validation = result.get("optimized", {}).get("validation", {})
     if baseline_validation.get("errors") or optimized_validation.get("errors"):
         print(f"\nCSV VALIDATION")
-        for label, validation in ((label_b, baseline_validation), (label_o, optimized_validation)):
+        for lbl, validation in ((label_b, baseline_validation), (label_o, optimized_validation)):
             for error in validation.get("errors", []):
-                print(f"  [ERROR] {label}: {error}")
+                print(f"  [ERROR] {lbl}: {error}")
     print()
 
 

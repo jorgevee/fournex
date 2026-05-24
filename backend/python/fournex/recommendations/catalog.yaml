@@ -631,6 +631,8 @@
   applies_to: [warp_stall_sync]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 10
+  estimated_speedup_pct_max: 25
   effort: high
   safety: low
   action_templates:

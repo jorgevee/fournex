@@ -119,6 +119,17 @@ from .cuda_static import (
     parse_cuda_kernels,
     parse_cuda_launches,
 )
+from .explain import (
+    build_explain_result,
+    render_summary_txt,
+    render_llm_prompt_txt,
+    render_evidence_json,
+)
+from .bench import (
+    bench_compare,
+    compile_kernel,
+    time_binary,
+)
 from .nvml_ir import NvmlSampleRecord, map_nvml_sample_to_ir
 from .distributed_ir import DistributedCommRecord, map_distributed_record_to_ir
 from .data_pipeline_ir import DataPipelineRecord, map_data_pipeline_record_to_ir
@@ -132,6 +143,13 @@ from .shapes import (
 )
 
 __all__ = [
+    "bench_compare",
+    "compile_kernel",
+    "time_binary",
+    "build_explain_result",
+    "render_summary_txt",
+    "render_llm_prompt_txt",
+    "render_evidence_json",
     "compare_implementations",
     "reconcile_evidence",
     "what_evidence_is_missing",

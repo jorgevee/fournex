@@ -1,0 +1,7 @@
+Kernel Name,Metric Name,Metric Unit,Metric Value
+ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,35.0
+ker,l1tex__t_sector_hit_rate.pct,%,72.0
+ker,lts__t_sector_hit_rate.pct,%,80.0
+ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,65.0
+ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_barrier,%,42.0
+ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_wait,%,18.0

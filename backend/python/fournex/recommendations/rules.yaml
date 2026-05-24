@@ -429,12 +429,11 @@
   suppressed_if: {}
   recommendations:
     - rec_ncu_reduce_syncthreads
-    - rec_ncu_shared_mem_layout
   priority_boost: 0.15
   explanation: >
     Warp stalls are dominated by barrier waits, indicating frequent or
-    unnecessary __syncthreads() calls. Reducing synchronization points
-    or restructuring shared memory access can improve throughput.
+    unnecessary __syncthreads() calls. Reducing synchronization frequency
+    (combining sync points, using warp-level primitives) improves throughput.
 
 # ── NCU: Low issue efficiency ─────────────────────────────────────────────────
 
@@ -478,7 +477,6 @@
   suppressed_if: {}
   recommendations:
     - rec_ncu_reduce_register_pressure
-    - rec_ncu_collect_metrics
   priority_boost: 0.15
   explanation: >
     Achieved or estimated occupancy is low and block residency is limited by

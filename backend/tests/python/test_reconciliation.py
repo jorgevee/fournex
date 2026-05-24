@@ -277,7 +277,7 @@ def test_register_pressure_ncu_occupancy_limited() -> None:
 
 
 def test_register_pressure_ptx_plus_ncu_confidence_high() -> None:
-    ncu = _ncu_result(["occupancy_limited_by_registers"], {"occ_causes": ["registers"]})
+    ncu = _ncu_result(["occupancy_limited_by_registers"], {"occ_causes": ["registers"], "occ": 25.0})
     result = reconcile_evidence(ptx=_ptx_result(_PTX_SPILL), ncu=ncu)
     d = next(d for d in result["diagnoses"] if d["label"] == "register_pressure")
     assert d["confidence"] == "high"

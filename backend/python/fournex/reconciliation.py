@@ -162,7 +162,7 @@ _CATALOG: list[dict[str, Any]] = [
         "source_style_claims": frozenset(),
         "ptx_check": lambda s: bool(s.get("ptx_has_register_spills") or s.get("ptx_high_register_count")),
         "ptx_claims": frozenset({"ptx_register_spills", "ptx_register_pressure"}),
-        "ncu_check": lambda s: bool(s.get("occupancy_limited_by_registers")),
+        "ncu_check": lambda s: bool(s.get("occupancy_limited_by_registers") and not s.get("occupancy_good")),
         "ncu_claims": frozenset({"occupancy_limited_by_registers"}),
         "ncu_metric_keys": ("avg_occupancy_pct",),
         "profiler_check": None,
@@ -185,7 +185,7 @@ _CATALOG: list[dict[str, Any]] = [
     {
         "label": "tensor_core_underutilization",
         "display_name": "Tensor core underutilization",
-        "severity": "medium",
+        "severity": "high",
         "fix_summary": "Use FP16/BF16 inputs; verify batch dims are multiples of 16",
         "recommendation_ids": [],
         "source_check": None,

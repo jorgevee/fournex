@@ -88,7 +88,8 @@ def extract_ncu_signals(
 ) -> dict[str, Any]:
     env = environment or {}
     dram = ncu_summary.get("avg_dram_throughput_pct") or 0.0
-    tc = ncu_summary.get("avg_tensor_core_utilization_pct") or 0.0
+    tc_raw = ncu_summary.get("avg_tensor_core_utilization_pct")
+    tc = tc_raw if tc_raw is not None else 0.0
     l1 = ncu_summary.get("avg_l1_cache_hit_rate_pct")
     l2 = ncu_summary.get("avg_l2_cache_hit_rate_pct")
     load_sectors = ncu_summary.get("avg_global_load_sectors_per_request")
@@ -115,8 +116,8 @@ def extract_ncu_signals(
         "dram_throughput_pct": dram,
 
         # ── Tensor core utilization ───────────────────────────────────────────
-        "tensor_core_underutilized": tc < 30.0,
-        "tensor_core_inactive": tc < 10.0,
+        "tensor_core_underutilized": tc_raw is not None and tc < 30.0,
+        "tensor_core_inactive": tc_raw is not None and tc < 10.0,
         "tensor_core_utilization_pct": tc,
 
         # ── Cache hit rates ───────────────────────────────────────────────────

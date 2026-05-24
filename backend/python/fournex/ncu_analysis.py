@@ -207,12 +207,17 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
         })
 
     if dominant_stall in _SYNC_STALL_TYPES and dominant_stall_pct > 20.0:
+        stall_breakdown = ncu_summary.get("warp_stall_breakdown", {})
+        total_sync_stall_pct = sum(
+            v for k, v in stall_breakdown.items() if k in _SYNC_STALL_TYPES
+        )
         bottlenecks.append({
             "label": "warp_stall_sync",
-            "score": round(min(dominant_stall_pct / 100.0, 1.0), 4),
+            "score": round(min(max(total_sync_stall_pct, dominant_stall_pct) / 100.0, 1.0), 4),
             "evidence": {
                 "dominant_warp_stall": dominant_stall,
                 "dominant_warp_stall_pct": dominant_stall_pct,
+                "total_sync_stall_pct": total_sync_stall_pct,
             },
             "worst_steps": [],
         })
@@ -409,7 +414,7 @@ def validate_ncu_csv_text(
         errors.append("CSV is empty after removing comments and Nsight Compute status lines.")
         return _validation_payload(False, [], _missing_ncu_metrics_by_preset(set()), warnings, errors, preset)
 
-    header = [column.strip() for column in clean_lines[0].split(",")]
+    header = [column.strip().strip('"') for column in clean_lines[0].split(",")]
     lowered_header = {column.lower() for column in header}
     if not any(column in lowered_header for column in ("kernel name", "kernel", "kernel name demangled", "name")):
         errors.append("CSV is missing a kernel name column.")

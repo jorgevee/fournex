@@ -226,3 +226,51 @@ def test_embedded_analyses_have_recommendations() -> None:
     result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
     assert isinstance(result["baseline"]["recommendations"], list)
     assert isinstance(result["optimized"]["recommendations"], list)
+
+
+# ── Metric delta label and unit fields ────────────────────────────────────────
+
+def test_metric_deltas_have_label_field() -> None:
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    deltas = result["metric_deltas"]
+    for key, delta in deltas.items():
+        assert "label" in delta, f"metric_deltas[{key!r}] missing 'label'"
+        assert isinstance(delta["label"], str) and delta["label"], (
+            f"metric_deltas[{key!r}]['label'] must be a non-empty string"
+        )
+
+
+def test_metric_deltas_have_unit_field() -> None:
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    deltas = result["metric_deltas"]
+    for key, delta in deltas.items():
+        assert "unit" in delta, f"metric_deltas[{key!r}] missing 'unit'"
+        assert isinstance(delta["unit"], str), (
+            f"metric_deltas[{key!r}]['unit'] must be a string"
+        )
+
+
+def test_metric_deltas_dram_has_pct_unit() -> None:
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    d = result["metric_deltas"]["avg_dram_throughput_pct"]
+    assert d["unit"] == "%"
+    assert d["label"] == "DRAM Throughput"
+
+
+def test_metric_deltas_stall_fraction_has_empty_unit() -> None:
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    d = result["metric_deltas"]["memory_stall_fraction"]
+    assert d["unit"] == ""
+    assert d["label"] == "Memory Stall Fraction"
+
+
+def test_metric_deltas_load_sectors_per_request_present() -> None:
+    # avg_global_load_sectors_per_request was added alongside label/unit
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    # The metric may be absent if neither CSV has the raw sectors metric,
+    # but the key must be recognised and not raise
+    deltas = result["metric_deltas"]
+    if "avg_global_load_sectors_per_request" in deltas:
+        d = deltas["avg_global_load_sectors_per_request"]
+        assert d["unit"] == ""
+        assert d["label"] == "Load Sectors / Request"

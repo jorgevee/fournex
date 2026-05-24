@@ -1,0 +1,7 @@
+Kernel Name,Metric Name,Metric Unit,Metric Value
+ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,38.0
+ker,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,6.0
+ker,l1tex__t_sector_hit_rate.pct,%,68.0
+ker,lts__t_sector_hit_rate.pct,%,75.0
+ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,62.0
+ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,62.0

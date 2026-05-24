@@ -136,6 +136,8 @@ def generate_recommendations(
             "tier": tier,
             "confidence": round(b_score, 4),
             "expected_impact": entry.get("impact", "medium"),
+            "estimated_speedup_pct_min": entry.get("estimated_speedup_pct_min"),
+            "estimated_speedup_pct_max": entry.get("estimated_speedup_pct_max"),
             "effort": entry.get("effort", "medium"),
             "risk": _risk_level(entry),
             "category": entry.get("category", "general"),

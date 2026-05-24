@@ -1,0 +1,7 @@
+Kernel Name,Metric Name,Metric Unit,Metric Value
+ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,52.0
+ker,sm__warps_active.avg.pct_of_peak_sustained_active,%,22.0
+ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,38.0
+ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,12.0
+ker,launch__registers_per_thread,register/thread,96
+ker,launch__block_size,thread,256

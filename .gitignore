@@ -71,3 +71,6 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/
+
+**/*.txt
+**/frx_evidence.json

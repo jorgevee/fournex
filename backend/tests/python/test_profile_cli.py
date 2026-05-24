@@ -268,3 +268,84 @@ def test_profile_ncu_json_validation_steps_have_current_value_field(capsys) -> N
                 assert "current_value" in step
     finally:
         p.unlink(missing_ok=True)
+
+
+# ── compare --before/--after (evidence mode, validation delta table) ──────────
+
+_BEFORE_NCU_CSV = "\n".join([
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,88.0",
+    "ker,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,8.0",
+    "ker,l1tex__t_sector_hit_rate.pct,%,28.0",
+    "ker,lts__t_sector_hit_rate.pct,%,38.0",
+    "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,55.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,45.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard,%,22.0",
+])
+
+_AFTER_NCU_CSV = "\n".join([
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,42.0",
+    "ker,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,62.0",
+    "ker,l1tex__t_sector_hit_rate.pct,%,72.0",
+    "ker,lts__t_sector_hit_rate.pct,%,80.0",
+    "ker,sm__issue_active.avg.pct_of_peak_sustained_active,%,75.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_memory_throttle,%,8.0",
+    "ker,smsp__pcsamplingdata_pct_of_utilization_issue_stalled_long_scoreboard,%,4.0",
+])
+
+
+def test_compare_before_after_ncu_exits_zero(capsys) -> None:
+    pb = _write_temp(_BEFORE_NCU_CSV, ".csv")
+    pa = _write_temp(_AFTER_NCU_CSV, ".csv")
+    try:
+        rc = main(["compare", "--before", str(pb), "--after", str(pa)])
+        assert rc == 0
+    finally:
+        pb.unlink(missing_ok=True)
+        pa.unlink(missing_ok=True)
+
+
+def test_compare_before_after_ncu_shows_validation_header(capsys) -> None:
+    pb = _write_temp(_BEFORE_NCU_CSV, ".csv")
+    pa = _write_temp(_AFTER_NCU_CSV, ".csv")
+    try:
+        main(["compare", "--before", str(pb), "--after", str(pa)])
+        out = capsys.readouterr().out
+        assert "BEFORE / AFTER VALIDATION" in out
+    finally:
+        pb.unlink(missing_ok=True)
+        pa.unlink(missing_ok=True)
+
+
+def test_compare_before_after_ncu_shows_result_line(capsys) -> None:
+    pb = _write_temp(_BEFORE_NCU_CSV, ".csv")
+    pa = _write_temp(_AFTER_NCU_CSV, ".csv")
+    try:
+        main(["compare", "--before", str(pb), "--after", str(pa)])
+        out = capsys.readouterr().out
+        assert "Result:" in out
+    finally:
+        pb.unlink(missing_ok=True)
+        pa.unlink(missing_ok=True)
+
+
+def test_compare_before_after_ncu_shows_metric_labels(capsys) -> None:
+    pb = _write_temp(_BEFORE_NCU_CSV, ".csv")
+    pa = _write_temp(_AFTER_NCU_CSV, ".csv")
+    try:
+        main(["compare", "--before", str(pb), "--after", str(pa)])
+        out = capsys.readouterr().out
+        assert "DRAM Throughput" in out
+        assert "L1 Hit Rate" in out
+    finally:
+        pb.unlink(missing_ok=True)
+        pa.unlink(missing_ok=True)
+
+
+def test_compare_before_after_no_positionals_error(capsys) -> None:
+    """compare with no positionals and no --before/--after flags exits 1."""
+    rc = main(["compare"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "frx compare" in err

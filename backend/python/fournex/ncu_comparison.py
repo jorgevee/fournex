@@ -5,16 +5,17 @@ from typing import Any
 from .ncu_analysis import analyze_ncu_csv_text
 
 
-# (metric_key, higher_is_better)
-_METRIC_CONFIGS: list[tuple[str, bool]] = [
-    ("avg_dram_throughput_pct",         False),
-    ("avg_tensor_core_utilization_pct", True),
-    ("avg_l1_cache_hit_rate_pct",       True),
-    ("avg_l2_cache_hit_rate_pct",       True),
-    ("avg_issue_slot_utilization_pct",  True),
-    ("avg_occupancy_pct",               True),
-    ("memory_stall_fraction",           False),
-    ("compute_stall_fraction",          False),
+# (metric_key, higher_is_better, display_label, unit)
+# unit: "%" for percentages, "" for raw values
+_METRIC_CONFIGS: list[tuple[str, bool, str, str]] = [
+    ("avg_dram_throughput_pct",             False, "DRAM Throughput",           "%"),
+    ("avg_tensor_core_utilization_pct",     True,  "Tensor Core Utilization",   "%"),
+    ("avg_l1_cache_hit_rate_pct",           True,  "L1 Hit Rate",               "%"),
+    ("avg_l2_cache_hit_rate_pct",           True,  "L2 Hit Rate",               "%"),
+    ("avg_global_load_sectors_per_request", False, "Load Sectors / Request",    ""),
+    ("avg_issue_slot_utilization_pct",      True,  "Issue Slot Utilization",    "%"),
+    ("avg_occupancy_pct",                   True,  "Achieved Occupancy",        "%"),
+    ("memory_stall_fraction",               False, "Memory Stall Fraction",     ""),
 ]
 
 _SCORE_IMPROVEMENT_THRESHOLD = 0.02
@@ -97,7 +98,7 @@ def _diff_metrics(
     optimized_summary: dict[str, Any],
 ) -> dict[str, Any]:
     deltas: dict[str, Any] = {}
-    for key, higher_is_better in _METRIC_CONFIGS:
+    for key, higher_is_better, label, unit in _METRIC_CONFIGS:
         a = baseline_summary.get(key)
         b = optimized_summary.get(key)
         if a is None and b is None:
@@ -112,6 +113,8 @@ def _diff_metrics(
         else:
             direction = "improved" if delta < 0 else "regressed"
         deltas[key] = {
+            "label":     label,
+            "unit":      unit,
             "baseline":  a,
             "optimized": b,
             "delta":     delta,
