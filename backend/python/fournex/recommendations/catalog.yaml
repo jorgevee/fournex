@@ -452,6 +452,8 @@
   applies_to: [memory_bandwidth_bound, warp_stall_memory, uncoalesced_access]
   prerequisites: {}
   impact: high
+  estimated_speedup_pct_min: 20
+  estimated_speedup_pct_max: 60
   effort: medium
   safety: high
   action_templates:
@@ -483,6 +485,8 @@
   applies_to: [memory_bandwidth_bound, l1_cache_thrashing, l2_cache_thrashing, warp_stall_memory, uncoalesced_access]
   prerequisites: {}
   impact: high
+  estimated_speedup_pct_min: 20
+  estimated_speedup_pct_max: 50
   effort: high
   safety: medium
   action_templates:
@@ -514,6 +518,8 @@
   applies_to: [memory_bandwidth_bound, l1_cache_thrashing, l2_cache_thrashing]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 10
+  estimated_speedup_pct_max: 30
   effort: high
   safety: medium
   action_templates:
@@ -549,6 +555,8 @@
     framework: [pytorch]
     mixed_precision_enabled: false
   impact: high
+  estimated_speedup_pct_min: 30
+  estimated_speedup_pct_max: 100
   effort: low
   safety: medium
   action_templates:
@@ -577,6 +585,8 @@
   applies_to: [tensor_core_underutilized]
   prerequisites: {}
   impact: high
+  estimated_speedup_pct_min: 50
+  estimated_speedup_pct_max: 200
   effort: medium
   safety: high
   action_templates:
@@ -603,6 +613,8 @@
   applies_to: [tensor_core_underutilized]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 5
+  estimated_speedup_pct_max: 30
   effort: low
   safety: high
   action_templates:
@@ -664,6 +676,8 @@
   applies_to: [warp_stall_sync]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 10
+  estimated_speedup_pct_max: 30
   effort: medium
   safety: medium
   action_templates:
@@ -694,6 +708,8 @@
   applies_to: [low_issue_efficiency]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 5
+  estimated_speedup_pct_max: 20
   effort: low
   safety: medium
   action_templates:
@@ -725,6 +741,8 @@
   applies_to: [low_issue_efficiency]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 5
+  estimated_speedup_pct_max: 20
   effort: high
   safety: medium
   action_templates:
@@ -757,6 +775,8 @@
   applies_to: [occupancy_limited, occupancy_limited_by_registers]
   prerequisites: {}
   impact: high
+  estimated_speedup_pct_min: 5
+  estimated_speedup_pct_max: 25
   effort: medium
   safety: medium
   action_templates:
@@ -788,6 +808,8 @@
   applies_to: [occupancy_limited, occupancy_limited_by_shared_memory]
   prerequisites: {}
   impact: medium
+  estimated_speedup_pct_min: 5
+  estimated_speedup_pct_max: 20
   effort: medium
   safety: medium
   action_templates:
