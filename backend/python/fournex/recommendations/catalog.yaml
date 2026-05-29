@@ -854,6 +854,133 @@
     - "Full metric collection has high overhead — use --kernel-name to filter to hot kernels."
     - "Some metrics are mutually exclusive and require multiple passes."
 
+# ── NCU: Roofline / MFU ───────────────────────────────────────────────────────
+
+- id: rec_roofline_tiling
+  title: Tile global loads through shared memory to raise arithmetic intensity
+  category: ncu_memory
+  applies_to: [roofline_memory_bound, memory_bandwidth_bound]
+  prerequisites: {}
+  impact: high
+  estimated_speedup_pct_min: 20
+  estimated_speedup_pct_max: 60
+  effort: high
+  safety: medium
+  action_templates:
+    - "Identify which arrays are loaded multiple times per thread block and candidate them for tiling."
+    - "Load a tile of each input array into shared memory, synchronise, then compute from shared."
+    - "Choose tile dimensions so all threads participate in the global→shared load phase."
+    - "Pad shared-memory rows by 1-4 elements to avoid 32-way bank conflicts."
+    - "Measure arithmetic intensity before and after using NCU metric dram__bytes_read.sum / smsp__inst_executed_pipe_fma.sum."
+  validation_templates:
+    - "Arithmetic intensity (FLOPs/byte) should increase as data is reused from shared memory."
+    - "DRAM throughput % should decrease as fewer cache lines are fetched from global memory."
+    - "MFU (% of peak TFLOP/s) should increase as the kernel moves right on the roofline chart."
+  validation_steps:
+    - metric: dram__throughput.avg.pct_of_peak_sustained_elapsed
+      label: "DRAM throughput %"
+      direction: decrease
+      expected: "decreases as tiling absorbs repeated global accesses into shared memory"
+    - metric: l1tex__t_sector_hit_rate.pct
+      label: "L1 cache hit rate %"
+      direction: increase
+      expected: "increases as shared-memory loads replace global memory misses"
+      threshold_good: 60.0
+  caveats:
+    - "Tiling increases register and shared-memory pressure — watch for occupancy regression."
+    - "Incorrect tile boundary handling is a common correctness bug; test with small and odd-sized inputs."
+
+- id: rec_roofline_kernel_fusion
+  title: Fuse adjacent kernels to reduce total DRAM traffic and raise arithmetic intensity
+  category: ncu_memory
+  applies_to: [roofline_memory_bound, memory_bandwidth_bound]
+  prerequisites: {}
+  impact: high
+  estimated_speedup_pct_min: 15
+  estimated_speedup_pct_max: 50
+  effort: high
+  safety: medium
+  action_templates:
+    - "Identify pairs of element-wise or reduction kernels whose intermediate result is consumed immediately."
+    - "Merge the producer and consumer into a single kernel that keeps the intermediate in registers."
+    - "Use torch.compile() or CUDA graphs to enable automatic kernel fusion where possible."
+    - "For custom kernels, verify that the fused version does not exceed occupancy limits from added register use."
+  validation_templates:
+    - "DRAM bytes read/written should decrease after fusion (intermediate not serialised to global memory)."
+    - "Kernel count in the NCU report should decrease."
+    - "End-to-end step time should improve."
+  validation_steps:
+    - metric: dram__throughput.avg.pct_of_peak_sustained_elapsed
+      label: "DRAM throughput %"
+      direction: decrease
+      expected: "decreases as fused kernels eliminate intermediate global-memory round-trips"
+  caveats:
+    - "Fused kernels are harder to debug — add intermediate checks while validating correctness."
+    - "Fusion can increase register pressure and lower occupancy; measure both before and after."
+
+- id: rec_roofline_occupancy
+  title: Increase parallelism to approach the compute ceiling
+  category: ncu_compute
+  applies_to: [roofline_low_mfu, low_warp_scheduler_utilization]
+  prerequisites: {}
+  impact: medium
+  estimated_speedup_pct_min: 10
+  estimated_speedup_pct_max: 40
+  effort: medium
+  safety: high
+  action_templates:
+    - "Increase tile dimensions or block size to expose more independent work per SM."
+    - "Increase the problem batch dimension so more thread blocks are launched."
+    - "Verify that the grid size covers enough thread blocks to keep all SMs busy (grid >= 2x SM count)."
+    - "Use CUDA persistent-kernel patterns for workloads with many small launches."
+  validation_templates:
+    - "MFU (% of peak TFLOP/s) should increase as more SMs are kept busy."
+    - "Eligible warps per scheduler should increase above 1.0."
+    - "Issue slot utilization % should rise toward 70%+."
+  validation_steps:
+    - metric: sm__warps_active.avg.pct_of_peak_sustained_active
+      label: "Achieved occupancy %"
+      direction: increase
+      expected: "increases as larger tile/batch dimensions expose more parallelism per SM"
+      threshold_good: 50.0
+    - metric: smsp__issue_active.avg.pct_of_peak_sustained_active
+      label: "Issue slot utilization %"
+      direction: increase
+      expected: "rises toward 70%+ as schedulers have more eligible warps to issue"
+      threshold_good: 70.0
+  caveats:
+    - "Larger tiles consume more shared memory and registers — watch for occupancy cliff."
+    - "Persistent-kernel patterns require careful load-balancing to avoid uneven SM utilisation."
+
+- id: rec_roofline_batch_size
+  title: Increase batch size to improve GPU utilisation and MFU
+  category: ncu_compute
+  applies_to: [roofline_low_mfu]
+  prerequisites:
+    framework: [pytorch]
+  impact: medium
+  estimated_speedup_pct_min: 10
+  estimated_speedup_pct_max: 50
+  effort: low
+  safety: medium
+  action_templates:
+    - "Double the training batch size and measure step time and GPU active fraction."
+    - "If memory-limited, enable gradient checkpointing to trade compute for memory."
+    - "Use torch.backends.cuda.matmul.allow_tf32 = True to enable TF32 on eligible ops."
+    - "Profile at batch_size × 2, × 4, × 8 to identify the batch size where MFU plateaus."
+  validation_templates:
+    - "MFU (% of peak TFLOP/s) should increase as the batch saturates the GPU."
+    - "Step time should increase sub-linearly — throughput (samples/s) should improve."
+  validation_steps:
+    - metric: sm__warps_active.avg.pct_of_peak_sustained_active
+      label: "Achieved occupancy %"
+      direction: increase
+      expected: "increases as larger batches launch more thread blocks across all SMs"
+      threshold_good: 50.0
+  caveats:
+    - "Larger batches may require learning-rate scaling (linear scaling rule) to maintain accuracy."
+    - "Memory pressure grows linearly with batch — monitor for OOM errors."
+
 # PTX static analysis
 
 - id: rec_ptx_reduce_register_pressure

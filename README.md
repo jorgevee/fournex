@@ -259,6 +259,30 @@ frx analyze --before before.ptx --after after.ptx --json
 | `launch_bound` | Many small kernels / low utilization pattern |
 | `insufficient_telemetry` | Not enough trace data to make a reliable call |
 
+### Framework Abstraction Tax
+
+When profiler telemetry is available, `frx analyze` / `frx profile` also report a
+**Framework Abstraction Tax** — a single 0–100 score estimating how much of the
+observed GPU inefficiency is attributable to framework/runtime overhead (kernel-launch
+fragmentation, Python dispatch, missing graph capture / kernel fusion) rather than to
+hardware limits or the data pipeline:
+
+```
+FRAMEWORK ABSTRACTION TAX
+  Score              : 74/100 (high)
+  Contributors:
+   - Kernel launch fragmentation
+   - Missing graph capture (opportunity) (inferred)
+   - Unfused elementwise operations (opportunity) (inferred)
+```
+
+The score is the GPU-idle fraction *not* explained by input/copy/sync stalls, scaled by
+how fragmented the kernel launch stream is. Contributors marked `(inferred)` are
+opportunities reasoned from existing signals (e.g. stable shapes + a heavy launch stream
+suggest CUDA Graphs / `torch.compile` would help) — Fournex does not detect whether those
+are already enabled, and deliberately reports no speedup multiplier (the score is not
+calibrated against measured speedups).
+
 ### NCU kernel bottlenecks
 
 Reported by `frx profile` and `frx analyze ncu_report.csv`.
@@ -347,6 +371,7 @@ frx profile -- ./my_kernel_app                               # run NCU + report
 frx profile --preset memory -- python train.py               # memory-focused preset
 frx profile --ncu ncu_report.csv                             # analyze saved CSV
 frx profile --ptx kernel.ptx                                 # PTX static analysis
+frx profile --ncu report.csv --gpu-model h100                # use target GPU roofline specs
 frx profile --ncu report.csv --json                          # JSON output
 
 # LLM-ready optimization brief
@@ -533,6 +558,18 @@ Pass `--gpu-model` to apply thresholds tuned to the target architecture:
 ```bash
 frx analyze kernel.cu --gpu-model h100
 frx explain ncu_report.csv --gpu-model rtx5060
+frx profile --ncu ncu_report.csv --gpu-model h100 --arch-profile ./h100-sxm.yaml
+```
+
+`--arch-profile` accepts YAML overrides for representative hardware specs used
+by estimated roofline/MFU calculations:
+
+```yaml
+profiles:
+  h100:
+    peak_fp32_tflops: 60.0
+    peak_fp16_tflops: 900.0
+    peak_memory_bw_gbps: 3900.0
 ```
 
 | GPU | SM version | Notes |

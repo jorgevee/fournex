@@ -172,6 +172,7 @@ class KernelLaunchSummary:
     dominant_warp_stall: str | None = None
     dominant_warp_stall_pct: float | None = None
     warp_stall_breakdown: dict = field(default_factory=dict)
+    kernel_duration_us: float | None = None
     source: str = "kernel_inspector"
 
     def to_dict(self) -> dict[str, Any]:
@@ -562,6 +563,7 @@ def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:
     summary.achieved_occupancy_pct = m.get("achieved_occupancy_pct")
     summary.eligible_warps_per_scheduler = m.get("eligible_warps_per_scheduler")
     summary.scheduler_active_pct = m.get("scheduler_active_pct")
+    summary.kernel_duration_us = m.get("kernel_duration_us")
     stalls = {k[len("warp_stall_"):]: v for k, v in m.items() if k.startswith("warp_stall_")}
     summary.warp_stall_breakdown = stalls
     if stalls:
@@ -637,6 +639,10 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "smsp__issue_active_avg_pct_of_peak_sustained_elapsed": "issue_slot_utilization_pct",
         "issue_slots_busy": "issue_slot_utilization_pct",
         "issue slots busy": "issue_slot_utilization_pct",
+        # Kernel execution duration (microseconds)
+        "gpu__time_duration_sum": "kernel_duration_us",
+        "gpu__time_duration_avg": "kernel_duration_us",
+        "duration": "kernel_duration_us",
     }
     if lowered in aliases:
         return aliases[lowered]

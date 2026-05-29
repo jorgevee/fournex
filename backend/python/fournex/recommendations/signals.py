@@ -77,7 +77,7 @@ def extract_signals(
         "mixed_precision_enabled": bool(env.get("mixed_precision", False)),
         "is_distributed": bool(env.get("distributed", False)),
         "num_gpus": int(env.get("num_gpus", 1)),
-        "gpu_type": str(env.get("gpu_type", "unknown")),
+        "gpu_type": str(env.get("gpu_type") or env.get("gpu_model") or "unknown"),
     }
 
 
@@ -156,12 +156,15 @@ def extract_ncu_signals(
         "avg_math_throttle_stall_pct": round(math_throttle_stall, 2),
         "avg_registers_per_thread": round(regs_per_thread, 1) if regs_per_thread is not None else None,
 
+        # ── Roofline / MFU ───────────────────────────────────────────────────
+        **_roofline_signals(ncu_summary.get("roofline")),
+
         # ── Environment ──────────────────────────────────────────────────────
         "framework_pytorch": str(env.get("framework", "")).lower() == "pytorch",
         "mixed_precision_enabled": bool(env.get("mixed_precision", False)),
         "is_distributed": bool(env.get("distributed", False)),
         "num_gpus": int(env.get("num_gpus", 1)),
-        "gpu_type": str(env.get("gpu_type", "unknown")),
+        "gpu_type": str(env.get("gpu_type") or env.get("gpu_model") or "unknown"),
     }
 
 
@@ -197,6 +200,33 @@ def extract_ptx_signals(
         "framework_pytorch": str(env.get("framework", "")).lower() == "pytorch",
         "mixed_precision_enabled": bool(env.get("mixed_precision", False)),
         "num_gpus": int(env.get("num_gpus", 1)),
+    }
+
+
+def _roofline_signals(roofline: dict | None) -> dict:
+    """Extract flat roofline signals from the embedded roofline dict."""
+    if not roofline:
+        return {
+            "roofline_region": None,
+            "mfu_pct": None,
+            "arithmetic_intensity": None,
+            "achieved_tflops": None,
+            "peak_tflops": None,
+            "peak_bw_gbps": None,
+            "memory_utilization_pct": None,
+            "roofline_ceiling_tflops": None,
+            "roofline_estimated": False,
+        }
+    return {
+        "roofline_region": roofline.get("roofline_region"),
+        "mfu_pct": roofline.get("mfu_pct"),
+        "arithmetic_intensity": roofline.get("arithmetic_intensity"),
+        "achieved_tflops": roofline.get("achieved_tflops"),
+        "peak_tflops": roofline.get("peak_tflops"),
+        "peak_bw_gbps": roofline.get("peak_bw_gbps"),
+        "memory_utilization_pct": roofline.get("memory_utilization_pct"),
+        "roofline_ceiling_tflops": roofline.get("roofline_ceiling_tflops"),
+        "roofline_estimated": bool(roofline.get("estimated", False)),
     }
 
 

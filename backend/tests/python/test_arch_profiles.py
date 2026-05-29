@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 import fournex as fn
-from fournex.arch_profiles import get_arch_profile, list_known_gpus, resolve_sm_version
+from fournex.arch_profiles import get_arch_profile, list_known_gpus, load_arch_profile_overrides, resolve_sm_version
 from fournex.cuda_rules.engine import extract_source_signals, load_rules, match_rules
 from fournex.cuda_static import inspect_cuda_source, parse_cuda_kernels
 from fournex.kernel_inspector import device_limits_for_gpu
@@ -77,6 +77,30 @@ def test_profile_hopper_higher_shared_memory_limit():
 
 def test_profile_hopper_tensor_core_min_dim_64():
     assert get_arch_profile("h100")["tensor_core_min_dim"] == 64
+
+def test_profile_override_dict_by_product_name():
+    profile = get_arch_profile("h100", {"profiles": {"h100": {"peak_fp32_tflops": 61.5}}})
+    assert profile["arch_family"] == "hopper"
+    assert profile["peak_fp32_tflops"] == 61.5
+
+def test_profile_override_dict_by_sm_version():
+    profile = get_arch_profile("h100", {"profiles": {"sm_90": {"peak_memory_bw_gbps": 3900.0}}})
+    assert profile["peak_memory_bw_gbps"] == 3900.0
+
+def test_profile_override_top_level_scalars():
+    profile = get_arch_profile("a100", {"peak_fp16_tflops": 280.0})
+    assert profile["peak_fp16_tflops"] == 280.0
+
+def test_load_arch_profile_overrides_yaml(tmp_path):
+    path = tmp_path / "arch.yaml"
+    path.write_text("profiles:\n  h100:\n    peak_fp32_tflops: 60.0\n", encoding="utf-8")
+    overrides = load_arch_profile_overrides(path)
+    assert overrides["profiles"]["h100"]["peak_fp32_tflops"] == 60.0
+
+def test_get_arch_profile_accepts_yaml_path(tmp_path):
+    path = tmp_path / "arch.yaml"
+    path.write_text("profiles:\n  h100:\n    peak_fp32_tflops: 60.0\n", encoding="utf-8")
+    assert get_arch_profile("h100", path)["peak_fp32_tflops"] == 60.0
 
 def test_list_known_gpus_includes_products_and_sm():
     gpus = list_known_gpus()
@@ -155,6 +179,11 @@ def test_resolve_sm_version_exported():
 
 def test_get_arch_profile_exported():
     assert fn.get_arch_profile("t4")["arch_family"] == "turing"
+
+def test_load_arch_profile_overrides_exported(tmp_path):
+    path = tmp_path / "arch.yaml"
+    path.write_text("peak_fp32_tflops: 42.0\n", encoding="utf-8")
+    assert fn.load_arch_profile_overrides(path)["peak_fp32_tflops"] == 42.0
 
 
 # ── Smoke tests ───────────────────────────────────────────────────────────────

@@ -32,6 +32,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    try:
+        return _dispatch(parser, args)
+    except (FileNotFoundError, ValueError) as exc:
+        # User-facing input errors (bad --arch-profile/--config path, malformed
+        # override YAML, etc.) should print a clean message, not a traceback.
+        print(f"frx: {exc}", file=sys.stderr)
+        return 1
+
+
+def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
     if args.command == "collect":
         args.workload_command = _normalize_workload_command(args.workload_command)
         args.workload_command = _resolve_workload_command(args.workload_command)
@@ -307,6 +317,9 @@ def compare(args: argparse.Namespace) -> int:
         layers.append("NCU")
     evidence_desc = " + ".join(layers)
 
+    # Resolve GPU/arch settings once (loads any --arch-profile YAML a single time)
+    env = _environment_from_args(args)
+
     # Build comparison inputs
     input_a: dict[str, Any] = {
         "label": label_a,
@@ -320,6 +333,10 @@ def compare(args: argparse.Namespace) -> int:
         "cuda_filename": str(file_b),
         "gpu_model": args.gpu_model,
     }
+    arch_overrides = env.get("arch_profile_overrides")
+    if arch_overrides:
+        input_a["arch_profile_overrides"] = arch_overrides
+        input_b["arch_profile_overrides"] = arch_overrides
     if ptx_a:
         input_a.update({"ptx": ptx_a, "ptx_filename": str(file_a.with_suffix(".ptx"))})
     if ptx_b:
@@ -340,7 +357,7 @@ def compare(args: argparse.Namespace) -> int:
     ncu_result_a = None
     if ncu_a_text:
         from .ncu_analysis import analyze_ncu_csv_text
-        ncu_result_a = analyze_ncu_csv_text(ncu_a_text, environment=_detect_environment())
+        ncu_result_a = analyze_ncu_csv_text(ncu_a_text, environment=env)
 
     rec = reconcile_evidence(static=static_a, ptx=ptx_result_a, ncu=ncu_result_a)
 
@@ -692,9 +709,7 @@ def explain_cmd(args: argparse.Namespace) -> int:
         return 1
 
     csv_text = ncu_path.read_text(encoding="utf-8", errors="replace")
-    env = _detect_environment()
-    if args.gpu_model:
-        env["gpu_model"] = args.gpu_model
+    env = _environment_from_args(args)
 
     ncu_result = analyze_ncu_csv_text(csv_text, environment=env)
 
@@ -706,7 +721,7 @@ def explain_cmd(args: argparse.Namespace) -> int:
             print(f"warning: source file not found: {src_path}", file=sys.stderr)
         else:
             kernel_source = src_path.read_text(encoding="utf-8", errors="replace")
-            static_result = inspect_cuda_source(kernel_source, filename=src_path.name)
+            static_result = inspect_cuda_source(kernel_source, filename=src_path.name, gpu_model=args.gpu_model)
 
     result = build_explain_result(
         ncu_result=ncu_result,
@@ -941,6 +956,7 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument("--before-ncu", default=None, metavar="CSV", help="baseline Nsight Compute CSV file")
     analyze_parser.add_argument("--after-ncu", default=None, metavar="CSV", help="optimized Nsight Compute CSV file")
     analyze_parser.add_argument("--gpu-model", default=None, help="optional GPU model used by CUDA source launch advisor")
+    analyze_parser.add_argument("--arch-profile", default=None, metavar="YAML", help="YAML hardware-spec overrides for roofline analysis")
     analyze_parser.add_argument(
         "--scope",
         choices=["run", "steady_state", "auto"],
@@ -997,6 +1013,7 @@ def _build_parser() -> argparse.ArgumentParser:
     profile_parser.add_argument("--launch-skip", type=int, default=None, help="skip the first N kernel launches")
     profile_parser.add_argument("--launch-count", type=int, default=None, help="profile at most N kernel launches")
     profile_parser.add_argument("--gpu-model", default=None, help="GPU model hint for launch advisor")
+    profile_parser.add_argument("--arch-profile", default=None, metavar="YAML", help="YAML hardware-spec overrides for roofline analysis")
     profile_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
     profile_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
@@ -1066,6 +1083,7 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--label-a", default=None, help="display label for file A (default: filename)")
     compare_parser.add_argument("--label-b", default=None, help="display label for file B (default: filename)")
     compare_parser.add_argument("--gpu-model", default=None, help="GPU model hint for launch advisor")
+    compare_parser.add_argument("--arch-profile", default=None, metavar="YAML", help="YAML hardware-spec overrides for roofline analysis")
     compare_parser.add_argument(
         "--build-flags",
         default="",
@@ -1120,6 +1138,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="MODEL",
         help="GPU model for arch-aware scoring (e.g. h100, a100)",
+    )
+    explain_parser.add_argument(
+        "--arch-profile",
+        default=None,
+        metavar="YAML",
+        help="YAML hardware-spec overrides for roofline analysis",
     )
     explain_parser.add_argument(
         "--prompt-only",
@@ -1200,6 +1224,20 @@ def _detect_environment() -> dict[str, Any]:
     return env
 
 
+def _environment_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    env = _detect_environment()
+    gpu_model = getattr(args, "gpu_model", None)
+    if gpu_model:
+        env["gpu_model"] = gpu_model
+        env["gpu_type"] = gpu_model
+    arch_profile = getattr(args, "arch_profile", None)
+    if arch_profile:
+        from .arch_profiles import load_arch_profile_overrides
+
+        env["arch_profile_overrides"] = load_arch_profile_overrides(arch_profile)
+    return env
+
+
 def ncu_command(args: argparse.Namespace) -> int:
     from .ncu_presets import build_ncu_command, describe_ncu_presets, format_shell_command, get_ncu_preset
 
@@ -1264,9 +1302,7 @@ def profile(args: argparse.Namespace) -> int:
     import fournex as at
     from .ncu_presets import build_ncu_command, format_shell_command
 
-    environment = _detect_environment()
-    if args.gpu_model:
-        environment["gpu_model"] = args.gpu_model
+    environment = _environment_from_args(args)
 
     ncu_csv_text: str | None = None
     source_label: str = "live profiling"
@@ -1772,7 +1808,7 @@ def _analyze_evidence_file(path: Path, args: argparse.Namespace) -> int:
     if kind == "ncu":
         from .ncu_analysis import analyze_ncu_csv_text
 
-        result = analyze_ncu_csv_text(text, environment=_detect_environment())
+        result = analyze_ncu_csv_text(text, environment=_environment_from_args(args))
         validation = result.get("validation", {})
         if args.output_json:
             _print_json_result("ncu", result)
@@ -1844,7 +1880,7 @@ def _analyze_auto_comparison(before_path: Path, after_path: Path, args: argparse
             after_text,
             label_baseline=before_label,
             label_optimized=after_label,
-            environment=_detect_environment(),
+            environment=_environment_from_args(args),
         )
         has_validation_errors = bool(result["baseline"].get("validation", {}).get("errors")) or bool(
             result["optimized"].get("validation", {}).get("errors")
@@ -1888,6 +1924,8 @@ def _build_layered_comparison_input(args: argparse.Namespace, side: str) -> dict
         payload["cuda_source"] = _read_text_file(path)
         payload["cuda_filename"] = str(path)
         payload["gpu_model"] = args.gpu_model
+        if args.arch_profile:
+            payload["arch_profile_overrides"] = _environment_from_args(args).get("arch_profile_overrides")
     if ptx_path:
         path = Path(ptx_path)
         payload["ptx"] = _read_text_file(path)
@@ -1895,6 +1933,9 @@ def _build_layered_comparison_input(args: argparse.Namespace, side: str) -> dict
     if ncu_path:
         path = Path(ncu_path)
         payload["ncu_csv"] = _read_text_file(path)
+        payload["gpu_model"] = args.gpu_model
+        if args.arch_profile:
+            payload["arch_profile_overrides"] = _environment_from_args(args).get("arch_profile_overrides")
 
     return payload
 
@@ -1912,9 +1953,11 @@ def _comparison_input_from_detected_file(
     elif kind == "ptx":
         payload.update({"ptx": text, "ptx_filename": str(path)})
     elif kind == "ncu":
-        payload.update({"ncu_csv": text})
+        payload.update({"ncu_csv": text, "gpu_model": args.gpu_model})
     else:
         raise ValueError(f"unsupported comparison input: {path}")
+    if args.arch_profile:
+        payload["arch_profile_overrides"] = _environment_from_args(args).get("arch_profile_overrides")
     return payload
 
 
@@ -3008,6 +3051,7 @@ def _analyze_ncu_diff(args: argparse.Namespace) -> int:
         optimized_text,
         label_baseline=baseline_path.stem,
         label_optimized=optimized_path.stem,
+        environment=_environment_from_args(args),
     )
 
     if args.output_json:
@@ -3213,6 +3257,17 @@ def _print_analysis_report(run_dir: Path, summary: dict[str, Any], scope: str = 
     if throughput > 0:
         print(f"  Throughput          : {throughput:,.1f} steps/sec")
     print(f"  Dominant Stall      : {stall}")
+
+    tax = scope_data.get("framework_abstraction_tax")
+    if tax:
+        print(f"\nFRAMEWORK ABSTRACTION TAX")
+        print(f"  Score              : {tax.get('score', 0)}/100 ({tax.get('severity', 'low')})")
+        contributors = tax.get("contributors", [])
+        if contributors:
+            print(f"  Contributors:")
+            for c in contributors:
+                tag = " (inferred)" if c.get("inferred") else ""
+                print(f"   - {c.get('name', '')}{tag}")
 
     recommendations = diagnosis.get("recommendations", [])
     if recommendations:

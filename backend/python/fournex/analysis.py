@@ -37,6 +37,9 @@ def summarize_step_scope(
     bottlenecks = classify_bottlenecks(events, scoped_steps, run_summary)
     diagnosis = build_diagnosis_result(bottlenecks, run_summary, scoped_steps, environment)
 
+    from .framework_abstraction_tax import compute_framework_abstraction_tax
+    framework_abstraction_tax = compute_framework_abstraction_tax(run_summary, bottlenecks)
+
     summary = {
         "event_count": len(events),
         "step_count": len(scoped_steps),
@@ -49,6 +52,8 @@ def summarize_step_scope(
             "step_ids": selected_step_ids if selected_step_ids is not None else [step["step_id"] for step in scoped_steps],
         },
     }
+    if framework_abstraction_tax is not None:
+        summary["framework_abstraction_tax"] = framework_abstraction_tax
     return summary
 
 

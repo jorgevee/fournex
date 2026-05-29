@@ -359,11 +359,40 @@ def _build_ncu_result(
 ) -> dict[str, Any]:
     from .recommendations.signals import extract_ncu_signals
     from .recommendations.engine import generate_recommendations
+    from .roofline import compute_roofline
+    from .arch_profiles import get_arch_profile
+    from .kernel_attribution import compute_kernel_attribution
+    from .tc_analysis import summarize_tc_analysis
+    from .occupancy_analysis import summarize_occupancy_analysis
 
     ncu_summary = derive_ncu_run_summary(summaries)
+
+    env = environment or {}
+    gpu_model = env.get("gpu_model") or env.get("gpu_type")
+    arch_profile = get_arch_profile(gpu_model, env.get("arch_profile") or env.get("arch_profile_overrides"))
+
+    # Roofline: embed in ncu_summary so it flows through signals and reconciliation
+    roofline = compute_roofline(ncu_summary, arch_profile)
+    if roofline is not None:
+        ncu_summary = {**ncu_summary, "roofline": roofline}
+
+    # Per-kernel attribution (ranks kernels by optimization opportunity)
+    kernel_attribution = compute_kernel_attribution(summaries, arch_profile, env)
+
+    # Workload-level TC and occupancy summaries derived from per-kernel data
+    per_kernel = kernel_attribution["kernels"]
+    tc_summary = summarize_tc_analysis(
+        [k["tc_analysis"] for k in per_kernel],
+        arch_profile,
+        env,
+    )
+    occupancy_summary = summarize_occupancy_analysis(
+        [k["occupancy_analysis"] for k in per_kernel]
+    )
+
     validation = validate_ncu_csv_text(source_text or "", summaries=summaries)
     bottlenecks = classify_ncu_bottlenecks(ncu_summary)
-    signals = extract_ncu_signals(ncu_summary, bottlenecks, environment or {})
+    signals = extract_ncu_signals(ncu_summary, bottlenecks, env)
     rec_result = generate_recommendations(bottlenecks, ncu_summary, signals=signals)
 
     primary = bottlenecks[0]["label"] if bottlenecks else None
@@ -386,6 +415,9 @@ def _build_ncu_result(
         "recommendations": rec_result["recommendations"],
         "bundles": rec_result["bundles"],
         "kernel_summaries": [s.to_dict() for s in summaries],
+        "kernel_attribution": kernel_attribution,
+        "tc_summary": tc_summary,
+        "occupancy_summary": occupancy_summary,
     }
 
 

@@ -85,7 +85,13 @@ def _run_ncu(inp: dict[str, Any]) -> dict[str, Any] | None:
     csv = inp.get("ncu_csv")
     if not csv:
         return None
-    return analyze_ncu_csv_text(csv)
+    environment = {
+        "gpu_model": inp.get("gpu_model"),
+        "gpu_type": inp.get("gpu_model"),
+    }
+    if inp.get("arch_profile_overrides"):
+        environment["arch_profile_overrides"] = inp["arch_profile_overrides"]
+    return analyze_ncu_csv_text(csv, environment=environment)
 
 
 # ── Diff builders ─────────────────────────────────────────────────────────────

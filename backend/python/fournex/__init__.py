@@ -27,6 +27,7 @@ from .analysis import (
     summarize_steady_state,
     summarize_step_scope,
 )
+from .framework_abstraction_tax import compute_framework_abstraction_tax
 from .common_ir_analysis import (
     derive_ir_bottleneck_annotations,
     derive_ir_run_summary,
@@ -108,7 +109,7 @@ from .ptx_analysis import (
 )
 from .comparison import compare_implementations
 from .reconciliation import reconcile_evidence, what_evidence_is_missing
-from .arch_profiles import get_arch_profile, resolve_sm_version
+from .arch_profiles import get_arch_profile, load_arch_profile_overrides, resolve_sm_version
 from .ncu_comparison import diff_ncu_runs
 from .cuda_static import (
     CudaKernelSource,
@@ -154,6 +155,7 @@ __all__ = [
     "reconcile_evidence",
     "what_evidence_is_missing",
     "get_arch_profile",
+    "load_arch_profile_overrides",
     "resolve_sm_version",
     "diff_ncu_runs",
     "NCU_METRIC_PRESETS",
@@ -186,6 +188,7 @@ __all__ = [
     "build_diagnosis_result",
     "build_runtime_event",
     "classify_bottlenecks",
+    "compute_framework_abstraction_tax",
     "clear_local_events",
     "derive_ir_bottleneck_annotations",
     "derive_ir_run_summary",

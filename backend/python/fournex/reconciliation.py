@@ -285,6 +285,80 @@ _CATALOG: list[dict[str, Any]] = [
             ],
         },
     },
+    {
+        "label": "roofline_memory_bound",
+        "display_name": "Memory-bandwidth limited (Roofline model)",
+        "severity": "high",
+        "fix_summary": (
+            "Arithmetic intensity is below the ridge point — kernel spends more time "
+            "waiting for DRAM than computing. Increase data reuse: tile through shared "
+            "memory, fuse adjacent kernels, or reduce redundant global loads."
+        ),
+        "recommendation_ids": ["rec_roofline_tiling", "rec_roofline_kernel_fusion"],
+        "source_check": None,
+        "source_claims": frozenset(),
+        "source_style_claims": frozenset(),
+        "ptx_check": None,
+        "ptx_claims": frozenset(),
+        "ncu_check": lambda s: s.get("roofline_region") == "memory_bound",
+        "ncu_claims": frozenset({"roofline_memory_bound"}),
+        "ncu_metric_keys": ("arithmetic_intensity", "achieved_tflops", "mfu_pct", "memory_utilization_pct"),
+        "profiler_check": None,
+        "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "dram__bytes_read.sum",
+                    "label": "DRAM bytes read",
+                    "why": "total memory traffic volume (numerator of arithmetic intensity)",
+                },
+                {
+                    "metric": "smsp__inst_executed_pipe_fma.sum",
+                    "label": "FP32 FMA instruction count",
+                    "why": "compute work (denominator of arithmetic intensity)",
+                },
+            ],
+        },
+    },
+    {
+        "label": "roofline_low_mfu",
+        "display_name": "Low compute utilization (MFU < 20%)",
+        "severity": "medium",
+        "fix_summary": (
+            "Achieved TFLOP/s is well below the compute ceiling. The kernel is not "
+            "memory-bound but still under-utilizes the GPU. Common causes: small tile "
+            "sizes, low parallelism, or a launch configuration that leaves most SMs idle."
+        ),
+        "recommendation_ids": ["rec_roofline_occupancy", "rec_roofline_batch_size"],
+        "source_check": None,
+        "source_claims": frozenset(),
+        "source_style_claims": frozenset(),
+        "ptx_check": None,
+        "ptx_claims": frozenset(),
+        "ncu_check": lambda s: (
+            s.get("mfu_pct") is not None
+            and s.get("mfu_pct") < 20.0
+            and s.get("roofline_region") != "memory_bound"
+        ),
+        "ncu_claims": frozenset({"roofline_low_mfu"}),
+        "ncu_metric_keys": ("mfu_pct", "achieved_tflops", "peak_tflops"),
+        "profiler_check": None,
+        "profiler_claims": frozenset(),
+        "evidence_needed": {
+            "ncu": [
+                {
+                    "metric": "sm__warps_active.avg.pct_of_peak_sustained_active",
+                    "label": "Achieved occupancy %",
+                    "why": "low occupancy explains gaps between the compute ceiling and achieved throughput",
+                },
+                {
+                    "metric": "smsp__inst_executed_pipe_fma.sum",
+                    "label": "FP32 FMA instruction count",
+                    "why": "confirms how much compute work was actually issued",
+                },
+            ],
+        },
+    },
 ]
 
 _LAYER_CHECK_KEY = {

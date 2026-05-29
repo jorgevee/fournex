@@ -58,6 +58,20 @@ def test_profile_ncu_csv_exits_zero(capsys) -> None:
         p.unlink(missing_ok=True)
 
 
+def test_bad_arch_profile_path_exits_cleanly(capsys) -> None:
+    # A missing --arch-profile path must produce a clean error + exit 1, not a
+    # raw FileNotFoundError traceback.
+    p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
+    try:
+        rc = main(["profile", "--ncu", str(p), "--arch-profile", "does_not_exist.yaml"])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert err.startswith("frx:")
+        assert "does_not_exist.yaml" in err
+    finally:
+        p.unlink(missing_ok=True)
+
+
 def test_profile_ncu_csv_contains_verdict(capsys) -> None:
     p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
     try:
@@ -154,6 +168,39 @@ def test_profile_ncu_json_output_is_valid(capsys) -> None:
 
 
 # ── --ptx FILE mode ────────────────────────────────────────────────────────────
+
+def test_profile_ncu_gpu_model_reaches_roofline(capsys) -> None:
+    p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
+    try:
+        main(["profile", "--ncu", str(p), "--gpu-model", "h100", "--json"])
+        data = json.loads(capsys.readouterr().out)
+        roofline = data["result"]["ncu_run_summary"]["roofline"]
+        assert roofline["peak_bw_gbps"] == 3350.0
+    finally:
+        p.unlink(missing_ok=True)
+
+
+def test_profile_ncu_arch_profile_overrides_roofline(capsys) -> None:
+    p = _write_temp(_MINIMAL_NCU_CSV, ".csv")
+    arch = _write_temp("profiles:\n  h100:\n    peak_memory_bw_gbps: 3900.0\n", ".yaml")
+    try:
+        main([
+            "profile",
+            "--ncu",
+            str(p),
+            "--gpu-model",
+            "h100",
+            "--arch-profile",
+            str(arch),
+            "--json",
+        ])
+        data = json.loads(capsys.readouterr().out)
+        roofline = data["result"]["ncu_run_summary"]["roofline"]
+        assert roofline["peak_bw_gbps"] == 3900.0
+    finally:
+        p.unlink(missing_ok=True)
+        arch.unlink(missing_ok=True)
+
 
 def test_profile_ptx_exits_zero() -> None:
     p = _write_temp(_MINIMAL_PTX, ".ptx")

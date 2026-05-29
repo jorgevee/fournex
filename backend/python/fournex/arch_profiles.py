@@ -5,6 +5,7 @@ Separates scoring calibration (when to flag) from hardware limits (what the GPU 
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 # ── Per-sm scoring profiles ───────────────────────────────────────────────────
@@ -20,6 +21,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": False,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # Roofline hardware specs — T4 reference; override via YAML arch profile for other SKUs
+        "peak_fp32_tflops": 8.1,
+        "peak_fp16_tflops": 65.0,
+        "peak_memory_bw_gbps": 320.0,
     },
     "sm_80": {
         "arch_family": "ampere",
@@ -31,6 +36,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": False,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # A100 80GB reference
+        "peak_fp32_tflops": 19.5,
+        "peak_fp16_tflops": 312.0,
+        "peak_memory_bw_gbps": 2000.0,
     },
     "sm_86": {
         "arch_family": "ampere",
@@ -42,6 +51,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": False,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # RTX 3090 reference
+        "peak_fp32_tflops": 35.6,
+        "peak_fp16_tflops": 142.6,
+        "peak_memory_bw_gbps": 936.0,
     },
     "sm_89": {
         "arch_family": "ada",
@@ -53,6 +66,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": True,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # RTX 4090 reference
+        "peak_fp32_tflops": 82.6,
+        "peak_fp16_tflops": 165.2,
+        "peak_memory_bw_gbps": 1008.0,
     },
     "sm_90": {
         "arch_family": "hopper",
@@ -69,6 +86,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": True,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # H100 SXM5 reference
+        "peak_fp32_tflops": 67.0,
+        "peak_fp16_tflops": 989.0,
+        "peak_memory_bw_gbps": 3350.0,
     },
     "sm_100": {
         "arch_family": "blackwell",
@@ -80,6 +101,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": True,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # B100 reference (preliminary)
+        "peak_fp32_tflops": 60.0,
+        "peak_fp16_tflops": 1800.0,
+        "peak_memory_bw_gbps": 8000.0,
     },
     "sm_120": {
         "arch_family": "blackwell",
@@ -91,6 +116,10 @@ _PROFILES: dict[str, dict[str, Any]] = {
         "fp8_supported": True,
         "occupancy_low_pct": 25.0,
         "warp_size": 32,
+        # RTX 5090 reference (preliminary)
+        "peak_fp32_tflops": 104.8,
+        "peak_fp16_tflops": 209.6,
+        "peak_memory_bw_gbps": 1792.0,
     },
 }
 
@@ -147,12 +176,95 @@ def resolve_sm_version(gpu_model: str | None) -> str | None:
     return _PRODUCT_TO_SM.get(normalized)
 
 
-def get_arch_profile(gpu_model: str | None) -> dict[str, Any]:
-    """Return the scoring profile for a GPU model, or the default (Ampere) if unknown."""
+def load_arch_profile_overrides(path: str | Path | None) -> dict[str, Any]:
+    """Load user arch profile overrides from a YAML file.
+
+    Supported shapes:
+
+    - top-level profile values, applied to the selected GPU:
+      ``peak_fp32_tflops: 82.6``
+    - keyed profiles:
+      ``profiles: {h100: {peak_fp32_tflops: 60.0}}``
+    - shorthand keyed profiles:
+      ``h100: {peak_fp32_tflops: 60.0}``
+
+    Note: top-level scalar overrides are applied last and unconditionally, so
+    they win for *every* GPU. Don't combine them with keyed ``profiles`` unless
+    you intend the scalar to override the keyed value for all hardware.
+    """
+    if path is None:
+        return {}
+    override_path = Path(path)
+    if not override_path.exists():
+        raise FileNotFoundError(f"arch profile override file not found: {override_path}")
+
+    import yaml
+
+    data = yaml.safe_load(override_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("arch profile override YAML must contain a mapping")
+    return data
+
+
+def get_arch_profile(
+    gpu_model: str | None,
+    overrides: dict[str, Any] | str | Path | None = None,
+) -> dict[str, Any]:
+    """Return the scoring profile for a GPU model, or the default (Ampere) if unknown.
+
+    ``overrides`` may be either a dict or a YAML path. Override keys can be the
+    explicit GPU model ("h100") or the resolved SM version ("sm_90"). Top-level
+    scalar fields are also accepted for one-off custom hardware specs.
+    """
     sm = resolve_sm_version(gpu_model)
-    return _PROFILES.get(sm, _DEFAULT_PROFILE) if sm else _DEFAULT_PROFILE
+    base = _PROFILES.get(sm, _DEFAULT_PROFILE) if sm else _DEFAULT_PROFILE
+    profile = dict(base)
+    override_map = (
+        load_arch_profile_overrides(overrides)
+        if isinstance(overrides, (str, Path))
+        else (overrides or {})
+    )
+    if override_map:
+        profile.update(_select_profile_override(gpu_model, sm, override_map))
+    return profile
 
 
 def list_known_gpus() -> list[str]:
     """Return all recognized product names and sm version strings."""
     return sorted(set(_PRODUCT_TO_SM) | set(_PROFILES))
+
+
+def _select_profile_override(
+    gpu_model: str | None,
+    sm: str | None,
+    overrides: dict[str, Any],
+) -> dict[str, Any]:
+    profiles = overrides.get("profiles", overrides)
+    selected: dict[str, Any] = {}
+
+    if isinstance(profiles, dict):
+        candidate_keys = []
+        if gpu_model:
+            candidate_keys.append(_normalize_gpu_key(gpu_model))
+        if sm:
+            candidate_keys.append(_normalize_gpu_key(sm))
+
+        normalized_profiles = {
+            _normalize_gpu_key(key): value
+            for key, value in profiles.items()
+            if isinstance(value, dict)
+        }
+        for key in candidate_keys:
+            selected.update(normalized_profiles.get(key, {}))
+
+    top_level_scalars = {
+        key: value
+        for key, value in overrides.items()
+        if key != "profiles" and not isinstance(value, dict)
+    }
+    selected.update(top_level_scalars)
+    return selected
+
+
+def _normalize_gpu_key(value: str) -> str:
+    return value.lower().strip().replace(" ", "").replace("-", "")
