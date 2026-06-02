@@ -316,6 +316,25 @@ def build_explain_result(
         for r in (ncu_result or {}).get("recommendations", [])[:3]
     ]
 
+    # Top kernel opportunities (ranked by opportunity_score — which kernel to fix first)
+    kernel_attr = (ncu_result or {}).get("kernel_attribution", {})
+    top_kernels = [
+        {
+            "kernel_name":     k.get("kernel_name", "unknown"),
+            "opportunity":     k.get("opportunity", ""),
+            "mfu_pct":         k.get("mfu_pct"),
+            "roofline_region": k.get("roofline_region"),
+            "runtime_share_pct": k.get("runtime_share_pct"),
+        }
+        for k in kernel_attr.get("top_opportunities", [])[:5]
+    ]
+
+    # Roofline / MFU summary
+    roofline = ncu_summary.get("roofline")
+
+    # Occupancy breakdown (only relevant when an occupancy bottleneck is present)
+    occupancy_summary = (ncu_result or {}).get("occupancy_summary")
+
     return {
         "schema": "frx_explain_v0",
         "layers_available": rec["layers_available"],
@@ -326,6 +345,9 @@ def build_explain_result(
         "ncu_bottlenecks": ncu_bottlenecks,
         "top_recommendations": top_recommendations,
         "missing_data": _build_missing_data(ncu_result, static_result),
+        "top_kernels": top_kernels,
+        "roofline": roofline,
+        "occupancy_summary": occupancy_summary,
     }
 
 
@@ -536,15 +558,62 @@ def render_llm_prompt_txt(
         lines.append("**PRIMARY BOTTLENECK:** No clear bottleneck detected above threshold")
     lines.append("")
 
+    # Secondary bottlenecks
+    other_diags = [d for d in diagnoses if d.get("label") != primary_label]
+    if other_diags:
+        lines.append("**SECONDARY ISSUES (also detected):**")
+        for d in other_diags[:3]:
+            lines.append(f"- {d['display_name']} [{d['confidence']} confidence]")
+        lines.append("")
+
+    # Top kernel opportunities — which kernel to fix first
+    top_kernels = result.get("top_kernels", [])
+    if len(top_kernels) > 1:
+        lines.append("**TOP KERNELS TO OPTIMIZE** (ranked by opportunity):")
+        for i, k in enumerate(top_kernels, 1):
+            name = k.get("kernel_name", "unknown")
+            opp = k.get("opportunity", "")
+            mfu = k.get("mfu_pct")
+            region = k.get("roofline_region") or ""
+            share = k.get("runtime_share_pct")
+            parts = []
+            if share is not None:
+                parts.append(f"runtime: {share:.0f}%")
+            if mfu is not None:
+                parts.append(f"MFU: {mfu:.0f}%")
+            if region:
+                parts.append(f"region: {region}")
+            if opp:
+                parts.append(f"opportunity: {opp}")
+            detail = "  " + "  ".join(parts) if parts else ""
+            lines.append(f"  {i}. {name}{detail}")
+        lines.append("")
+
     # Expected improvement + validation targets
     lines += _render_expected_improvement_lines(result.get("top_recommendations", []))
 
     # NCU evidence
     ev_lines = _ncu_evidence_lines(result.get("key_metrics", {}))
-    if ev_lines:
+    roofline = result.get("roofline")
+    occupancy_summary = result.get("occupancy_summary")
+    occ_bottleneck = any(
+        "occupancy" in (d.get("label") or "") for d in [primary_diag] + other_diags if d
+    )
+    if ev_lines or roofline or (occ_bottleneck and occupancy_summary):
         lines.append("**EVIDENCE FROM PROFILER (Nsight Compute):**")
         for ev in ev_lines:
             lines.append(f"- {ev}")
+        if roofline:
+            region = roofline.get("roofline_region", "unknown")
+            mfu = roofline.get("mfu_pct")
+            mfu_str = f"  MFU: {mfu:.0f}% of peak FP32 throughput" if mfu is not None else ""
+            lines.append(f"- Roofline region: {region}{mfu_str}")
+        if occ_bottleneck and occupancy_summary:
+            limiter = occupancy_summary.get("dominant_limiter")
+            eff = occupancy_summary.get("occupancy_efficiency_pct")
+            if limiter:
+                eff_str = f" (achieved {eff:.0f}% of theoretical)" if eff is not None else ""
+                lines.append(f"- Occupancy limiter: {limiter}{eff_str}")
         lines.append("")
 
     # Static analysis evidence
@@ -620,3 +689,401 @@ def render_llm_prompt_txt(
 def render_evidence_json(result: dict) -> str:
     """Serialized JSON of the frx_explain_v0 result (pretty-printed)."""
     return json.dumps(result, indent=2, default=str)
+
+
+# ── Training-path explain ─────────────────────────────────────────────────────
+# Parallel pipeline for PyTorch training telemetry (frx analyze run dirs).
+# Produces the same three output files (frx_summary.txt / frx_llm_prompt.txt /
+# frx_evidence.json) so users paste the same file into their LLM regardless of
+# which profiling path they used.
+
+_TRAINING_BOTTLENECK_QUESTION: dict[str, str] = {
+    "input_bound": (
+        "My PyTorch training loop spends {dataloader_pct:.0f}% of each step waiting on "
+        "the DataLoader. GPU utilization is {gpu_pct:.0f}%. What is the most effective "
+        "DataLoader configuration change (num_workers, pin_memory, prefetch_factor, "
+        "persistent_workers) or data-preprocessing restructuring to reduce this overhead?"
+    ),
+    "copy_bound": (
+        "My training loop spends {h2d_pct:.0f}% of each step on host-to-device data "
+        "transfers. GPU utilization is {gpu_pct:.0f}%. What is the most effective way to "
+        "reduce H2D copy overhead — pin_memory, non-blocking transfers, pre-fetching, or "
+        "moving preprocessing closer to the GPU?"
+    ),
+    "sync_bound": (
+        "My training loop spends {sync_pct:.0f}% of each step blocked on device "
+        "synchronizations. GPU utilization is {gpu_pct:.0f}%. What synchronization calls "
+        "are likely unnecessary and what is the safest way to remove or defer them?"
+    ),
+    "launch_bound": (
+        "My training loop launches {kernel_count:.0f} kernels per step with a median "
+        "duration of {median_us:.0f}us, leaving GPU utilization at {gpu_pct:.0f}%. "
+        "What framework-level optimization — torch.compile, CUDA Graphs, or operator "
+        "fusion — would most reduce per-step launch overhead for this workload?"
+    ),
+    "underutilized_gpu": (
+        "GPU utilization is {gpu_pct:.0f}% during training with no dominant data-pipeline "
+        "or synchronization stall. What is the most likely cause and what is the most "
+        "impactful fix to increase GPU utilization?"
+    ),
+    "memory_pressure": (
+        "Peak GPU memory pressure is {mem_pct:.0f}% of capacity during training. What "
+        "technique — gradient checkpointing, mixed precision, micro-batching, or activation "
+        "offloading — would most safely reduce peak memory usage without harming throughput?"
+    ),
+    "shape_instability": (
+        "Tensor shapes change in {volatility_pct:.0f}% of training steps, preventing "
+        "graph capture and causing per-step recompilation overhead. What is the most "
+        "effective way to stabilize shapes for this workload?"
+    ),
+    "insufficient_telemetry": (
+        "Insufficient telemetry was collected to identify a bottleneck. What additional "
+        "profiling (SDK instrumentation, torch.profiler, nvidia-smi) would best reveal "
+        "the performance bottleneck for this workload?"
+    ),
+}
+
+_TRAINING_DEFAULT_QUESTION = (
+    "What is the most impactful optimization for the primary bottleneck identified above? "
+    "Please suggest minimal, targeted changes that preserve training correctness."
+)
+
+
+def _select_scope_data(summary: dict[str, Any], scope: str = "auto") -> dict[str, Any]:
+    """Pick the best scope from a summarize_run_with_steady_state result."""
+    if scope == "steady_state":
+        return summary.get("steady_state") or summary.get("run") or summary
+    if scope == "run":
+        return summary.get("run") or summary
+    # auto: prefer steady_state (skips warmup), fall back to run, then bare dict
+    return summary.get("steady_state") or summary.get("run") or summary
+
+
+def _format_training_question(label: str | None, bottleneck_map: dict, run_summary: dict) -> str:
+    template = _TRAINING_BOTTLENECK_QUESTION.get(label or "", _TRAINING_DEFAULT_QUESTION)
+    gpu_pct = run_summary.get("average_gpu_utilization_pct", 0.0)
+    ev = bottleneck_map.get(label or "", {}).get("evidence", {})
+    try:
+        return template.format(
+            gpu_pct=gpu_pct,
+            dataloader_pct=ev.get("avg_dataloader_fraction", 0.0) * 100,
+            h2d_pct=ev.get("avg_h2d_fraction", 0.0) * 100,
+            sync_pct=ev.get("avg_sync_fraction", 0.0) * 100,
+            kernel_count=run_summary.get("kernel_count_per_step", 0.0),
+            median_us=run_summary.get("median_cuda_kernel_duration_us", 0.0),
+            mem_pct=run_summary.get("memory_pressure_peak_ratio", 0.0) * 100,
+            volatility_pct=run_summary.get("shape_volatility_ratio", 0.0) * 100,
+        )
+    except (KeyError, ValueError):
+        return _TRAINING_DEFAULT_QUESTION
+
+
+def build_telemetry_explain_result(
+    *,
+    scope_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the frx_telemetry_explain_v0 structure from one scope of training analysis.
+
+    ``scope_data`` is a single scope dict as returned by ``summarize_step_scope()``
+    (the value under the "run" or "steady_state" key of ``summarize_run_with_steady_state``).
+    """
+    diagnosis = scope_data.get("diagnosis", {})
+    run_summary = scope_data.get("run_summary", {})
+    bottlenecks = scope_data.get("bottlenecks", [])
+    fat = scope_data.get("framework_abstraction_tax")
+
+    primary_label: str | None = diagnosis.get("primary_bottleneck")
+    user_facing: str | None = diagnosis.get("user_facing_bottleneck", primary_label)
+    secondary_labels: list[str] = [
+        s for s in diagnosis.get("secondary_bottlenecks", [])
+        if s != user_facing and s != primary_label
+    ]
+    confidence: dict[str, Any] = diagnosis.get("confidence", {})
+
+    bottleneck_map = {b["label"]: b for b in bottlenecks}
+
+    # Key training metrics
+    key_metrics: dict[str, Any] = {
+        k: run_summary[k]
+        for k in (
+            "average_gpu_utilization_pct",
+            "average_memory_utilization_pct",
+            "throughput_steps_per_sec",
+            "step_time_avg_ns",
+            "memory_pressure_peak_ratio",
+            "kernel_count_per_step",
+            "median_cuda_kernel_duration_us",
+            "small_kernel_fraction",
+            "dominant_stall_type",
+            "shape_volatility_ratio",
+        )
+        if run_summary.get(k) is not None
+    }
+
+    # Per-step phase fractions from bottleneck evidence
+    phase_fractions: dict[str, float] = {}
+    for label, ev_key in (
+        ("input_bound", "avg_dataloader_fraction"),
+        ("copy_bound", "avg_h2d_fraction"),
+        ("sync_bound", "avg_sync_fraction"),
+    ):
+        val = bottleneck_map.get(label, {}).get("evidence", {}).get(ev_key)
+        if val is not None:
+            phase_fractions[label] = val
+
+    # Top recommendations (from diagnosis, same shape as engine output)
+    top_recs = [
+        {
+            "id":                        r.get("id", ""),
+            "title":                     r.get("title", ""),
+            "priority":                  r.get("priority", "medium"),
+            "tier":                      r.get("tier", ""),
+            "score":                     r.get("score", 0.0),
+            "estimated_speedup_pct_min": r.get("estimated_speedup_pct_min"),
+            "estimated_speedup_pct_max": r.get("estimated_speedup_pct_max"),
+            "why":                       r.get("why", ""),
+            "actions":                   r.get("actions", [])[:3],
+            "validation_steps":          r.get("validation_steps", []),
+        }
+        for r in diagnosis.get("recommendations", [])[:3]
+    ]
+
+    # Missing data hints
+    missing_data: list[dict] = []
+    if run_summary.get("profiler_windows_exported", 0) == 0:
+        missing_data.append({
+            "layer": "profiler",
+            "description": "No per-step profiler windows captured",
+            "how_to_collect": (
+                "Instrument your loop with frx.step_context() or wrap with "
+                "frx collect -- python train.py"
+            ),
+        })
+    if run_summary.get("kernel_count_per_step") is None:
+        missing_data.append({
+            "layer": "kernel_trace",
+            "description": "No CUDA kernel trace available — launch-overhead signals absent",
+            "how_to_collect": "Export a torch.profiler Chrome trace to frx-run/profiler_trace.json",
+        })
+
+    return {
+        "schema": "frx_telemetry_explain_v0",
+        "scope_name": scope_data.get("scope", {}).get("name", "unknown"),
+        "step_count": scope_data.get("step_count", 0),
+        "primary_bottleneck": user_facing,
+        "secondary_bottlenecks": secondary_labels,
+        "confidence": confidence,
+        "why": diagnosis.get("why", []),
+        "key_metrics": key_metrics,
+        "phase_fractions": phase_fractions,
+        "top_recommendations": top_recs,
+        "framework_abstraction_tax": fat,
+        "missing_data": missing_data,
+        # raw evidence for JSON output
+        "bottleneck_evidence": {b["label"]: b.get("evidence", {}) for b in bottlenecks},
+    }
+
+
+def render_training_summary_txt(
+    result: dict[str, Any],
+    *,
+    run_id: str | None = None,
+) -> str:
+    """Human-readable training bottleneck narrative."""
+    lines: list[str] = ["GPU Training Performance Summary", "================================", ""]
+
+    if run_id:
+        lines.append(f"Run        : {run_id}")
+    scope = result.get("scope_name", "unknown")
+    steps = result.get("step_count", 0)
+    lines.append(f"Scope      : {scope}  ({steps} steps)")
+    lines.append("")
+
+    primary = result.get("primary_bottleneck")
+    conf = result.get("confidence", {})
+    lines.append(f"PRIMARY BOTTLENECK: {(primary or 'none').replace('_', ' ')}")
+    if conf.get("level"):
+        lines.append(f"Confidence  : {conf['level']} ({conf.get('score', 0.0):.2f})")
+    if conf.get("reason"):
+        lines.append(f"Reason      : {conf['reason']}")
+    lines.append("")
+
+    why = result.get("why", [])
+    if why:
+        lines.append("EVIDENCE")
+        for bullet in why:
+            lines.append(f"  - {bullet}")
+        lines.append("")
+
+    km = result.get("key_metrics", {})
+    lines.append("KEY METRICS")
+    if km.get("average_gpu_utilization_pct") is not None:
+        lines.append(f"  GPU Utilization    : {km['average_gpu_utilization_pct']:.1f}%")
+    if km.get("throughput_steps_per_sec"):
+        lines.append(f"  Throughput         : {km['throughput_steps_per_sec']:,.1f} steps/sec")
+    sns = km.get("step_time_avg_ns")
+    if sns:
+        lines.append(f"  Avg Step Time      : {sns / 1_000_000:.2f} ms")
+    if km.get("dominant_stall_type") and km["dominant_stall_type"] != "unknown":
+        lines.append(f"  Dominant Stall     : {km['dominant_stall_type']}")
+    lines.append("")
+
+    fat = result.get("framework_abstraction_tax")
+    if fat and fat.get("score", 0) >= 20:
+        lines.append(f"FRAMEWORK ABSTRACTION TAX: {fat['score']}/100 ({fat.get('severity', 'moderate')})")
+        for c in fat.get("contributors", []):
+            tag = " (inferred)" if c.get("inferred") else ""
+            lines.append(f"  - {c['name']}{tag}")
+        lines.append("")
+
+    secondary = result.get("secondary_bottlenecks", [])
+    if secondary:
+        lines.append("SECONDARY ISSUES")
+        for s in secondary:
+            lines.append(f"  - {s.replace('_', ' ')}")
+        lines.append("")
+
+    recs = result.get("top_recommendations", [])
+    lines.append("WHAT TO FIX FIRST")
+    if recs:
+        for i, r in enumerate(recs[:3], 1):
+            lines.append(f"  {i}. [{r['priority'].upper()}] {r['title']}{_speedup_str(r)}")
+    else:
+        lines.append("  (no recommendations generated — check missing data section)")
+    lines.append("")
+
+    missing = result.get("missing_data", [])
+    if missing:
+        lines.append("MISSING DATA")
+        for m in missing:
+            lines.append(f"  {m['description']}")
+            lines.append(f"  -> {m['how_to_collect']}")
+        lines.append("")
+
+    lines.append("Generated by Fournex")
+    return "\n".join(lines)
+
+
+def render_training_llm_prompt_txt(result: dict[str, Any]) -> str:
+    """Paste-ready LLM prompt for training-loop bottleneck optimization."""
+    lines: list[str] = []
+
+    lines += [
+        "## PyTorch Training Loop Optimization Request",
+        "",
+        "I am analyzing a PyTorch training loop for GPU performance optimization.",
+        "",
+        "**Rules for your response:**",
+        "- Suggest the minimal targeted change that addresses the identified bottleneck",
+        "- Preserve training correctness - flag any risks (numerical stability, convergence)",
+        "- If multiple approaches exist, rank by implementation simplicity",
+        "- Do not rewrite the entire training loop unless absolutely necessary",
+        "",
+        "---",
+        "",
+    ]
+
+    primary = result.get("primary_bottleneck")
+    conf = result.get("confidence", {})
+    secondary = [s for s in result.get("secondary_bottlenecks", []) if s != primary]
+
+    if primary:
+        lines.append(f"**PRIMARY BOTTLENECK:** {primary.replace('_', ' ')}")
+    else:
+        lines.append("**PRIMARY BOTTLENECK:** No clear bottleneck detected above threshold")
+    if conf.get("level"):
+        lines.append(f"**Confidence:** {conf['level']} (score: {conf.get('score', 0.0):.2f})")
+    lines.append("")
+
+    if secondary:
+        lines.append("**SECONDARY ISSUES (also detected):**")
+        for s in secondary:
+            lines.append(f"- {s.replace('_', ' ')}")
+        lines.append("")
+
+    # Framework Abstraction Tax
+    fat = result.get("framework_abstraction_tax")
+    if fat and fat.get("score", 0) >= 20:
+        lines.append(f"**FRAMEWORK ABSTRACTION TAX: {fat['score']}/100 ({fat.get('severity', 'moderate')})**")
+        for c in fat.get("contributors", []):
+            tag = " (inferred)" if c.get("inferred") else ""
+            lines.append(f"- {c['name']}{tag}")
+        lines.append("")
+
+    # Training evidence
+    km = result.get("key_metrics", {})
+    pf = result.get("phase_fractions", {})
+    why = result.get("why", [])
+
+    lines.append("**TRAINING EVIDENCE:**")
+    if km.get("average_gpu_utilization_pct") is not None:
+        lines.append(f"- GPU utilization: {km['average_gpu_utilization_pct']:.1f}%")
+    if km.get("throughput_steps_per_sec"):
+        lines.append(f"- Throughput: {km['throughput_steps_per_sec']:,.1f} steps/sec")
+    sns = km.get("step_time_avg_ns")
+    if sns:
+        lines.append(f"- Avg step time: {sns / 1_000_000:.2f} ms")
+    if pf.get("input_bound") is not None:
+        lines.append(f"- DataLoader fraction: {pf['input_bound'] * 100:.1f}% of step time")
+    if pf.get("copy_bound") is not None:
+        lines.append(f"- H2D copy fraction: {pf['copy_bound'] * 100:.1f}% of step time")
+    if pf.get("sync_bound") is not None:
+        lines.append(f"- Sync wait fraction: {pf['sync_bound'] * 100:.1f}% of step time")
+    if km.get("kernel_count_per_step") is not None:
+        lines.append(f"- Kernel launches/step: {km['kernel_count_per_step']:.0f}")
+    if km.get("median_cuda_kernel_duration_us") is not None:
+        lines.append(f"- Median kernel duration: {km['median_cuda_kernel_duration_us']:.1f}us")
+    if km.get("dominant_stall_type") and km["dominant_stall_type"] != "unknown":
+        lines.append(f"- Dominant stall: {km['dominant_stall_type']}")
+    if why:
+        lines.append("")
+        lines.append("Classifier reasoning:")
+        for bullet in why[:3]:
+            lines.append(f"  {bullet}")
+    lines.append("")
+
+    # Top recommendations
+    recs = result.get("top_recommendations", [])
+    if recs:
+        lines.append("**TOP RECOMMENDATIONS:**")
+        for i, r in enumerate(recs[:3], 1):
+            speedup = _speedup_str(r)
+            lines.append(f"")
+            lines.append(f"{i}. [{r['priority'].upper()}] {r['title']}{speedup}")
+            why_text = r.get("why", "").strip()
+            if why_text:
+                for chunk in textwrap.wrap(why_text, width=72):
+                    lines.append(f"   {chunk}")
+            for action in r.get("actions", [])[:3]:
+                lines.append(f"   - {action}")
+            vsteps = r.get("validation_steps", [])
+            if vsteps:
+                lines.append("   Validate:")
+                for step in vsteps[:2]:
+                    direction = step.get("direction", "")
+                    label = step.get("label", "")
+                    expected = step.get("expected", "")
+                    current = step.get("current_value")
+                    arrow = {"decrease": "<--", "increase": "-->"}.get(direction, " ~~")
+                    cur_str = f"was {current:.1f}; " if current is not None else ""
+                    lines.append(f"   {arrow} {label}: {cur_str}{expected}")
+        lines.append("")
+
+    # Specific question
+    bottleneck_map = {
+        label: {"evidence": ev}
+        for label, ev in result.get("bottleneck_evidence", {}).items()
+    }
+    question = _format_training_question(primary, bottleneck_map, km)
+    lines += [
+        "**SPECIFIC QUESTION:**",
+        question,
+        "",
+        "---",
+        "",
+        "**NOTE:** After applying the fix, re-collect a training run and compare:",
+        "  frx collect --name after-fix -- python train.py",
+        "  frx analyze --before <before-run-dir> --after <after-run-dir>",
+    ]
+
+    return "\n".join(lines)

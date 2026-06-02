@@ -354,3 +354,88 @@ def test_render_functions_exported_from_fournex():
     assert hasattr(fn, "render_summary_txt")
     assert hasattr(fn, "render_llm_prompt_txt")
     assert hasattr(fn, "render_evidence_json")
+
+
+# ── enriched brief: new fields in build_explain_result ───────────────────────
+
+_MULTI_KERNEL_CSV = "\n".join([
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "gemm,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,87.0",
+    "gemm,sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active,%,8.0",
+    "gemm,sm__issue_active.avg.pct_of_peak_sustained_active,%,55.0",
+    "softmax,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,72.0",
+    "softmax,sm__issue_active.avg.pct_of_peak_sustained_active,%,30.0",
+    "layernorm,sm__issue_active.avg.pct_of_peak_sustained_active,%,20.0",
+])
+
+
+def test_explain_result_has_top_kernels_roofline_occupancy_keys():
+    ncu = analyze_ncu_csv_text(_UNCOALESCED_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    assert "top_kernels" in result
+    assert "roofline" in result
+    assert "occupancy_summary" in result
+
+
+def test_top_kernels_have_expected_fields():
+    ncu = analyze_ncu_csv_text(_UNCOALESCED_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    for k in result["top_kernels"]:
+        assert "kernel_name" in k
+        assert "opportunity" in k
+
+
+def test_roofline_present_when_arch_profile_available():
+    ncu = analyze_ncu_csv_text(_UNCOALESCED_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    # Default arch profile provides peak specs → roofline should be computed
+    assert result["roofline"] is not None
+    assert "roofline_region" in result["roofline"]
+    assert "mfu_pct" in result["roofline"]
+
+
+def test_prompt_includes_roofline_line():
+    ncu = analyze_ncu_csv_text(_UNCOALESCED_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    txt = render_llm_prompt_txt(result)
+    assert "Roofline region" in txt
+
+
+def test_prompt_single_kernel_omits_top_kernels_section():
+    # Single-kernel workloads should not show a TOP KERNELS section (nothing to rank)
+    ncu = analyze_ncu_csv_text(_UNCOALESCED_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    txt = render_llm_prompt_txt(result)
+    assert "TOP KERNELS" not in txt
+
+
+def test_prompt_multi_kernel_includes_top_kernels_section():
+    ncu = analyze_ncu_csv_text(_MULTI_KERNEL_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    assert len(result["top_kernels"]) > 1
+    txt = render_llm_prompt_txt(result)
+    assert "TOP KERNELS TO OPTIMIZE" in txt
+
+
+def test_prompt_top_kernels_names_appear_in_section():
+    ncu = analyze_ncu_csv_text(_MULTI_KERNEL_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    txt = render_llm_prompt_txt(result)
+    kernel_names = [k["kernel_name"] for k in result["top_kernels"]]
+    top_section = txt.split("TOP KERNELS TO OPTIMIZE")[1].split("EXPECTED IMPROVEMENT")[0]
+    for name in kernel_names:
+        assert name in top_section
+
+
+def test_prompt_secondary_issues_shown_when_multiple_diagnoses():
+    ncu = analyze_ncu_csv_text(_MULTI_KERNEL_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    txt = render_llm_prompt_txt(result)
+    if len(result["diagnoses"]) > 1:
+        assert "SECONDARY ISSUES" in txt
+
+
+def test_top_kernels_capped_at_5():
+    ncu = analyze_ncu_csv_text(_MULTI_KERNEL_CSV)
+    result = build_explain_result(ncu_result=ncu)
+    assert len(result["top_kernels"]) <= 5

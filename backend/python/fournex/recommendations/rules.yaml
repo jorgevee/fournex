@@ -429,11 +429,13 @@
   suppressed_if: {}
   recommendations:
     - rec_ncu_reduce_syncthreads
+    - rec_ncu_shared_mem_layout
   priority_boost: 0.15
   explanation: >
     Warp stalls are dominated by barrier waits, indicating frequent or
-    unnecessary __syncthreads() calls. Reducing synchronization frequency
-    (combining sync points, using warp-level primitives) improves throughput.
+    unnecessary __syncthreads() calls or shared-memory bank conflicts.
+    Reducing synchronization frequency and restructuring shared-memory layout
+    (padding to avoid 32-way bank conflicts) are the two most effective fixes.
 
 # ── NCU: Low issue efficiency ─────────────────────────────────────────────────
 
@@ -593,3 +595,77 @@
   explanation: >
     Conditional branch density is high in PTX, which can indicate warp
     divergence risk if neighboring threads take different paths.
+
+# ── NCU: Roofline — memory-bound kernel ──────────────────────────────────────
+
+- id: rule_ncu_roofline_memory_bound
+  bottleneck: memory_bandwidth_bound
+  min_score: 0.40
+  signals:
+    roofline_region: "memory_bound"
+  suppressed_if: {}
+  recommendations:
+    - rec_roofline_tiling
+    - rec_roofline_kernel_fusion
+  priority_boost: 0.15
+  explanation: >
+    Roofline analysis confirms the kernel is memory-bound — arithmetic intensity
+    is below the ridge point. Tiling through shared memory and kernel fusion are
+    the most effective paths to raise arithmetic intensity and move the kernel
+    toward the compute ceiling.
+
+# ── NCU: Roofline — low MFU on compute-bound kernel ──────────────────────────
+
+- id: rule_ncu_low_mfu_issue
+  bottleneck: low_issue_efficiency
+  min_score: 0.20
+  signals:
+    mfu_low: true
+    roofline_region: "compute_bound"
+  suppressed_if: {}
+  recommendations:
+    - rec_roofline_occupancy
+    - rec_roofline_batch_size
+  priority_boost: 0.15
+  explanation: >
+    The kernel is compute-bound but MFU is below 40% of peak throughput,
+    indicating the GPU is not fully saturated. Increasing parallelism — via
+    larger tiles, more work per block, or a larger batch — is the most direct
+    path to approaching the compute ceiling.
+
+- id: rule_ncu_low_mfu_scheduler
+  bottleneck: low_warp_scheduler_utilization
+  min_score: 0.20
+  signals:
+    mfu_low: true
+    roofline_region: "compute_bound"
+  suppressed_if: {}
+  recommendations:
+    - rec_roofline_occupancy
+    - rec_roofline_batch_size
+  priority_boost: 0.15
+  explanation: >
+    The kernel is compute-bound but MFU is below 40% of peak throughput,
+    indicating the GPU is not fully saturated. Increasing parallelism — via
+    larger tiles, more work per block, or a larger batch — is the most direct
+    path to approaching the compute ceiling.
+
+# ── NCU: Occupancy limited — generic (no specific limiter identified) ─────────
+
+- id: rule_ncu_occupancy_limited
+  bottleneck: occupancy_limited
+  min_score: 0.25
+  signals: {}
+  suppressed_if:
+    occupancy_limited_by_registers: true
+    occupancy_limited_by_shared_memory: true
+    occupancy_limited_by_block_size: true
+  recommendations:
+    - rec_ncu_increase_block_size
+    - rec_ncu_reduce_register_pressure
+  priority_boost: 0.10
+  explanation: >
+    Occupancy is low but the specific limiter (registers, shared memory, or
+    block size) could not be determined from available metrics. Tuning block
+    size with cudaOccupancyMaxPotentialBlockSize() and reducing register usage
+    are the most common first steps.

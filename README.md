@@ -33,8 +33,9 @@ frx profile --ncu ncu_report.csv
 frx collect --name my-run -- python train.py
 frx analyze runs/run-a1b2c3d4e5f6
 
-# Generate a paste-ready LLM optimization brief
+# Generate a paste-ready LLM brief — CUDA kernel or training run
 frx explain ncu_report.csv --src kernel.cu --prompt-only | clip
+frx explain runs/my-run --prompt-only | clip
 ```
 
 Example `frx profile` output:
@@ -97,9 +98,10 @@ frx profile --ncu report.csv                     # analyze saved CSV
 frx profile --ncu report.csv --gpu-model h100    # architecture-aware roofline
 frx profile --ncu report.csv --arch-profile h100-overrides.yaml  # custom specs
 
-# LLM brief
+# LLM brief — auto-detects CSV (kernel) or run directory (training)
 frx explain report.csv --src kernel.cu --out ./brief/
-frx explain report.csv --src kernel.cu --prompt-only | clip
+frx explain runs/my-run --out ./brief/
+frx explain report.csv --prompt-only | clip    # pipe to clipboard
 
 # Training telemetry
 frx collect --name <name> -- python train.py
@@ -143,13 +145,23 @@ Supported GPU families: RTX 30xx (sm_86), A100 (sm_80), RTX 40xx (sm_89), H100 (
 
 ## LLM workflow
 
+`frx explain` works the same way for both CUDA kernels and PyTorch training runs — same three output files, same paste-into-LLM step.
+
+**CUDA kernel:**
 1. `frx profile --ncu report.csv` — identify bottleneck
 2. `frx explain report.csv --src kernel.cu --prompt-only | clip` — generate brief
 3. Paste into Claude / ChatGPT — get targeted fix suggestion
 4. Apply, recompile
 5. `frx bench before.cu after.cu --arch sm_120 --with-ncu` — validate
 
-The brief includes: primary bottleneck, all evidence, expected speedup range, current measured values, exact NCU command to verify the fix, and the kernel source.
+**PyTorch training run:**
+1. `frx collect --name my-run -- python train.py` — collect telemetry
+2. `frx analyze runs/my-run` — review bottleneck report
+3. `frx explain runs/my-run --prompt-only | clip` — generate brief
+4. Paste into Claude / ChatGPT — get targeted fix suggestion
+5. `frx collect --name after-fix -- python train.py && frx analyze --before runs/my-run --after runs/after-fix` — validate
+
+The brief includes: primary bottleneck, Framework Abstraction Tax (when relevant), per-phase timing breakdown, top recommendations with validation steps, and a bottleneck-specific question for the LLM.
 
 ---
 

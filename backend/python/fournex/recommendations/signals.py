@@ -209,6 +209,7 @@ def _roofline_signals(roofline: dict | None) -> dict:
         return {
             "roofline_region": None,
             "mfu_pct": None,
+            "mfu_low": False,
             "arithmetic_intensity": None,
             "achieved_tflops": None,
             "peak_tflops": None,
@@ -217,9 +218,11 @@ def _roofline_signals(roofline: dict | None) -> dict:
             "roofline_ceiling_tflops": None,
             "roofline_estimated": False,
         }
+    mfu = roofline.get("mfu_pct")
     return {
         "roofline_region": roofline.get("roofline_region"),
-        "mfu_pct": roofline.get("mfu_pct"),
+        "mfu_pct": mfu,
+        "mfu_low": mfu is not None and mfu < 40.0,
         "arithmetic_intensity": roofline.get("arithmetic_intensity"),
         "achieved_tflops": roofline.get("achieved_tflops"),
         "peak_tflops": roofline.get("peak_tflops"),

@@ -125,6 +125,9 @@ from .explain import (
     render_summary_txt,
     render_llm_prompt_txt,
     render_evidence_json,
+    build_telemetry_explain_result,
+    render_training_summary_txt,
+    render_training_llm_prompt_txt,
 )
 from .bench import (
     bench_compare,
@@ -151,6 +154,9 @@ __all__ = [
     "render_summary_txt",
     "render_llm_prompt_txt",
     "render_evidence_json",
+    "build_telemetry_explain_result",
+    "render_training_summary_txt",
+    "render_training_llm_prompt_txt",
     "compare_implementations",
     "reconcile_evidence",
     "what_evidence_is_missing",

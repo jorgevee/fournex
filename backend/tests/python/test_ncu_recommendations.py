@@ -136,7 +136,7 @@ def test_warp_stall_sync_recommends_reduce_syncthreads() -> None:
     assert "warp_stall_sync" in result["bottlenecks"]
     ids = result["ids"]
     assert "rec_ncu_reduce_syncthreads" in ids
-    assert "rec_ncu_shared_mem_layout" not in ids
+    assert "rec_ncu_shared_mem_layout" in ids  # bank-conflict fix now wired alongside sync reduction
 
 
 def test_warp_stall_sync_excludes_coalescing() -> None:

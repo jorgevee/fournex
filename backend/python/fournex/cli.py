@@ -699,18 +699,27 @@ def _print_compare_upgrade_hints(result: dict[str, Any]) -> None:
 
 def explain_cmd(args: argparse.Namespace) -> int:
     from pathlib import Path
-    from .explain import build_explain_result, render_summary_txt, render_llm_prompt_txt, render_evidence_json
+    from .explain import (
+        build_explain_result, render_summary_txt, render_llm_prompt_txt, render_evidence_json,
+        build_telemetry_explain_result, render_training_summary_txt, render_training_llm_prompt_txt,
+        _select_scope_data,
+    )
+
+    input_path = Path(args.ncu_path) if args.ncu_path else None
+    if input_path is None or not input_path.exists():
+        print(f"error: file or directory not found: {args.ncu_path}", file=sys.stderr)
+        return 1
+
+    # Auto-detect: directory or zip → training telemetry path; CSV → NCU path.
+    if input_path.is_dir() or input_path.suffix.lower() == ".zip":
+        return _explain_training(args, input_path)
+
+    # ── NCU CSV path (existing) ────────────────────────────────────────────────
     from .ncu_analysis import analyze_ncu_csv_text
     from .cuda_static import inspect_cuda_source
 
-    ncu_path = Path(args.ncu_path) if args.ncu_path else None
-    if ncu_path is None or not ncu_path.exists():
-        print(f"error: NCU CSV file not found: {args.ncu_path}", file=sys.stderr)
-        return 1
-
-    csv_text = ncu_path.read_text(encoding="utf-8", errors="replace")
+    csv_text = input_path.read_text(encoding="utf-8", errors="replace")
     env = _environment_from_args(args)
-
     ncu_result = analyze_ncu_csv_text(csv_text, environment=env)
 
     static_result = None
@@ -723,52 +732,92 @@ def explain_cmd(args: argparse.Namespace) -> int:
             kernel_source = src_path.read_text(encoding="utf-8", errors="replace")
             static_result = inspect_cuda_source(kernel_source, filename=src_path.name, gpu_model=args.gpu_model)
 
-    result = build_explain_result(
-        ncu_result=ncu_result,
-        static_result=static_result,
-        environment=env,
-    )
+    result = build_explain_result(ncu_result=ncu_result, static_result=static_result, environment=env)
 
     if args.prompt_only:
-        print(render_llm_prompt_txt(
-            result,
-            kernel_source=kernel_source,
-            src_filename=src_path.name if src_path else None,
-        ))
+        print(render_llm_prompt_txt(result, kernel_source=kernel_source,
+                                    src_filename=src_path.name if src_path else None))
         return 0
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-
     summary_path  = out_dir / "frx_summary.txt"
     prompt_path   = out_dir / "frx_llm_prompt.txt"
     evidence_path = out_dir / "frx_evidence.json"
 
-    summary_path.write_text(
-        render_summary_txt(
-            result,
-            ncu_filename=ncu_path.name,
-            src_filename=src_path.name if src_path else None,
-        ),
-        encoding="utf-8",
-    )
-    prompt_path.write_text(
-        render_llm_prompt_txt(
-            result,
-            kernel_source=kernel_source,
-            src_filename=src_path.name if src_path else None,
-        ),
-        encoding="utf-8",
-    )
+    summary_path.write_text(render_summary_txt(result, ncu_filename=input_path.name,
+                                               src_filename=src_path.name if src_path else None),
+                            encoding="utf-8")
+    prompt_path.write_text(render_llm_prompt_txt(result, kernel_source=kernel_source,
+                                                 src_filename=src_path.name if src_path else None),
+                           encoding="utf-8")
     evidence_path.write_text(render_evidence_json(result), encoding="utf-8")
 
     primary = result.get("primary_diagnosis") or "(none)"
     diagnoses = result.get("diagnoses", [])
-    conf = next(
-        (d["confidence"] for d in diagnoses if d["label"] == primary),
-        "",
+    conf = next((d["confidence"] for d in diagnoses if d["label"] == primary), "")
+    _print_explain_footer(summary_path, prompt_path, evidence_path, primary, conf)
+    return 0
+
+
+def _explain_training(args: Any, run_path: Any) -> int:
+    """Training-telemetry explain path (run dir or zip)."""
+    from pathlib import Path
+    from .explain import (
+        build_telemetry_explain_result, render_training_summary_txt,
+        render_training_llm_prompt_txt, render_evidence_json, _select_scope_data,
     )
 
+    run_path = Path(run_path)
+
+    # Zip extraction (reuse existing helper)
+    import tempfile, shutil
+    tmp_dir: str | None = None
+    if run_path.suffix.lower() == ".zip":
+        tmp_dir = tempfile.mkdtemp(prefix="frx_explain_")
+        shutil.unpack_archive(str(run_path), tmp_dir)
+        run_path = Path(tmp_dir)
+
+    try:
+        summary = _load_or_generate_summary(run_path)
+        if summary is None:
+            print(f"error: no analysis data found in {run_path}. "
+                  "Run 'frx collect' first or check the directory.", file=sys.stderr)
+            return 1
+
+        scope_arg = getattr(args, "scope", "auto")
+        scope_data = _select_scope_data(summary, scope_arg)
+        run_id = run_path.name
+
+        result = build_telemetry_explain_result(scope_data=scope_data)
+
+        if getattr(args, "prompt_only", False):
+            print(render_training_llm_prompt_txt(result))
+            return 0
+
+        out_dir = Path(args.out)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        summary_path  = out_dir / "frx_summary.txt"
+        prompt_path   = out_dir / "frx_llm_prompt.txt"
+        evidence_path = out_dir / "frx_evidence.json"
+
+        summary_path.write_text(render_training_summary_txt(result, run_id=run_id), encoding="utf-8")
+        prompt_path.write_text(render_training_llm_prompt_txt(result), encoding="utf-8")
+        evidence_path.write_text(render_evidence_json(result), encoding="utf-8")
+
+        primary = result.get("primary_bottleneck") or "(none)"
+        conf_level = result.get("confidence", {}).get("level", "")
+        _print_explain_footer(summary_path, prompt_path, evidence_path, primary, conf_level)
+        return 0
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _print_explain_footer(
+    summary_path: Any, prompt_path: Any, evidence_path: Any,
+    primary: str, conf: str,
+) -> None:
     print()
     print("  frx explain complete")
     print()
@@ -776,13 +825,13 @@ def explain_cmd(args: argparse.Namespace) -> int:
     print(f"  frx_llm_prompt.txt  ->  {prompt_path}")
     print(f"  frx_evidence.json   ->  {evidence_path}")
     print()
+    label = primary.replace("_", " ") if primary else "(none)"
     if conf:
-        print(f"  Primary issue  : {primary.replace('_', ' ')}  ({conf})")
+        print(f"  Primary issue  : {label}  ({conf})")
     else:
-        print(f"  Primary issue  : {primary.replace('_', ' ')}")
+        print(f"  Primary issue  : {label}")
     print("  Paste frx_llm_prompt.txt into your preferred LLM for optimization suggestions.")
     print()
-    return 0
 
 
 def bench_cmd(args: argparse.Namespace) -> int:
@@ -1111,14 +1160,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     explain_parser = subparsers.add_parser(
         "explain",
-        help="generate LLM-ready optimization brief from profiler output",
+        help="generate LLM-ready optimization brief from NCU CSV or a training run directory",
     )
     explain_parser.add_argument(
         "ncu_path",
-        metavar="NCU_CSV",
+        metavar="PATH",
         nargs="?",
         default=None,
-        help="Nsight Compute CSV file to analyze",
+        help="NCU CSV file  OR  frx run directory (auto-detected by type)",
+    )
+    explain_parser.add_argument(
+        "--scope",
+        choices=["run", "steady_state", "auto"],
+        default="auto",
+        help="which analysis scope to use for run directories (default: steady_state when available)",
     )
     explain_parser.add_argument(
         "--src",

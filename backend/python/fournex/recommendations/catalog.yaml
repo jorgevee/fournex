@@ -417,7 +417,7 @@
   effort: low
   safety: high
   action_templates:
-    - "Call autopilot.init() before the training loop begins."
+    - "Call frx.init() before the training loop begins."
     - "Verify that instrument_dataloader() wraps the DataLoader."
     - "Confirm step_start and step_end events appear in the event log."
   validation_templates:
