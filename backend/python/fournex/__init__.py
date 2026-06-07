@@ -109,7 +109,7 @@ from .ptx_analysis import (
 )
 from .comparison import compare_implementations
 from .reconciliation import reconcile_evidence, what_evidence_is_missing
-from .arch_profiles import get_arch_profile, load_arch_profile_overrides, resolve_sm_version
+from .arch_profiles import detect_gpu_model, get_arch_profile, load_arch_profile_overrides, resolve_sm_version
 from .ncu_comparison import diff_ncu_runs
 from .cuda_static import (
     CudaKernelSource,
@@ -195,6 +195,7 @@ __all__ = [
     "build_runtime_event",
     "classify_bottlenecks",
     "compute_framework_abstraction_tax",
+    "detect_gpu_model",
     "clear_local_events",
     "derive_ir_bottleneck_annotations",
     "derive_ir_run_summary",

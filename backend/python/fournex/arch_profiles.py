@@ -161,6 +161,10 @@ _PRODUCT_TO_SM: dict[str, str] = {
     "b200": "sm_100",
     "rtx5090": "sm_120",
     "rtx5080": "sm_120",
+    "rtx5070ti": "sm_120",
+    "rtx5070": "sm_120",
+    "rtx5060ti": "sm_120",
+    "rtx5060": "sm_120",
 }
 
 
@@ -174,6 +178,28 @@ def resolve_sm_version(gpu_model: str | None) -> str | None:
     if normalized.startswith("sm_"):
         return normalized if normalized in _PROFILES else None
     return _PRODUCT_TO_SM.get(normalized)
+
+
+def detect_gpu_model(gpu_name: str | None) -> str | None:
+    """Infer a canonical GPU model key from a raw device name string.
+
+    Matches the full device name (e.g. "NVIDIA H100 80GB HBM3") against the
+    known product keys in ``_PRODUCT_TO_SM`` by checking whether any key is a
+    substring of the normalized device name. Returns the longest matching key so
+    that "rtx3090ti" wins over "rtx3090" for an RTX 3090 Ti device.
+
+    Returns ``None`` when no known product key matches.
+    """
+    if not gpu_name:
+        return None
+    normalized = gpu_name.lower().replace("nvidia ", "").replace(" ", "").replace("-", "")
+    # Longest match wins (avoids "a100" matching "a10" prefix)
+    best: str | None = None
+    for key in _PRODUCT_TO_SM:
+        if key in normalized:
+            if best is None or len(key) > len(best):
+                best = key
+    return best
 
 
 def load_arch_profile_overrides(path: str | Path | None) -> dict[str, Any]:

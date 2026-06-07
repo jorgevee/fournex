@@ -50,6 +50,8 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return collect(args)
     elif args.command == "analyze":
         return analyze(args)
+    elif args.command == "init":
+        return init_cmd(args)
     elif args.command == "doctor":
         return doctor(args)
     elif args.command == "smoke-test":
@@ -184,6 +186,14 @@ def collect(args: argparse.Namespace) -> int:
         _zip_run_dir(run_dir, zip_path)
 
     _print_collection_summary(run_dir, zip_path, manifest, exit_code, imported)
+
+    if getattr(args, "explain", False):
+        print("\n  Generating LLM brief from run data...")
+        explain_out = Path(getattr(args, "explain_out", None) or ".")
+        rc = _explain_training(args, run_dir)
+        if rc == 0:
+            print(f"  LLM brief written to {explain_out / 'frx_llm_prompt.txt'}")
+            print("  Paste frx_llm_prompt.txt into your LLM for optimization suggestions.")
 
     return exit_code
 
@@ -961,6 +971,19 @@ def _build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument("--run-id", default=None)
     collect_parser.add_argument("--no-zip", action="store_true")
     collect_parser.add_argument(
+        "--explain",
+        action="store_true",
+        default=False,
+        help="after collection, automatically generate the LLM optimization brief",
+    )
+    collect_parser.add_argument(
+        "--explain-out",
+        dest="explain_out",
+        default=None,
+        metavar="DIR",
+        help="directory for LLM brief files when --explain is set (default: current directory)",
+    )
+    collect_parser.add_argument(
         "--artifact-dir",
         action="append",
         dest="artifact_dirs",
@@ -1014,6 +1037,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     analyze_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
 
+    init_parser = subparsers.add_parser(
+        "init",
+        help="guided setup: check environment and show how to instrument your training loop",
+    )
+    init_parser.add_argument(
+        "--patch",
+        metavar="FILE",
+        default=None,
+        help="training script to patch with SDK instrumentation (asks for confirmation)",
+    )
+
     subparsers.add_parser("doctor", help="check environment for frx requirements")
 
     subparsers.add_parser("smoke-test", help="run a synthetic workload and verify end-to-end bundle generation")
@@ -1064,6 +1098,19 @@ def _build_parser() -> argparse.ArgumentParser:
     profile_parser.add_argument("--gpu-model", default=None, help="GPU model hint for launch advisor")
     profile_parser.add_argument("--arch-profile", default=None, metavar="YAML", help="YAML hardware-spec overrides for roofline analysis")
     profile_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
+    profile_parser.add_argument(
+        "--explain",
+        action="store_true",
+        default=False,
+        help="after profiling, also write frx_summary.txt / frx_llm_prompt.txt / frx_evidence.json",
+    )
+    profile_parser.add_argument(
+        "--explain-out",
+        dest="explain_out",
+        default=None,
+        metavar="DIR",
+        help="directory for LLM brief files when --explain is set (default: current directory)",
+    )
     profile_parser.add_argument("workload_command", nargs=argparse.REMAINDER)
 
     tune_parser = subparsers.add_parser(
@@ -1272,7 +1319,14 @@ def _detect_environment() -> dict[str, Any]:
         env["pytorch_version"] = getattr(torch, "__version__", "unknown")
         env["cuda_available"] = bool(torch.cuda.is_available())
         env["num_gpus"] = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
-        env["gpu_name"] = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+        gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+        env["gpu_name"] = gpu_name
+        if gpu_name and "gpu_model" not in env:
+            from .arch_profiles import detect_gpu_model
+            detected = detect_gpu_model(gpu_name)
+            if detected:
+                env["gpu_model"] = detected
+                env["gpu_type"] = detected
     except Exception as exc:
         env["framework"] = "unknown"
         env["framework_detection_error"] = str(exc)
@@ -1435,6 +1489,22 @@ def profile(args: argparse.Namespace) -> int:
         return 0
 
     _print_ncu_report_full(result, source=source_label, args=args)
+
+    if getattr(args, "explain", False):
+        from .explain import build_explain_result, render_summary_txt, render_llm_prompt_txt, render_evidence_json
+        explain_result = build_explain_result(ncu_result=result, environment=environment)
+        out_dir = Path(getattr(args, "explain_out", None) or ".")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "frx_summary.txt").write_text(
+            render_summary_txt(explain_result, ncu_filename=source_label), encoding="utf-8"
+        )
+        (out_dir / "frx_llm_prompt.txt").write_text(
+            render_llm_prompt_txt(explain_result), encoding="utf-8"
+        )
+        (out_dir / "frx_evidence.json").write_text(render_evidence_json(explain_result), encoding="utf-8")
+        print(f"\n  LLM brief written to {out_dir / 'frx_llm_prompt.txt'}")
+        print("  Paste frx_llm_prompt.txt into your LLM for optimization suggestions.")
+
     return 0
 
 
@@ -2057,6 +2127,159 @@ def _detect_analysis_input_kind(path: Path, text: str) -> str:
 
 def _print_json_result(mode: str, result: dict[str, Any]) -> None:
     print(json.dumps({"mode": mode, "result": result}, indent=2))
+
+
+_SDK_SNIPPET = """\
+import fournex as frx
+
+frx.init(job_name="my-run")
+
+for step, batch in enumerate(dataloader):
+    with frx.step_context(step=step, batch=batch, model=model):
+        # your existing training step here
+        pass
+"""
+
+_TRAINING_SCRIPT_NAMES = ("train.py", "train.py", "main.py", "run.py", "finetune.py")
+
+
+def _detect_training_script(cwd: Path) -> Path | None:
+    """Return the first likely training script found in cwd, or None."""
+    for name in _TRAINING_SCRIPT_NAMES:
+        p = cwd / name
+        if p.exists():
+            return p
+    for p in sorted(cwd.glob("train_*.py")):
+        return p
+    return None
+
+
+def _already_instrumented(text: str) -> bool:
+    return "fournex" in text or "frx.init" in text
+
+
+def _patch_script(script_path: Path) -> bool:
+    """Insert SDK snippet after the last top-level import line, with confirmation."""
+    text = script_path.read_text(encoding="utf-8")
+    if _already_instrumented(text):
+        print(f"\n  {script_path.name} already contains fournex instrumentation — nothing to do.")
+        return True
+
+    lines = text.splitlines(keepends=True)
+    last_import_idx = -1
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("import ") or stripped.startswith("from "):
+            last_import_idx = i
+
+    insert_at = last_import_idx + 1 if last_import_idx >= 0 else 0
+    snippet_lines = ["\n", "import fournex as frx\n", "frx.init(job_name=\"my-run\")\n", "\n"]
+    new_lines = lines[:insert_at] + snippet_lines + lines[insert_at:]
+
+    print(f"\n  Will add these lines after line {insert_at} of {script_path.name}:")
+    for line in snippet_lines:
+        print(f"  + {line}", end="")
+    print()
+
+    answer = input("\n  Apply? [y/N] ").strip().lower()
+    if answer == "y":
+        script_path.write_text("".join(new_lines), encoding="utf-8")
+        print(f"  Patched {script_path}")
+        return True
+    else:
+        print("  Skipped.")
+        return False
+
+
+def init_cmd(args: argparse.Namespace) -> int:
+    """Guided onboarding: environment check + SDK snippet + optional script patch."""
+    cwd = Path.cwd()
+
+    # ── Environment status ────────────────────────────────────────────────────
+    print("\nfrx init\n")
+
+    python_ok = True
+    torch_ok = False
+    cuda_ok = False
+    ncu_ok = bool(shutil.which("ncu"))
+    gpu_label = "not detected"
+
+    print(f"  Python {platform.python_version():<10} OK")
+
+    try:
+        import torch  # type: ignore
+        torch_ok = True
+        tv = getattr(torch, "__version__", "?")
+        print(f"  PyTorch {tv:<9} OK")
+        if torch.cuda.is_available():
+            cuda_ok = True
+            gpu_name = torch.cuda.get_device_name(0)
+            from .arch_profiles import detect_gpu_model
+            detected = detect_gpu_model(gpu_name)
+            gpu_label = f"{gpu_name}" + (f" -> {detected}" if detected else "")
+            print(f"  CUDA              OK  ({gpu_label})")
+        else:
+            print("  CUDA              WARN  (torch.cuda.is_available() is False)")
+    except ImportError:
+        print("  PyTorch           FAIL  (not installed — run: pip install torch)")
+
+    if ncu_ok:
+        print(f"  ncu               OK  ({shutil.which('ncu')})")
+    else:
+        print("  ncu               not found  (kernel profiling needs Nsight Compute)")
+
+    # ── Detect training script ────────────────────────────────────────────────
+    script = _detect_training_script(cwd)
+
+    # ── Print next steps ──────────────────────────────────────────────────────
+    print()
+    if torch_ok:
+        script_name = script.name if script else "train.py"
+        already = script and _already_instrumented(script.read_text(encoding="utf-8"))
+
+        if already:
+            print(f"  {script_name} is already instrumented with fournex.")
+            print()
+            print("  Run:")
+            print(f"    frx collect --explain -- python {script_name}")
+            print("  Then paste frx_llm_prompt.txt into your LLM.")
+        else:
+            if script:
+                print(f"  Found {script_name}. Add these lines to instrument it:")
+            else:
+                print("  Add these lines to your training script:")
+            print()
+            for line in _SDK_SNIPPET.splitlines():
+                print(f"    {line}")
+            print()
+            print("  Then run:")
+            print(f"    frx collect --explain -- python {script_name}")
+            print("  Paste frx_llm_prompt.txt into your LLM for optimization suggestions.")
+            if script:
+                print(f"\n  Or run:  frx init --patch {script_name}  to add the snippet automatically.")
+    elif ncu_ok:
+        print("  PyTorch not found. For CUDA kernel profiling:")
+        print()
+        print("    frx profile --ncu report.csv --explain")
+        print()
+        print("  Collect a report with:")
+        print("    frx ncu-command full --output report.csv -- ./your_kernel_app")
+    else:
+        print("  Install PyTorch for training analysis, or Nsight Compute for kernel profiling.")
+        print("  Then re-run frx init.")
+
+    print()
+
+    # ── Optional patch ────────────────────────────────────────────────────────
+    patch_target = getattr(args, "patch", None)
+    if patch_target:
+        patch_path = Path(patch_target)
+        if not patch_path.exists():
+            print(f"  error: file not found: {patch_path}", file=sys.stderr)
+            return 1
+        _patch_script(patch_path)
+
+    return 0
 
 
 def doctor(args: argparse.Namespace) -> int:

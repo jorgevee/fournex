@@ -23,19 +23,14 @@ Python 3.10+. A CUDA GPU is needed for live profiling; NCU CSV, PTX, and source 
 ## Quick start
 
 ```bash
-# Profile a kernel — runs NCU and prints the full report
-frx profile -- ./my_kernel_app
+# First time? Let Fournex detect your setup and show what to run:
+frx init
 
-# Or analyze an existing NCU CSV
-frx profile --ncu ncu_report.csv
+# Profile a kernel + generate LLM brief in one step
+frx profile --ncu ncu_report.csv --explain
 
-# Collect + analyze a PyTorch training run
-frx collect --name my-run -- python train.py
-frx analyze runs/run-a1b2c3d4e5f6
-
-# Generate a paste-ready LLM brief — CUDA kernel or training run
-frx explain ncu_report.csv --src kernel.cu --prompt-only | clip
-frx explain runs/my-run --prompt-only | clip
+# Collect training telemetry + generate LLM brief in one step
+frx collect --name my-run --explain -- python train.py
 ```
 
 Example `frx profile` output:
@@ -99,9 +94,10 @@ frx profile --ncu report.csv --gpu-model h100    # architecture-aware roofline
 frx profile --ncu report.csv --arch-profile h100-overrides.yaml  # custom specs
 
 # LLM brief — auto-detects CSV (kernel) or run directory (training)
+frx profile --ncu report.csv --explain          # profile + brief in one command
 frx explain report.csv --src kernel.cu --out ./brief/
 frx explain runs/my-run --out ./brief/
-frx explain report.csv --prompt-only | clip    # pipe to clipboard
+frx explain report.csv --prompt-only | clip     # pipe to clipboard
 
 # Training telemetry
 frx collect --name <name> -- python train.py
@@ -116,13 +112,15 @@ frx analyze --before before.csv --after after.csv
 frx bench before.cu after.cu --arch sm_120 --with-ncu
 
 # Utilities
+frx init                                            # guided setup + SDK snippet
+frx init --patch train.py                           # auto-add SDK lines to your script
 frx ncu-command full --output report.csv -- ./app   # print NCU command
-frx doctor                                          # check environment
+frx doctor                                          # detailed environment check
 ```
 
 ### `--gpu-model` and `--arch-profile`
 
-Pass `--gpu-model` to apply architecture-aware thresholds and roofline specs:
+Fournex auto-detects your GPU when PyTorch is available (`torch.cuda.get_device_name()`). Pass `--gpu-model` explicitly to override or when running without PyTorch:
 
 ```bash
 frx profile --ncu report.csv --gpu-model h100
@@ -148,18 +146,16 @@ Supported GPU families: RTX 30xx (sm_86), A100 (sm_80), RTX 40xx (sm_89), H100 (
 `frx explain` works the same way for both CUDA kernels and PyTorch training runs — same three output files, same paste-into-LLM step.
 
 **CUDA kernel:**
-1. `frx profile --ncu report.csv` — identify bottleneck
-2. `frx explain report.csv --src kernel.cu --prompt-only | clip` — generate brief
-3. Paste into Claude / ChatGPT — get targeted fix suggestion
-4. Apply, recompile
-5. `frx bench before.cu after.cu --arch sm_120 --with-ncu` — validate
+1. `frx profile --ncu report.csv --explain` — identify bottleneck + generate brief in one step
+2. Paste `frx_llm_prompt.txt` into Claude / ChatGPT — get targeted fix suggestion
+3. Apply, recompile
+4. `frx bench before.cu after.cu --arch sm_120 --with-ncu` — validate
 
 **PyTorch training run:**
-1. `frx collect --name my-run -- python train.py` — collect telemetry
-2. `frx analyze runs/my-run` — review bottleneck report
-3. `frx explain runs/my-run --prompt-only | clip` — generate brief
-4. Paste into Claude / ChatGPT — get targeted fix suggestion
-5. `frx collect --name after-fix -- python train.py && frx analyze --before runs/my-run --after runs/after-fix` — validate
+1. `frx collect --name my-run --explain -- python train.py` — collect telemetry + generate brief in one step
+2. Paste `frx_llm_prompt.txt` into Claude / ChatGPT — get targeted fix suggestion
+3. Apply fix
+4. `frx collect --name after-fix -- python train.py && frx analyze --before runs/my-run --after runs/after-fix` — validate
 
 The brief includes: primary bottleneck, Framework Abstraction Tax (when relevant), per-phase timing breakdown, top recommendations with validation steps, and a bottleneck-specific question for the LLM.
 

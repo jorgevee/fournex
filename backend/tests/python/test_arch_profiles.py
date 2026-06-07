@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 import fournex as fn
-from fournex.arch_profiles import get_arch_profile, list_known_gpus, load_arch_profile_overrides, resolve_sm_version
+from fournex.arch_profiles import detect_gpu_model, get_arch_profile, list_known_gpus, load_arch_profile_overrides, resolve_sm_version
 from fournex.cuda_rules.engine import extract_source_signals, load_rules, match_rules
 from fournex.cuda_static import inspect_cuda_source, parse_cuda_kernels
 from fournex.kernel_inspector import device_limits_for_gpu
@@ -27,6 +27,42 @@ def test_resolve_rtx4090():
 
 def test_resolve_t4():
     assert resolve_sm_version("t4") == "sm_75"
+
+
+# ── detect_gpu_model ──────────────────────────────────────────────────────────
+
+def test_detect_h100_full_name():
+    assert detect_gpu_model("NVIDIA H100 80GB HBM3") == "h100"
+
+def test_detect_a100_sxm():
+    assert detect_gpu_model("NVIDIA A100-SXM4-80GB") == "a100"
+
+def test_detect_rtx5060():
+    assert detect_gpu_model("NVIDIA GeForce RTX 5060") == "rtx5060"
+
+def test_detect_rtx4090():
+    assert detect_gpu_model("NVIDIA GeForce RTX 4090") == "rtx4090"
+
+def test_detect_t4():
+    assert detect_gpu_model("Tesla T4") == "t4"
+
+def test_detect_l4():
+    assert detect_gpu_model("NVIDIA L4") == "l4"
+
+def test_detect_prefers_longer_match():
+    # "rtx3090ti" must win over "rtx3090" for a 3090 Ti device
+    assert detect_gpu_model("NVIDIA GeForce RTX 3090 Ti") == "rtx3090ti"
+
+def test_detect_unknown_returns_none():
+    assert detect_gpu_model("NVIDIA Quadro P4000") is None
+
+def test_detect_none_returns_none():
+    assert detect_gpu_model(None) is None
+
+def test_detect_exported_from_fournex():
+    import fournex as fn
+    assert hasattr(fn, "detect_gpu_model")
+    assert fn.detect_gpu_model("NVIDIA H100 80GB HBM3") == "h100"
 
 def test_resolve_unknown_returns_none():
     assert resolve_sm_version("unknown_gpu_xyz") is None
