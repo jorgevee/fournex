@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import summarize_run, summarize_run_with_steady_state
+from .common_ir import RunRecord
 from .sdk import get_local_events, get_runtime_config
+
+
+def load_run_record(path: str | Path) -> RunRecord:
+    """Load a serialized RunRecord JSON through the schema-version gate."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return RunRecord.from_dict(data)
 
 
 def persist_local_trace(

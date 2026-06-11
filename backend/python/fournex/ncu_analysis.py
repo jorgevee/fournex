@@ -4,6 +4,7 @@ from typing import Any
 
 from .kernel_inspector import KernelLaunchSummary, parse_nsight_compute_csv, parse_nsight_compute_csv_text
 from .ncu_presets import NCU_METRIC_PRESETS
+from .thresholds import CLASSIFIER_VERSION, ClassifierThresholds, DEFAULT_THRESHOLDS, resolve_thresholds
 
 _MEMORY_STALL_TYPES = frozenset({"memory_throttle", "long_scoreboard", "mio", "lg", "texture"})
 _COMPUTE_STALL_TYPES = frozenset({"short_scoreboard", "dispatch", "not_selected"})
@@ -23,6 +24,10 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
             "avg_global_load_sectors_per_request": None,
             "avg_issue_slot_utilization_pct": None,
             "avg_occupancy_pct": None,
+            "avg_theoretical_occupancy_pct": None,
+            "avg_sm_throughput_pct": None,
+            "avg_l1tex_throughput_pct": None,
+            "avg_memory_busy_pct": None,
             "avg_eligible_warps_per_scheduler": None,
             "avg_scheduler_active_pct": None,
             "avg_registers_per_thread": None,
@@ -60,6 +65,10 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         for s in summaries
         if s.achieved_occupancy_pct is not None or isinstance(s.occupancy_estimate, dict)
     ]
+    theoretical_occs = [s.theoretical_occupancy_pct for s in summaries]
+    sm_throughputs = [s.sm_throughput_pct for s in summaries]
+    l1tex_throughputs = [s.l1tex_throughput_pct for s in summaries]
+    memory_busys = [s.memory_busy_pct for s in summaries]
     limiting_factor_counts: dict[str, int] = {}
     for s in summaries:
         estimate = s.occupancy_estimate if isinstance(s.occupancy_estimate, dict) else {}
@@ -139,6 +148,10 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         "avg_global_load_sectors_per_request": _avg(load_sectors),
         "avg_issue_slot_utilization_pct": _avg(isus),
         "avg_occupancy_pct": _avg(occs),
+        "avg_theoretical_occupancy_pct": _avg(theoretical_occs),
+        "avg_sm_throughput_pct": _avg(sm_throughputs),
+        "avg_l1tex_throughput_pct": _avg(l1tex_throughputs),
+        "avg_memory_busy_pct": _avg(memory_busys),
         "avg_eligible_warps_per_scheduler": _avg(eligible_warps),
         "avg_scheduler_active_pct": _avg(scheduler_active),
         "avg_registers_per_thread": _avg(regs),
@@ -155,7 +168,11 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     }
 
 
-def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]]:
+def classify_ncu_bottlenecks(
+    ncu_summary: dict[str, Any],
+    *,
+    thresholds: ClassifierThresholds | None = None,
+) -> list[dict[str, Any]]:
     bottlenecks: list[dict[str, Any]] = []
     kernels_with_data = ncu_summary.get("kernels_with_ncu_data", 0)
 
@@ -168,6 +185,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
         })
         return bottlenecks
 
+    t = thresholds or DEFAULT_THRESHOLDS
     dram = ncu_summary.get("avg_dram_throughput_pct")
     tc = ncu_summary.get("avg_tensor_core_utilization_pct")
     l1 = ncu_summary.get("avg_l1_cache_hit_rate_pct")
@@ -182,7 +200,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
     dominant_stall = ncu_summary.get("dominant_warp_stall", "unknown")
     dominant_stall_pct = ncu_summary.get("dominant_warp_stall_pct", 0.0)
 
-    if dram is not None and dram > 70.0 and mem_frac > 0.50:
+    if dram is not None and dram > t.ncu_dram_throughput_high_pct and mem_frac > t.ncu_memory_stall_fraction_min:
         bottlenecks.append({
             "label": "memory_bandwidth_bound",
             "score": round(min(dram / 100.0, 1.0), 4),
@@ -194,7 +212,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if dominant_stall in _MEMORY_STALL_TYPES and dominant_stall_pct > 20.0:
+    if dominant_stall in _MEMORY_STALL_TYPES and dominant_stall_pct > t.ncu_dominant_warp_stall_pct:
         bottlenecks.append({
             "label": "warp_stall_memory",
             "score": round(min(dominant_stall_pct / 100.0, 1.0), 4),
@@ -206,7 +224,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if dominant_stall in _SYNC_STALL_TYPES and dominant_stall_pct > 20.0:
+    if dominant_stall in _SYNC_STALL_TYPES and dominant_stall_pct > t.ncu_dominant_warp_stall_pct:
         stall_breakdown = ncu_summary.get("warp_stall_breakdown", {})
         total_sync_stall_pct = sum(
             v for k, v in stall_breakdown.items() if k in _SYNC_STALL_TYPES
@@ -222,7 +240,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if l1 is not None and l1 < 40.0:
+    if l1 is not None and l1 < t.ncu_l1_hit_low_pct:
         bottlenecks.append({
             "label": "l1_cache_thrashing",
             "score": round(max(0.0, 1.0 - l1 / 100.0), 4),
@@ -233,7 +251,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if l2 is not None and l2 < 50.0:
+    if l2 is not None and l2 < t.ncu_l2_hit_low_pct:
         bottlenecks.append({
             "label": "l2_cache_thrashing",
             "score": round(max(0.0, 1.0 - l2 / 100.0), 4),
@@ -244,7 +262,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if load_sectors is not None and load_sectors > 4.0:
+    if load_sectors is not None and load_sectors > t.ncu_load_sectors_per_request_high:
         bottlenecks.append({
             "label": "uncoalesced_access",
             "score": round(min(1.0, max(0.0, (load_sectors - 1.0) / 10.0)), 4),
@@ -254,7 +272,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if tc is not None and tc < 30.0 and (occ is None or occ > 40.0):
+    if tc is not None and tc < t.ncu_tc_util_low_pct and (occ is None or occ > t.ncu_tc_occupancy_ok_pct):
         bottlenecks.append({
             "label": "tensor_core_underutilized",
             "score": round(max(0.0, 1.0 - tc / 100.0), 4),
@@ -265,10 +283,10 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if occ is not None and occ < 40.0:
+    if occ is not None and occ < t.ncu_occupancy_low_pct:
         bottlenecks.append({
             "label": "occupancy_limited",
-            "score": round(max(0.0, 1.0 - occ / 40.0), 4),
+            "score": round(max(0.0, 1.0 - occ / t.ncu_occupancy_low_pct), 4),
             "evidence": {
                 "avg_occupancy_pct": occ,
                 "occupancy_limit_causes": sorted(causes),
@@ -299,14 +317,14 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
                 })
 
     if (
-        (eligible is not None and eligible < 1.0)
-        or (scheduler_active is not None and scheduler_active < 40.0)
+        (eligible is not None and eligible < t.ncu_eligible_warps_low)
+        or (scheduler_active is not None and scheduler_active < t.ncu_scheduler_active_low_pct)
     ):
         bottlenecks.append({
             "label": "low_warp_scheduler_utilization",
             "score": round(max(
-                1.0 - (eligible or 1.0) / 1.0 if eligible is not None else 0.0,
-                1.0 - (scheduler_active or 40.0) / 40.0 if scheduler_active is not None else 0.0,
+                1.0 - (eligible or t.ncu_eligible_warps_low) / t.ncu_eligible_warps_low if eligible is not None else 0.0,
+                1.0 - (scheduler_active or t.ncu_scheduler_active_low_pct) / t.ncu_scheduler_active_low_pct if scheduler_active is not None else 0.0,
             ), 4),
             "evidence": {
                 "avg_eligible_warps_per_scheduler": eligible,
@@ -316,7 +334,7 @@ def classify_ncu_bottlenecks(ncu_summary: dict[str, Any]) -> list[dict[str, Any]
             "worst_steps": [],
         })
 
-    if isu is not None and isu < 60.0:
+    if isu is not None and isu < t.ncu_issue_slot_low_pct:
         bottlenecks.append({
             "label": "low_issue_efficiency",
             "score": round(max(0.0, 1.0 - isu / 100.0), 4),
@@ -390,12 +408,17 @@ def _build_ncu_result(
         [k["occupancy_analysis"] for k in per_kernel]
     )
 
+    resolved = resolve_thresholds(env if env else None)
     validation = validate_ncu_csv_text(source_text or "", summaries=summaries)
-    bottlenecks = classify_ncu_bottlenecks(ncu_summary)
+    bottlenecks = classify_ncu_bottlenecks(ncu_summary, thresholds=resolved.values)
     signals = extract_ncu_signals(ncu_summary, bottlenecks, env)
     rec_result = generate_recommendations(bottlenecks, ncu_summary, signals=signals)
 
-    primary = bottlenecks[0]["label"] if bottlenecks else None
+    # Use "inconclusive" when NCU data was present but no bottleneck cleared the
+    # threshold — better UX than null, and clearly distinct from "no data at all".
+    primary = bottlenecks[0]["label"] if bottlenecks else (
+        "inconclusive" if ncu_summary.get("kernels_with_ncu_data", 0) > 0 else None
+    )
     secondary = [b["label"] for b in bottlenecks[1:3]]
 
     return {
@@ -418,6 +441,12 @@ def _build_ncu_result(
         "kernel_attribution": kernel_attribution,
         "tc_summary": tc_summary,
         "occupancy_summary": occupancy_summary,
+        "classifier": {
+            "classifier_version": CLASSIFIER_VERSION,
+            "thresholds_source": resolved.source,
+            "thresholds_hash": resolved.thresholds_hash,
+            "sm_version": resolved.sm_version,
+        },
     }
 
 
@@ -439,6 +468,10 @@ def validate_ncu_csv_text(
         and not line.lstrip().startswith("#")
         and not line.lstrip().startswith("==")
     ]
+    # Apply the same quoted-line filter as the parser: when stdout leakage is present,
+    # only keep CSV-quoted lines so the header detection sees a clean column list.
+    if clean_lines and any(line.lstrip().startswith('"') for line in clean_lines):
+        clean_lines = [line for line in clean_lines if line.lstrip().startswith('"')]
     warnings: list[str] = []
     errors: list[str] = []
 

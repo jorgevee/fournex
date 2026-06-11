@@ -5,8 +5,7 @@ from statistics import mean
 from typing import Any
 
 from .recommendations import generate_recommendations
-
-CLASSIFIER_VERSION = "0.2.0"
+from .thresholds import CLASSIFIER_VERSION, ClassifierThresholds, DEFAULT_THRESHOLDS, ResolvedThresholds, resolve_thresholds
 
 DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
 
@@ -34,11 +33,12 @@ def summarize_step_scope(
     selected_step_ids = sorted({int(step_id) for step_id in step_ids}) if step_ids is not None else None
     scoped_steps = _select_steps(resolved_per_step, selected_step_ids)
     run_summary = derive_run_summary(events, scoped_steps)
-    bottlenecks = classify_bottlenecks(events, scoped_steps, run_summary)
-    diagnosis = build_diagnosis_result(bottlenecks, run_summary, scoped_steps, environment)
+    resolved = resolve_thresholds(environment)
+    bottlenecks = classify_bottlenecks(events, scoped_steps, run_summary, thresholds=resolved.values)
+    diagnosis = build_diagnosis_result(bottlenecks, run_summary, scoped_steps, environment, _resolved=resolved)
 
     from .framework_abstraction_tax import compute_framework_abstraction_tax
-    framework_abstraction_tax = compute_framework_abstraction_tax(run_summary, bottlenecks)
+    framework_abstraction_tax = compute_framework_abstraction_tax(run_summary, bottlenecks, thresholds=resolved.values)
 
     summary = {
         "event_count": len(events),
@@ -160,7 +160,10 @@ def classify_bottlenecks(
     events: list[dict[str, Any]],
     per_step: list[dict[str, Any]],
     run_summary: dict[str, Any],
+    *,
+    thresholds: ClassifierThresholds | None = None,
 ) -> list[dict[str, Any]]:
+    t = thresholds or DEFAULT_THRESHOLDS
     completed_steps = [step for step in per_step if step["status"] == "ok" and step["step_wall_time_ns"] > 0]
     if not completed_steps:
         return []
@@ -171,7 +174,7 @@ def classify_bottlenecks(
         _bounded_ratio(step["dataloader_wait_time_ns"], step["step_wall_time_ns"])
         for step in completed_steps
     )
-    if input_ratio >= 0.2:
+    if input_ratio >= t.input_bound_ratio:
         classifications.append(
             _classification(
                 "input_bound",
@@ -191,7 +194,7 @@ def classify_bottlenecks(
         _bounded_ratio(step["h2d_copy_time_ns"], step["step_wall_time_ns"])
         for step in completed_steps
     )
-    if copy_ratio >= 0.15:
+    if copy_ratio >= t.copy_bound_ratio:
         classifications.append(
             _classification(
                 "copy_bound",
@@ -211,7 +214,7 @@ def classify_bottlenecks(
         _bounded_ratio(step["sync_wait_time_ns"], step["step_wall_time_ns"])
         for step in completed_steps
     )
-    if sync_ratio >= 0.1:
+    if sync_ratio >= t.sync_bound_ratio:
         classifications.append(
             _classification(
                 "sync_bound",
@@ -227,7 +230,7 @@ def classify_bottlenecks(
             )
         )
 
-    if run_summary["average_gpu_utilization_pct"] > 0 and run_summary["average_gpu_utilization_pct"] < 35:
+    if run_summary["average_gpu_utilization_pct"] > 0 and run_summary["average_gpu_utilization_pct"] < t.underutilized_gpu_util_pct:
         classifications.append(
             _classification(
                 "underutilized_gpu",
@@ -243,7 +246,7 @@ def classify_bottlenecks(
             )
         )
 
-    if run_summary["memory_pressure_peak_ratio"] >= 0.9:
+    if run_summary["memory_pressure_peak_ratio"] >= t.memory_pressure_peak_ratio:
         classifications.append(
             _classification(
                 "memory_pressure",
@@ -255,7 +258,7 @@ def classify_bottlenecks(
             )
         )
 
-    if run_summary["shape_volatility_ratio"] >= 0.3:
+    if run_summary["shape_volatility_ratio"] >= t.shape_volatility_ratio:
         classifications.append(
             _classification(
                 "shape_instability",
@@ -274,10 +277,10 @@ def classify_bottlenecks(
 
     if (
         run_summary["profiler_windows_exported"] > 0
-        and run_summary["average_gpu_utilization_pct"] < 50
-        and copy_ratio < 0.1
-        and input_ratio < 0.1
-        and sync_ratio < 0.1
+        and run_summary["average_gpu_utilization_pct"] < t.launch_bound_gpu_util_pct
+        and copy_ratio < t.launch_bound_stall_ratio_max
+        and input_ratio < t.launch_bound_stall_ratio_max
+        and sync_ratio < t.launch_bound_stall_ratio_max
     ):
         avg_gpu = run_summary["average_gpu_utilization_pct"]
         launch_bound_score = round(min(0.5, max(0.3, (50.0 - avg_gpu) / 100.0 + 0.3)), 4)
@@ -293,7 +296,7 @@ def classify_bottlenecks(
                         run_summary.get("median_cuda_kernel_duration_us", 0.0), 3
                     ),
                     "small_kernel_fraction": round(run_summary.get("small_kernel_fraction", 0.0), 4),
-                    "shapes_stable": run_summary.get("shape_volatility_ratio", 0.0) < 0.3,
+                    "shapes_stable": run_summary.get("shape_volatility_ratio", 0.0) < t.shape_volatility_ratio,
                     "note": "Profiler windows were captured but dominant stalls were not input, copy, or sync heavy.",
                 },
                 worst_steps=_top_steps(
@@ -338,11 +341,20 @@ def build_diagnosis_result(
     run_summary: dict[str, Any],
     per_step: list[dict[str, Any]] | None = None,
     environment: dict[str, Any] | None = None,
+    *,
+    _resolved: "ResolvedThresholds | None" = None,
 ) -> dict[str, Any]:
+    resolved = _resolved or resolve_thresholds(environment)
     if not bottlenecks:
+        # Use "inconclusive" when telemetry was collected but no bottleneck cleared the
+        # threshold — distinguishable from null (truly no data) in downstream consumers.
+        # Only mark inconclusive when we had real profiler windows — otherwise
+        # the run genuinely lacked data and None is the correct signal.
+        has_profiler_data = run_summary.get("profiler_windows_exported", 0) > 0
+        no_bottleneck_label = "inconclusive" if has_profiler_data else None
         return {
-            "primary_bottleneck": None,
-            "user_facing_bottleneck": None,
+            "primary_bottleneck": no_bottleneck_label,
+            "user_facing_bottleneck": no_bottleneck_label,
             "secondary_bottlenecks": [],
             "confidence": {
                 "level": "low",
@@ -357,6 +369,8 @@ def build_diagnosis_result(
             "withheld_recommendations": [],
             "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
             "classifier_version": CLASSIFIER_VERSION,
+            "thresholds_source": resolved.source,
+            "thresholds_hash": resolved.thresholds_hash,
         }
 
     primary = bottlenecks[0]
@@ -400,6 +414,8 @@ def build_diagnosis_result(
         "withheld_recommendations": rec_output.get("withheld_recommendations", []),
         "dominant_stall_type": run_summary.get("dominant_stall_type", "unknown"),
         "classifier_version": CLASSIFIER_VERSION,
+        "thresholds_source": resolved.source,
+        "thresholds_hash": resolved.thresholds_hash,
     }
 
 

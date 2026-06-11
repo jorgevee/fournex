@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Callable
 
+
+CURRENT_SCHEMA_VERSION = "1.0.0"
 
 WORKLOAD_CLASSES = ("training", "inference", "eval", "preprocessing", "unknown")
 MODEL_FAMILIES = ("transformer", "cnn", "recsys", "diffusion", "unknown")
@@ -96,6 +98,7 @@ class EventRecord:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EventRecord":
+        data = migrate_record_dict("event", data)
         event = cls(**data)
         event.validate()
         return event
@@ -132,6 +135,7 @@ class MetricRecord:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MetricRecord":
+        data = migrate_record_dict("metric", data)
         metric = cls(**data)
         metric.validate()
         return metric
@@ -166,6 +170,7 @@ class AnnotationRecord:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnnotationRecord":
+        data = migrate_record_dict("annotation", data)
         annotation = cls(**data)
         annotation.validate()
         return annotation
@@ -211,6 +216,7 @@ class RunRecord:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RunRecord":
+        data = migrate_record_dict("run", data)
         run = cls(
             run_id=data["run_id"],
             job=JobInfo(**data["job"]),
@@ -228,6 +234,75 @@ class RunRecord:
         )
         run.validate()
         return run
+
+
+class SchemaVersionError(ValueError):
+    pass
+
+
+_MIGRATIONS: dict[str, list[tuple[str, str, Callable[[dict[str, Any]], dict[str, Any]]]]] = {
+    "run": [],
+    "event": [],
+    "metric": [],
+    "annotation": [],
+}
+
+
+def register_migration(
+    kind: str,
+    from_version: str,
+    to_version: str,
+    fn: Callable[[dict[str, Any]], dict[str, Any]],
+) -> None:
+    if kind not in _MIGRATIONS:
+        raise ValueError(f"Unknown migration kind '{kind}'; expected one of {list(_MIGRATIONS)}")
+    _MIGRATIONS[kind].append((from_version, to_version, fn))
+
+
+def _parse_version(value: str, field_name: str) -> tuple[int, int, int]:
+    parts = value.split(".")
+    if len(parts) != 3:
+        raise SchemaVersionError(
+            f"{field_name} has malformed schema_version '{value}'; expected MAJOR.MINOR.PATCH"
+        )
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        raise SchemaVersionError(
+            f"{field_name} has malformed schema_version '{value}'; expected MAJOR.MINOR.PATCH"
+        )
+
+
+def migrate_record_dict(kind: str, data: dict[str, Any]) -> dict[str, Any]:
+    found = data.get("schema_version", CURRENT_SCHEMA_VERSION)
+    current_tuple = _parse_version(CURRENT_SCHEMA_VERSION, "fournex")
+    found_tuple = _parse_version(found, kind)
+
+    if found_tuple == current_tuple:
+        return data
+
+    if found_tuple > current_tuple:
+        raise SchemaVersionError(
+            f"{kind} artifact has schema_version {found}, but this fournex supports up to "
+            f"{CURRENT_SCHEMA_VERSION}; upgrade fournex to read it"
+        )
+
+    # Older version: walk the migration chain
+    result = dict(data)
+    version = found
+    migrations = _MIGRATIONS.get(kind, [])
+    while version != CURRENT_SCHEMA_VERSION:
+        step = next((fn for (fv, tv, fn) in migrations if fv == version), None)
+        if step is None:
+            target = next((tv for (fv, tv, _) in migrations if fv == version), CURRENT_SCHEMA_VERSION)
+            raise SchemaVersionError(
+                f"No migration path for {kind} from schema_version {version} to "
+                f"{CURRENT_SCHEMA_VERSION}"
+            )
+        result = step(result)
+        version = result.get("schema_version", CURRENT_SCHEMA_VERSION)
+
+    return result
 
 
 def validate_run_dict(data: dict[str, Any]) -> None:

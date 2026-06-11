@@ -167,6 +167,10 @@ class KernelLaunchSummary:
     global_load_sectors_per_request: float | None = None
     issue_slot_utilization_pct: float | None = None
     achieved_occupancy_pct: float | None = None
+    theoretical_occupancy_pct: float | None = None
+    sm_throughput_pct: float | None = None
+    l1tex_throughput_pct: float | None = None
+    memory_busy_pct: float | None = None
     eligible_warps_per_scheduler: float | None = None
     scheduler_active_pct: float | None = None
     dominant_warp_stall: str | None = None
@@ -561,6 +565,10 @@ def _compute_derived_ncu_fields(summary: KernelLaunchSummary) -> None:
     summary.global_load_sectors_per_request = m.get("global_load_sectors_per_request")
     summary.issue_slot_utilization_pct = m.get("issue_slot_utilization_pct")
     summary.achieved_occupancy_pct = m.get("achieved_occupancy_pct")
+    summary.theoretical_occupancy_pct = m.get("theoretical_occupancy_pct")
+    summary.sm_throughput_pct = m.get("sm_throughput_pct")
+    summary.l1tex_throughput_pct = m.get("l1tex_throughput_pct")
+    summary.memory_busy_pct = m.get("memory_busy_pct")
     summary.eligible_warps_per_scheduler = m.get("eligible_warps_per_scheduler")
     summary.scheduler_active_pct = m.get("scheduler_active_pct")
     summary.kernel_duration_us = m.get("kernel_duration_us")
@@ -605,9 +613,14 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "launch__grid_dim_x": "grid_x",
         "launch__grid_dim_y": "grid_y",
         "launch__grid_dim_z": "grid_z",
-        # Occupancy
+        # Occupancy — programmatic NCU metric names
         "sm__warps_active_avg_pct_of_peak_sustained_active": "achieved_occupancy_pct",
         "sm__warps_active_avg_pct_of_peak_sustained_elapsed": "achieved_occupancy_pct",
+        # Occupancy — human-readable Nsight Compute UI column headers (wide format)
+        # Note: _canonical_ncu_metric_name normalizes spaces to underscores before
+        # looking up, so "Achieved Occupancy" becomes "achieved_occupancy" here.
+        "achieved_occupancy": "achieved_occupancy_pct",
+        "theoretical_occupancy": "theoretical_occupancy_pct",
         "smsp__warps_eligible_avg_per_cycle_active": "eligible_warps_per_scheduler",
         "eligible_warps_per_scheduler": "eligible_warps_per_scheduler",
         "smsp__warps_active_avg_pct_of_peak_sustained_active": "scheduler_active_pct",
@@ -617,6 +630,19 @@ def _canonical_ncu_metric_name(name: str) -> str:
         "dram__throughput_avg_pct_of_peak_sustained_elapsed": "dram_throughput_pct",
         "memory_throughput": "dram_throughput_pct",
         "memory throughput": "dram_throughput_pct",
+        # Compute (SM) throughput — Nsight Compute UI wide-format header
+        # "Compute (SM) Throughput" normalizes to "compute_(sm)_throughput"
+        "compute_(sm)_throughput": "sm_throughput_pct",
+        "sm_throughput": "sm_throughput_pct",
+        # L1/TEX throughput — programmatic metric key (separate from cache hit rate)
+        # "L1/TEX Cache Throughput" (UI) normalizes to "l1/tex_cache_throughput" which
+        # is already mapped to l1_cache_hit_rate_pct above; use explicit key for the
+        # throughput variant to avoid overriding it.
+        "l1tex_throughput": "l1tex_throughput_pct",
+        "l1/tex_throughput": "l1tex_throughput_pct",
+        # Memory busy — Nsight Compute UI wide-format header
+        # "Mem Busy" normalizes to "mem_busy"
+        "mem_busy": "memory_busy_pct",
         # Tensor core utilization
         "sm__pipe_tensor_cycles_active_avg_pct_of_peak_sustained_active": "tensor_core_utilization_pct",
         "sm__pipe_tensor_cycles_active_avg_pct_of_peak_sustained_elapsed": "tensor_core_utilization_pct",

@@ -31,24 +31,24 @@ from __future__ import annotations
 
 from typing import Any
 
-VERSION = "fat_v1"
+from .thresholds import ClassifierThresholds, DEFAULT_THRESHOLDS
 
-# Severity bands for the 0-100 score. Chosen to sit above the noise floor so a
-# trivially-idle-but-well-explained workload does not read as "high".
-_HIGH_THRESHOLD = 45
-_MODERATE_THRESHOLD = 20
+VERSION = "fat_v1"
 
 # A kernel-count-per-step of this magnitude is treated as "fully fragmented" when
 # normalizing launch density into a 0-1 signal.
 _KERNEL_COUNT_SATURATION = 100.0
 
 # Shapes are considered stable (graph-capture-friendly) below this volatility.
+# Uses the same threshold as ClassifierThresholds.shape_volatility_ratio default.
 _STABLE_SHAPE_THRESHOLD = 0.30
 
 
 def compute_framework_abstraction_tax(
     run_summary: dict[str, Any],
     bottlenecks: list[dict[str, Any]],
+    *,
+    thresholds: ClassifierThresholds | None = None,
 ) -> dict[str, Any] | None:
     """Return the framework-abstraction-tax score and contributors, or None.
 
@@ -60,6 +60,7 @@ def compute_framework_abstraction_tax(
     scaled by how fragmented the kernel launch stream is. It is a heuristic and is
     not calibrated against measured speedups.
     """
+    t = thresholds or DEFAULT_THRESHOLDS
     if run_summary.get("profiler_windows_exported", 0) <= 0:
         return None
 
@@ -79,7 +80,7 @@ def compute_framework_abstraction_tax(
     kernel_count_per_step = max(0.0, float(run_summary.get("kernel_count_per_step", 0.0)))
     median_kernel_us = max(0.0, float(run_summary.get("median_cuda_kernel_duration_us", 0.0)))
     shape_volatility = _clamp01(run_summary.get("shape_volatility_ratio", 0.0))
-    shapes_stable = shape_volatility < _STABLE_SHAPE_THRESHOLD
+    shapes_stable = shape_volatility < t.shape_volatility_ratio
 
     kcps_norm = min(1.0, kernel_count_per_step / _KERNEL_COUNT_SATURATION)
     frag_signal = _clamp01(0.6 * small_kernel_fraction + 0.4 * kcps_norm)
@@ -89,9 +90,9 @@ def compute_framework_abstraction_tax(
 
     score = int(round(_clamp(100.0 * overhead_idle * fragmentation_weight, 0.0, 100.0)))
 
-    if score >= _HIGH_THRESHOLD:
+    if score >= t.fat_high_threshold:
         severity = "high"
-    elif score >= _MODERATE_THRESHOLD:
+    elif score >= t.fat_moderate_threshold:
         severity = "moderate"
     else:
         severity = "low"
@@ -119,7 +120,7 @@ def compute_framework_abstraction_tax(
             shape_volatility=shape_volatility,
             shapes_stable=shapes_stable,
         )
-        if score >= _MODERATE_THRESHOLD
+        if score >= t.fat_moderate_threshold
         else []
     )
 

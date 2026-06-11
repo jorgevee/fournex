@@ -9,6 +9,10 @@ from typing import Any
 
 from ._native import HAS_NATIVE, native
 
+# SCHEMA_VERSION versions the telemetry JSONL event stream (make_event output).
+# It is intentionally separate from the common_ir schema versioning system
+# (common_ir.CURRENT_SCHEMA_VERSION / migrate_record_dict). Do not unify them;
+# the two artifact families have independent evolution paths.
 SCHEMA_VERSION = "0.1.0"
 
 EVENT_TYPES = (

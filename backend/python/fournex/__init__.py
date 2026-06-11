@@ -1,3 +1,5 @@
+__version__ = "0.2.7"
+
 from .sdk import (
     EVENT_LEVELS,
     EVENT_SOURCES,
@@ -28,6 +30,14 @@ from .analysis import (
     summarize_step_scope,
 )
 from .framework_abstraction_tax import compute_framework_abstraction_tax
+from .thresholds import (
+    CLASSIFIER_VERSION,
+    ClassifierThresholds,
+    DEFAULT_THRESHOLDS,
+    ResolvedThresholds,
+    resolve_thresholds,
+)
+from .variant_comparison import load_variants_csv, analyze_variants
 from .common_ir_analysis import (
     derive_ir_bottleneck_annotations,
     derive_ir_run_summary,
@@ -37,6 +47,7 @@ from .common_ir_analysis import (
 from .common_ir import (
     AnnotationRecord,
     BOTTLENECK_CLASSES,
+    CURRENT_SCHEMA_VERSION,
     EVENT_FAMILIES,
     EventRecord,
     JobInfo,
@@ -44,8 +55,11 @@ from .common_ir import (
     MODEL_FAMILIES,
     MetricRecord,
     RunRecord,
+    SchemaVersionError,
     WORKLOAD_CLASSES,
     WorkloadInfo,
+    migrate_record_dict,
+    register_migration,
     validate_run_dict,
 )
 from .common_ir_validators import (
@@ -58,6 +72,7 @@ from .common_ir_validators import (
 )
 from .cuda_timers import time_memcpy, time_phase, time_region
 from .storage import (
+    load_run_record,
     persist_local_trace,
     persist_run_artifacts,
     persist_run_summary,
@@ -193,7 +208,10 @@ __all__ = [
     "begin_span",
     "build_diagnosis_result",
     "build_runtime_event",
+    "__version__",
     "classify_bottlenecks",
+    "load_variants_csv",
+    "analyze_variants",
     "compute_framework_abstraction_tax",
     "detect_gpu_model",
     "clear_local_events",

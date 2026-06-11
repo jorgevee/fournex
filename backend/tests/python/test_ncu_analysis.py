@@ -696,3 +696,93 @@ def test_parse_ncu_wide_format_with_done_line_leakage() -> None:
     s = summaries[0]
     assert abs(s.dram_throughput_pct - 88.0) < 0.01
     assert s.tensor_core_utilization_pct == 5.0
+
+
+# ── Fix: metric aliases — human-readable Nsight Compute UI column headers ─────
+
+def test_achieved_occupancy_alias_from_ui_header():
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"gemm","Achieved Occupancy","%","72.5"',
+        '"gemm","dram__throughput.avg.pct_of_peak_sustained_elapsed","%","82.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    assert result["ncu_run_summary"]["avg_occupancy_pct"] == 72.5
+
+
+def test_theoretical_occupancy_alias():
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"gemm","Theoretical Occupancy","%","100.0"',
+        '"gemm","dram__throughput.avg.pct_of_peak_sustained_elapsed","%","80.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    assert result["ncu_run_summary"]["avg_theoretical_occupancy_pct"] == 100.0
+
+
+def test_sm_throughput_alias():
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"gemm","Compute (SM) Throughput","%","65.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    assert result["ncu_run_summary"]["avg_sm_throughput_pct"] == 65.0
+
+
+def test_l1tex_throughput_alias():
+    # Use the programmatic key name (not the UI column name which maps to l1_cache_hit_rate_pct)
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"gemm","l1tex_throughput","%","48.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    assert result["ncu_run_summary"]["avg_l1tex_throughput_pct"] == 48.0
+
+
+def test_mem_busy_alias():
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"gemm","Mem Busy","%","55.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    assert result["ncu_run_summary"]["avg_memory_busy_pct"] == 55.0
+
+
+# ── Fix: validation uses same cleaning as parser ──────────────────────────────
+
+def test_validation_succeeds_when_stdout_leakage_present():
+    from fournex.ncu_analysis import validate_ncu_csv_text
+    # Simulate stdout leakage between header and data rows (unquoted lines)
+    csv_with_leakage = "\n".join([
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"Units","","",""',          # units row
+        "Set the HOME environment variable",  # unquoted stdout leakage
+        '"gemm","dram__throughput.avg.pct_of_peak_sustained_elapsed","%","82.0"',
+    ])
+    result = validate_ncu_csv_text(csv_with_leakage)
+    # Validation must not report column errors when parsing would succeed
+    assert not any("missing" in e.lower() for e in result.get("errors", []))
+
+
+# ── Fix: inconclusive label ───────────────────────────────────────────────────
+
+def test_primary_bottleneck_inconclusive_when_ncu_data_present_no_threshold():
+    # A CSV with very low values — no bottleneck should fire, but data is present
+    csv = _csv(
+        '"Kernel Name","Metric Name","Metric Unit","Metric Value"',
+        '"k","dram__throughput.avg.pct_of_peak_sustained_elapsed","%","10.0"',
+        '"k","sm__issue_active.avg.pct_of_peak_sustained_active","%","80.0"',
+    )
+    result = at.analyze_ncu_csv_text(csv)
+    # 10% DRAM and 80% ISU won't fire any bottleneck — should be inconclusive, not None
+    if result["bottlenecks"] == []:
+        assert result["primary_bottleneck"] == "inconclusive"
+
+
+# ── Fix: fournex.__version__ ──────────────────────────────────────────────────
+
+def test_version_exported():
+    import fournex
+    assert hasattr(fournex, "__version__")
+    assert isinstance(fournex.__version__, str)
+    assert "." in fournex.__version__

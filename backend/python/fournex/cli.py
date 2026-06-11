@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import os
 import platform
@@ -17,6 +18,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Thread
 from typing import Any
+
+
+@dataclasses.dataclass
+class StepResult:
+    ok: bool
+    output: str | None = None
+    error: str | None = None
+    step: str = ""
 
 
 BUNDLE_SCHEMA_VERSION = "0.1.0"
@@ -72,6 +81,8 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return tune(args)
     elif args.command == "compare":
         return compare(args)
+    elif args.command == "compare-variants":
+        return compare_variants_cmd(args)
     elif args.command == "explain":
         return explain_cmd(args)
     elif args.command == "bench":
@@ -289,17 +300,23 @@ def compare(args: argparse.Namespace) -> int:
 
     # PTX layer
     ptx_a = ptx_b = None
+    evidence_failures: list[dict[str, Any]] = []
     if args.with_ptx or args.with_ncu:
-        nvcc = shutil.which("nvcc")
-        if not nvcc:
-            print("[warn] nvcc not found on PATH — skipping PTX compilation", file=sys.stderr)
+        print(f"  Compiling PTX for {file_a.name} ...", end="", flush=True)
+        res_a = _compile_ptx_cu(file_a)
+        print(" ok" if res_a.ok else " failed")
+        if res_a.ok:
+            ptx_a = res_a.output
         else:
-            print(f"  Compiling PTX for {file_a.name} ...", end="", flush=True)
-            ptx_a = _compile_ptx_cu(file_a)
-            print(" ok" if ptx_a else " failed")
-            print(f"  Compiling PTX for {file_b.name} ...", end="", flush=True)
-            ptx_b = _compile_ptx_cu(file_b)
-            print(" ok" if ptx_b else " failed")
+            evidence_failures.append({"layer": "ptx", "target": label_a, "step": res_a.step, "reason": res_a.error})
+
+        print(f"  Compiling PTX for {file_b.name} ...", end="", flush=True)
+        res_b = _compile_ptx_cu(file_b)
+        print(" ok" if res_b.ok else " failed")
+        if res_b.ok:
+            ptx_b = res_b.output
+        else:
+            evidence_failures.append({"layer": "ptx", "target": label_b, "step": res_b.step, "reason": res_b.error})
 
     # NCU layer — pre-existing CSVs take priority over --with-ncu compilation
     ncu_a_text = ncu_b_text = None
@@ -317,7 +334,15 @@ def compare(args: argparse.Namespace) -> int:
         ncu_b_text = ncu_path.read_text(encoding="utf-8-sig", errors="replace")
 
     if args.with_ncu and not (ncu_a_text and ncu_b_text):
-        ncu_a_text, ncu_b_text = _run_ncu_compare(file_a, file_b, ptx_a, ptx_b, args)
+        ncu_res_a, ncu_res_b = _run_ncu_compare(file_a, file_b, ptx_a, ptx_b, args)
+        if ncu_res_a.ok:
+            ncu_a_text = ncu_res_a.output
+        else:
+            evidence_failures.append({"layer": "ncu", "target": label_a, "step": ncu_res_a.step, "reason": ncu_res_a.error})
+        if ncu_res_b.ok:
+            ncu_b_text = ncu_res_b.output
+        else:
+            evidence_failures.append({"layer": "ncu", "target": label_b, "step": ncu_res_b.step, "reason": ncu_res_b.error})
 
     # Determine evidence description for header
     layers: list[str] = ["CUDA source"]
@@ -372,18 +397,18 @@ def compare(args: argparse.Namespace) -> int:
     rec = reconcile_evidence(static=static_a, ptx=ptx_result_a, ncu=ncu_result_a)
 
     if args.output_json:
-        _print_json_result("compare", {"comparison": result, "reconciliation": rec})
+        _print_json_result("compare", {"comparison": result, "reconciliation": rec, "evidence_failures": evidence_failures})
         return 0
 
-    _print_compare_report(result, rec, label_a, label_b, evidence_desc)
+    _print_compare_report(result, rec, label_a, label_b, evidence_desc, evidence_failures)
     return 0
 
 
-def _compile_ptx_cu(cu_path: Path) -> str | None:
-    """Compile a .cu file to PTX text. Returns None on failure."""
+def _compile_ptx_cu(cu_path: Path) -> StepResult:
+    """Compile a .cu file to PTX text. Returns a StepResult (ok=True on success)."""
     nvcc = shutil.which("nvcc")
     if not nvcc:
-        return None
+        return StepResult(ok=False, step="nvcc -ptx", error="nvcc not found on PATH")
     with tempfile.NamedTemporaryFile(suffix=".ptx", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
@@ -392,10 +417,15 @@ def _compile_ptx_cu(cu_path: Path) -> str | None:
             capture_output=True, text=True, timeout=120,
         )
         if proc.returncode != 0:
-            return None
-        return tmp_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return None
+            return StepResult(
+                ok=False, step="nvcc -ptx",
+                error=f"nvcc exited {proc.returncode}: {proc.stderr.strip()[:200]}",
+            )
+        return StepResult(ok=True, output=tmp_path.read_text(encoding="utf-8", errors="replace"), step="nvcc -ptx")
+    except subprocess.TimeoutExpired:
+        return StepResult(ok=False, step="nvcc -ptx", error="nvcc -ptx timed out after 120s")
+    except OSError as exc:
+        return StepResult(ok=False, step="nvcc -ptx", error=f"nvcc could not run: {exc}")
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -404,81 +434,99 @@ def _run_ncu_compare(
     file_a: Path, file_b: Path,
     ptx_a: str | None, ptx_b: str | None,
     args: argparse.Namespace,
-) -> tuple[str | None, str | None]:
-    """Compile both .cu files to executables and run NCU on each. Returns (csv_a, csv_b)."""
+) -> tuple[StepResult, StepResult]:
+    """Compile both .cu files to executables and run NCU on each. Returns (StepResult_a, StepResult_b)."""
     nvcc = shutil.which("nvcc")
     ncu_bin = shutil.which("ncu")
 
     if not nvcc:
-        print("[warn] --with-ncu: nvcc not found on PATH — skipping NCU", file=sys.stderr)
+        msg = "nvcc not found on PATH"
+        print(f"[warn] --with-ncu: {msg} — skipping NCU", file=sys.stderr)
         print("  Provide pre-existing CSVs with --ncu-a FILE --ncu-b FILE", file=sys.stderr)
-        return None, None
+        return StepResult(ok=False, step="nvcc", error=msg), StepResult(ok=False, step="nvcc", error=msg)
     if not ncu_bin:
-        print("[warn] --with-ncu: ncu not found on PATH — skipping NCU", file=sys.stderr)
+        msg = "ncu not found on PATH"
+        print(f"[warn] --with-ncu: {msg} — skipping NCU", file=sys.stderr)
         print("  Provide pre-existing CSVs with --ncu-a FILE --ncu-b FILE", file=sys.stderr)
-        return None, None
+        return StepResult(ok=False, step="ncu", error=msg), StepResult(ok=False, step="ncu", error=msg)
 
     build_flags = args.build_flags.split() if args.build_flags.strip() else []
 
-    def _compile_exec(cu: Path) -> Path | None:
+    def _compile_exec(cu: Path) -> StepResult:
         with tempfile.NamedTemporaryFile(suffix=".exe" if sys.platform == "win32" else "", delete=False) as tmp:
             out_path = Path(tmp.name)
         try:
             cmd = [nvcc, str(cu), "-o", str(out_path)] + build_flags
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if proc.returncode != 0:
+                reason = f"nvcc exited {proc.returncode}: {proc.stderr.strip()[:200]}"
                 print(f"  [warn] nvcc failed for {cu.name}: {proc.stderr[:200]}", file=sys.stderr)
                 out_path.unlink(missing_ok=True)
-                return None
-            return out_path
-        except Exception as exc:
+                return StepResult(ok=False, step="nvcc", error=reason)
+            return StepResult(ok=True, output=str(out_path), step="nvcc")
+        except subprocess.TimeoutExpired:
+            reason = "nvcc timed out after 120s"
+            print(f"  [warn] nvcc error for {cu.name}: {reason}", file=sys.stderr)
+            return StepResult(ok=False, step="nvcc", error=reason)
+        except OSError as exc:
+            reason = f"nvcc could not run: {exc}"
             print(f"  [warn] nvcc error for {cu.name}: {exc}", file=sys.stderr)
-            return None
+            return StepResult(ok=False, step="nvcc", error=reason)
 
-    def _run_ncu_on(exe: Path) -> str | None:
+    def _run_ncu_on(exe_path: str) -> StepResult:
         try:
             from .ncu_presets import build_ncu_command
-            cmd = build_ncu_command("full", [str(exe)])
+            cmd = build_ncu_command("full", [exe_path])
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if proc.returncode != 0:
+                reason = f"ncu exited {proc.returncode}: {proc.stderr.strip()[:200]}"
                 print(f"  [warn] ncu failed: {proc.stderr[:200]}", file=sys.stderr)
-                return None
-            return proc.stdout
-        except Exception as exc:
+                return StepResult(ok=False, step="ncu", error=reason)
+            return StepResult(ok=True, output=proc.stdout, step="ncu")
+        except subprocess.TimeoutExpired:
+            reason = "ncu timed out after 300s"
+            print(f"  [warn] ncu error: {reason}", file=sys.stderr)
+            return StepResult(ok=False, step="ncu", error=reason)
+        except OSError as exc:
+            reason = f"ncu could not run: {exc}"
             print(f"  [warn] ncu error: {exc}", file=sys.stderr)
-            return None
+            return StepResult(ok=False, step="ncu", error=reason)
 
     print(f"  Compiling {file_a.name} ...", end="", flush=True)
-    exe_a = _compile_exec(file_a)
-    print(" ok" if exe_a else " failed")
+    compile_a = _compile_exec(file_a)
+    print(" ok" if compile_a.ok else " failed")
 
     print(f"  Compiling {file_b.name} ...", end="", flush=True)
-    exe_b = _compile_exec(file_b)
-    print(" ok" if exe_b else " failed")
+    compile_b = _compile_exec(file_b)
+    print(" ok" if compile_b.ok else " failed")
 
-    csv_a = csv_b = None
+    ncu_a = ncu_b = StepResult(ok=False, step="ncu", error="executable build failed")
     try:
-        if exe_a:
+        if compile_a.ok:
             print(f"  Profiling {file_a.name} with ncu ...", end="", flush=True)
-            csv_a = _run_ncu_on(exe_a)
-            print(" ok" if csv_a else " failed")
-        if exe_b:
+            ncu_a = _run_ncu_on(compile_a.output)  # type: ignore[arg-type]
+            print(" ok" if ncu_a.ok else " failed")
+        else:
+            ncu_a = StepResult(ok=False, step="ncu", error=f"executable build failed: {compile_a.error}")
+        if compile_b.ok:
             print(f"  Profiling {file_b.name} with ncu ...", end="", flush=True)
-            csv_b = _run_ncu_on(exe_b)
-            print(" ok" if csv_b else " failed")
+            ncu_b = _run_ncu_on(compile_b.output)  # type: ignore[arg-type]
+            print(" ok" if ncu_b.ok else " failed")
+        else:
+            ncu_b = StepResult(ok=False, step="ncu", error=f"executable build failed: {compile_b.error}")
     finally:
-        if exe_a:
-            exe_a.unlink(missing_ok=True)
-        if exe_b:
-            exe_b.unlink(missing_ok=True)
+        if compile_a.ok and compile_a.output:
+            Path(compile_a.output).unlink(missing_ok=True)
+        if compile_b.ok and compile_b.output:
+            Path(compile_b.output).unlink(missing_ok=True)
 
-    if not csv_a or not csv_b:
+    if not ncu_a.ok or not ncu_b.ok:
         print(
             "  [hint] If your .cu files need a main(), compile with: --build-flags \"-DBUILD_EXECUTABLE\"",
             file=sys.stderr,
         )
 
-    return csv_a, csv_b
+    return ncu_a, ncu_b
 
 
 # ── Finding / dimension name maps ──────────────────────────────────────────────
@@ -551,6 +599,7 @@ def _print_compare_report(
     label_a: str,
     label_b: str,
     evidence_desc: str,
+    evidence_failures: list[dict[str, Any]] | None = None,
 ) -> None:
     sep = "=" * 66
     verdict = result.get("verdict", {})
@@ -566,6 +615,15 @@ def _print_compare_report(
     print(f"  B: {label_b}")
     print(f"  Evidence: {evidence_desc}")
     print(sep)
+
+    if evidence_failures:
+        print()
+        print("Evidence layers unavailable:")
+        for failure in evidence_failures:
+            target = failure.get("target", "")
+            reason = failure.get("reason", "unknown error")
+            layer = failure.get("layer", "")
+            print(f"  evidence layer unavailable: {layer.upper()} ({target}) — {reason}")
 
     # Winner
     print()
@@ -842,6 +900,85 @@ def _print_explain_footer(
         print(f"  Primary issue  : {label}")
     print("  Paste frx_llm_prompt.txt into your preferred LLM for optimization suggestions.")
     print()
+
+
+def compare_variants_cmd(args: argparse.Namespace) -> int:
+    """Rank multiple kernel variants by measured throughput + explain NCU deltas."""
+    from pathlib import Path
+    from .variant_comparison import load_variants_csv, analyze_variants
+
+    results_path = Path(args.results_csv)
+    try:
+        variants = load_variants_csv(results_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"frx: {exc}", file=sys.stderr)
+        return 1
+
+    env = _environment_from_args(args)
+    try:
+        report = analyze_variants(
+            variants,
+            baseline_variant=getattr(args, "baseline", None) or None,
+            environment=env,
+        )
+    except ValueError as exc:
+        print(f"frx: {exc}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        _print_json_result("compare_variants", report)
+        return 0
+
+    baseline = report["baseline"]
+    ranked = report["variants_ranked"]
+    transitions = report["transitions"]
+
+    print(f"\nfrx compare-variants -- {report['variant_count']} variants\n")
+
+    # Header — account for " (baseline)" suffix in column width
+    col_v = max(len(v["variant"]) + (len(" (baseline)") if v["is_baseline"] else 0) for v in ranked) + 2
+    print(f"  {'Variant':<{col_v}} {'GFLOP/s':>9}  {'vs baseline':>12}  {'Primary bottleneck'}")
+    print(f"  {'-'*col_v} {'-'*9}  {'-'*12}  {'-'*22}")
+    for v in ranked:
+        tag = " (baseline)" if v["is_baseline"] else ""
+        label = f"{v['variant']}{tag}"
+        delta = f"+{v['delta_vs_baseline_x']:.2f}x" if v["delta_vs_baseline_x"] is not None and not v["is_baseline"] else ("--" if v["is_baseline"] else "")
+        bn = v["primary_bottleneck"] or "—"
+        print(f"  {label:<{col_v}} {v['throughput']:>9.1f}  {delta:>12}  {bn}")
+
+    if transitions:
+        print(f"\nNotable transitions:")
+        for t in transitions:
+            delta_str = f"+{t['throughput_delta_x']:.2f}x" if t["throughput_delta_x"] is not None and t["throughput_delta_x"] >= 1.0 else (f"{t['throughput_delta_x']:.2f}x" if t["throughput_delta_x"] is not None else "?")
+            resolved_str = f"  [{', '.join(t['bottleneck_resolved'])} resolved]" if t["bottleneck_resolved"] else ""
+            new_str = f"  [{', '.join(t['bottleneck_new'])} introduced]" if t["bottleneck_new"] else ""
+            headline = ""
+            if t.get("headline_metric"):
+                m = t["headline_metric"]
+                unit = m.get("unit", "")
+                a = f"{m['baseline']:.1f}{unit}" if m.get("baseline") is not None else "?"
+                b = f"{m['optimized']:.1f}{unit}" if m.get("optimized") is not None else "?"
+                headline = f"  {m['label']}: {a} -> {b}"
+            print(f"  {t['from_variant']} -> {t['to_variant']}  {delta_str}{headline}{resolved_str}{new_str}")
+
+    top_rec = report.get("top_recommendation")
+    if top_rec:
+        print(f"\nTop recommendation across all variants: {top_rec}")
+
+    if getattr(args, "explain", False):
+        # Generate LLM brief from the best-performing variant
+        from .explain import build_explain_result, render_summary_txt, render_llm_prompt_txt, render_evidence_json
+        best = ranked[0]
+        explain_result = build_explain_result(ncu_result=best["ncu_result"], environment=env)
+        out_dir = Path(getattr(args, "explain_out", None) or ".")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "frx_summary.txt").write_text(render_summary_txt(explain_result, ncu_filename=best["variant"]), encoding="utf-8")
+        (out_dir / "frx_llm_prompt.txt").write_text(render_llm_prompt_txt(explain_result), encoding="utf-8")
+        (out_dir / "frx_evidence.json").write_text(render_evidence_json(explain_result), encoding="utf-8")
+        print(f"\n  LLM brief written to {out_dir / 'frx_llm_prompt.txt'} (best variant: {best['variant']})")
+
+    print()
+    return 0
 
 
 def bench_cmd(args: argparse.Namespace) -> int:
@@ -1252,6 +1389,27 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print frx_llm_prompt.txt to stdout only (for piping/clipboard)",
     )
+
+    cv_parser = subparsers.add_parser(
+        "compare-variants",
+        help="rank multiple kernel variants by measured throughput + explain NCU deltas",
+    )
+    cv_parser.add_argument(
+        "results_csv",
+        metavar="RESULTS_CSV",
+        help="CSV manifest with columns: variant, ncu_csv, throughput_gflops, notes",
+    )
+    cv_parser.add_argument(
+        "--baseline",
+        default=None,
+        metavar="VARIANT",
+        help="name of the reference variant (default: lowest throughput)",
+    )
+    cv_parser.add_argument("--gpu-model", default=None, help="GPU model hint for arch-aware scoring")
+    cv_parser.add_argument("--arch-profile", default=None, metavar="YAML", help="YAML hardware-spec overrides for roofline analysis")
+    cv_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
+    cv_parser.add_argument("--explain", action="store_true", default=False, help="write frx_llm_prompt.txt for the best variant")
+    cv_parser.add_argument("--explain-out", dest="explain_out", default=None, metavar="DIR", help="directory for LLM brief when --explain is set")
 
     bench_parser = subparsers.add_parser(
         "bench",
@@ -2391,8 +2549,8 @@ def _load_or_generate_summary(run_dir: Path) -> dict[str, Any] | None:
     if derived_path.exists():
         try:
             return json.loads(derived_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[warn] could not read {derived_path}: {exc}; regenerating from raw trace", file=sys.stderr)
 
     if raw_trace_path.exists():
         return _generate_summary_from_trace(raw_trace_path)
@@ -2402,8 +2560,8 @@ def _load_or_generate_summary(run_dir: Path) -> dict[str, Any] | None:
         try:
             from .analysis import summarize_run_with_steady_state
             return summarize_run_with_steady_state(events)
-        except Exception:
-            pass
+        except (ImportError, ValueError) as exc:
+            print(f"[warn] could not generate summary from profiler bundle: {exc}", file=sys.stderr)
 
     return None
 
