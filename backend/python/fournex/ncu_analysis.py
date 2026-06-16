@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .kernel_inspector import KernelLaunchSummary, parse_nsight_compute_csv, parse_nsight_compute_csv_text
 from .ncu_presets import NCU_METRIC_PRESETS
 from .thresholds import CLASSIFIER_VERSION, ClassifierThresholds, DEFAULT_THRESHOLDS, resolve_thresholds
+
+logger = logging.getLogger(__name__)
 
 _MEMORY_STALL_TYPES = frozenset({"memory_throttle", "long_scoreboard", "mio", "lg", "texture"})
 _COMPUTE_STALL_TYPES = frozenset({"short_scoreboard", "dispatch", "not_selected"})
@@ -358,6 +361,7 @@ def analyze_ncu_csv(
 
     text = Path(path).read_text(encoding="utf-8-sig", errors="replace")
     summaries = parse_nsight_compute_csv_text(text)
+    logger.debug("analyze_ncu_csv: %s -> %d kernel summaries", path, len(summaries))
     return _build_ncu_result(summaries, environment, source_text=text)
 
 

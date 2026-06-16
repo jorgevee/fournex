@@ -62,6 +62,36 @@ frx compare bad.cu good.cu
 
 ---
 
+## Case-study harness (no GPU required)
+
+Each pair ships a `case_study.yaml` manifest, so the whole diagnose → fix →
+re-check → validate loop runs from the repo on any machine — no CUDA toolkit or
+GPU needed (it uses static source analysis). It emits a reproducible proof bundle.
+
+```bash
+# list the available case studies
+frx case-study list
+
+# run one and write an artifact bundle (+ a GitHub-ready README.md)
+frx case-study run uncoalesced_global_loads --emit-readme
+```
+
+The command exits non-zero if validation fails, so it doubles as a regression
+gate. Each run validates three things against the manifest:
+
+- the expected finding is **detected** in `bad.cu`,
+- it is **resolved** in `good.cu`, and
+- **no new** finding is introduced.
+
+Artifacts land in `artifacts/case_studies/<name>/`:
+`case_study.txt` (transcript), `diagnosis.txt`, `llm_brief.txt`, `evidence.json`,
+`compare.json`, `validation.json`, and optionally `README.md`.
+
+To layer hardware-counter evidence on top, capture before/after Nsight Compute
+CSVs and point the manifest's `before_ncu` / `after_ncu` at them.
+
+---
+
 ## Static-only vs. with NCU data
 
 `frx compare` runs static analysis only. To add runtime confirmation:

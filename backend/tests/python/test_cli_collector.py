@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from fournex.cli import main, _resolve_workload_command
+from fournex.cli import main, _load_or_generate_summary, _resolve_workload_command
 import fournex as at
 
 from analysis_bottleneck_golden_cases import INPUT_BOUND_EVENTS
@@ -18,6 +18,51 @@ def _test_out_dir(name: str) -> Path:
     path = ROOT / "traces" / "cli_test_runs" / f"{name}-{uuid.uuid4().hex[:8]}"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _write_jsonl(path: Path, events: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _three_step_input_fraction_events(wait_ns: int = 150) -> list[dict]:
+    events: list[dict] = [
+        {
+            "event_type": "gpu_sample",
+            "payload": {
+                "utilization_gpu_pct": 80,
+                "utilization_mem_pct": 30,
+                "memory_used_bytes": 30,
+                "memory_total_bytes": 100,
+            },
+        }
+    ]
+    for step_id in range(1, 4):
+        events.extend([
+            {"event_type": "step_start", "step_id": step_id, "payload": {"step_kind": "train"}},
+            {
+                "event_type": "dataloader_span",
+                "step_id": step_id,
+                "duration_ns": wait_ns,
+                "payload": {"stage": "next"},
+            },
+            {
+                "event_type": "phase_span",
+                "step_id": step_id,
+                "duration_ns": 500,
+                "payload": {"phase_name": "forward"},
+            },
+            {
+                "event_type": "step_end",
+                "step_id": step_id,
+                "duration_ns": 1000,
+                "payload": {"step_kind": "train", "status": "ok"},
+            },
+        ])
+    return events
 
 
 PTX_SIMPLE = """
@@ -264,6 +309,36 @@ def test_analyze_accepts_collected_zip_bundle_json(capsys) -> None:
     assert payload["mode"] == "run_bundle"
     assert "event_count" in payload["result"]
     assert "diagnosis" in payload["result"] or "run" in payload["result"]
+
+
+def test_load_or_generate_summary_uses_run_config_environment() -> None:
+    out_dir = _test_out_dir("summary-env")
+    run_dir = out_dir / "run-summary-env"
+    run_dir.mkdir(parents=True)
+    _write_jsonl(run_dir / "raw" / "trace.jsonl", _three_step_input_fraction_events())
+    (run_dir / "run_config.yaml").write_text(
+        "\n".join([
+            "collector:",
+            "  schema_version: 0.1.0",
+            "environment:",
+            "  gpu_model: h100",
+            "  arch_profile_overrides:",
+            "    profiles:",
+            "      sm_90:",
+            "        classifier_thresholds:",
+            "          input_bound_ratio: 0.1",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    summary = _load_or_generate_summary(run_dir)
+
+    assert summary is not None
+    assert summary["run"]["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert summary["steady_state"]["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert summary["run"]["diagnosis"]["thresholds_source"] == "defaults+arch_overrides"
+    assert summary["steady_state"]["diagnosis"]["thresholds_source"] == "defaults+arch_overrides"
 
 
 def test_analyze_accepts_ptx_file_json(capsys) -> None:

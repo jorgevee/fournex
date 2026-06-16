@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ._native import HAS_NATIVE
 from .analysis import summarize_run, summarize_run_with_steady_state
 from .common_ir import RunRecord
 from .sdk import get_local_events, get_runtime_config
@@ -15,13 +16,32 @@ def load_run_record(path: str | Path) -> RunRecord:
     return RunRecord.from_dict(data)
 
 
+def _resolve_events(events: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Resolve the event list to persist, guarding the native-backend trap.
+
+    Under the native backend the Python event buffer is empty by design, so
+    persisting it would silently write empty/misleading artifacts. Fail loudly
+    instead — the native engine owns its own artifacts (fournex.flush()/
+    shutdown()); callers wanting a Python-side trace must pass events explicitly.
+    """
+    if events is not None:
+        return list(events)
+    if HAS_NATIVE:
+        raise RuntimeError(
+            "persist_*: native telemetry backend is active; the Python event "
+            "buffer is empty by design. Use the native engine's own finalization "
+            "(fournex.flush()/shutdown()), or pass events= explicitly."
+        )
+    return get_local_events()
+
+
 def persist_local_trace(
     events: list[dict[str, Any]] | None = None,
     *,
     output_path: str | None = None,
 ) -> str:
     runtime = get_runtime_config()
-    resolved_events = list(events) if events is not None else get_local_events()
+    resolved_events = _resolve_events(events)
     resolved_output = Path(output_path or runtime["raw_trace_path"])
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -40,7 +60,7 @@ def persist_run_summary(
     summary: dict[str, Any] | None = None,
 ) -> str:
     runtime = get_runtime_config()
-    resolved_events = list(events) if events is not None else get_local_events()
+    resolved_events = _resolve_events(events)
     resolved_summary = summary if summary is not None else summarize_run(resolved_events)
     resolved_output = Path(output_path or runtime["derived_summary_path"])
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +70,7 @@ def persist_run_summary(
 
 def persist_run_artifacts(events: list[dict[str, Any]] | None = None) -> dict[str, str]:
     runtime = get_runtime_config()
-    resolved_events = list(events) if events is not None else get_local_events()
+    resolved_events = _resolve_events(events)
     summary = summarize_run(resolved_events)
     raw_trace_path = persist_local_trace(resolved_events, output_path=runtime["raw_trace_path"])
     derived_summary_path = persist_run_summary(
@@ -73,7 +93,7 @@ def persist_run_with_steady_state_summary(
     last_k: int | None = None,
 ) -> str:
     runtime = get_runtime_config()
-    resolved_events = list(events) if events is not None else get_local_events()
+    resolved_events = _resolve_events(events)
     resolved_summary = (
         summary
         if summary is not None

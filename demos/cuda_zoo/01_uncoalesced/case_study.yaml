@@ -1,0 +1,20 @@
+name: uncoalesced_global_loads
+title: Uncoalesced Global Memory Loads
+category: memory
+description: >
+  bad.cu reads global memory with a strided index, so adjacent threads touch
+  non-adjacent addresses and each warp issues many memory sectors per request.
+  good.cu uses a stride-1 coalesced access pattern.
+bad_source: bad.cu
+good_source: good.cu
+# Optional Nsight Compute captures. Drop real before/after CSVs here (or use
+# `frx case-study run --regenerate` on a GPU box) to layer hardware-counter
+# evidence on top of the static source analysis.
+# before_ncu: before.ncu.csv
+# after_ncu: after.ncu.csv
+expected:
+  detected_before:
+    - uncoalesced_access
+  resolved_after:
+    - uncoalesced_access
+  no_new_findings: true

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from statistics import mean
 from typing import Any
 
 from .recommendations import generate_recommendations
 from .thresholds import CLASSIFIER_VERSION, ClassifierThresholds, DEFAULT_THRESHOLDS, ResolvedThresholds, resolve_thresholds
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_STEADY_STATE_SKIP_FIRST_N = 2
 
@@ -16,9 +19,14 @@ _STALL_BOTTLENECK_PRIORITY = ["input_bound", "copy_bound", "sync_bound", "launch
 DEFAULT_STEADY_STATE_LAST_K: int | None = None
 
 
-def summarize_run(events: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize_run(
+    events: list[dict[str, Any]],
+    *,
+    environment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     per_step = derive_step_metrics(events)
-    return summarize_step_scope(events, per_step=per_step)
+    logger.debug("summarize_run: %d events -> %d steps", len(events), len(per_step))
+    return summarize_step_scope(events, per_step=per_step, environment=environment)
 
 
 def summarize_step_scope(
@@ -63,6 +71,7 @@ def summarize_steady_state(
     skip_first_n: int = 0,
     last_k: int | None = None,
     per_step: list[dict[str, Any]] | None = None,
+    environment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_per_step = list(per_step) if per_step is not None else derive_step_metrics(events)
     steady_state_step_ids = select_steady_state_step_ids(
@@ -75,6 +84,7 @@ def summarize_steady_state(
         step_ids=steady_state_step_ids,
         per_step=resolved_per_step,
         scope_name="steady_state",
+        environment=environment,
     )
 
 
@@ -83,18 +93,25 @@ def summarize_run_with_steady_state(
     *,
     skip_first_n: int | None = None,
     last_k: int | None = None,
+    environment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_skip_first_n, resolved_last_k, selector_policy = _resolve_steady_state_selector(
         skip_first_n=skip_first_n,
         last_k=last_k,
     )
     per_step = derive_step_metrics(events)
-    run_summary = summarize_step_scope(events, per_step=per_step, scope_name="run")
+    run_summary = summarize_step_scope(
+        events,
+        per_step=per_step,
+        scope_name="run",
+        environment=environment,
+    )
     steady_state_summary = summarize_steady_state(
         events,
         skip_first_n=resolved_skip_first_n,
         last_k=resolved_last_k,
         per_step=per_step,
+        environment=environment,
     )
     return {
         "event_count": len(events),

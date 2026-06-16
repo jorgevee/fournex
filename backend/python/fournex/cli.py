@@ -4,6 +4,7 @@ import argparse
 import csv
 import dataclasses
 import json
+import logging
 import os
 import platform
 import shutil
@@ -29,6 +30,7 @@ class StepResult:
 
 
 BUNDLE_SCHEMA_VERSION = "0.1.0"
+DEFAULT_CASE_STUDY_ROOT = "demos/cuda_zoo"
 EXPECTED_ARTIFACTS = (
     "metadata.json",
     "run_config.yaml",
@@ -37,9 +39,32 @@ EXPECTED_ARTIFACTS = (
 )
 
 
+def _configure_logging(args: argparse.Namespace) -> None:
+    """Set the ``fournex`` logger level/handler from --verbose/--debug.
+
+    Defaults to WARNING so normal runs stay quiet; -v raises to INFO and
+    --debug to DEBUG. Logs go to stderr so they never pollute stdout output
+    (JSON, briefs) that callers may pipe.
+    """
+    if getattr(args, "debug", False):
+        level = logging.DEBUG
+    elif getattr(args, "verbose", False):
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+
+    root = logging.getLogger("fournex")
+    root.setLevel(level)
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        root.addHandler(handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    _configure_logging(args)
 
     try:
         return _dispatch(parser, args)
@@ -87,6 +112,8 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return explain_cmd(args)
     elif args.command == "bench":
         return bench_cmd(args)
+    elif args.command == "case-study":
+        return case_study_cmd(args)
     else:
         parser.print_help()
         return 1
@@ -169,8 +196,9 @@ def collect(args: argparse.Namespace) -> int:
     )
     if imported:
         warnings.append(f"Imported workload artifacts: {', '.join(imported)}")
-    _generate_derived_summary_from_trace(run_dir, warnings)
-    _generate_derived_summary_from_profiler_bundle(run_dir, warnings)
+    environment = config.get("environment") if isinstance(config.get("environment"), dict) else None
+    _generate_derived_summary_from_trace(run_dir, warnings, environment=environment)
+    _generate_derived_summary_from_profiler_bundle(run_dir, warnings, environment=environment)
     artifacts = _discover_artifacts(run_dir)
     _append_limited_bundle_warnings(artifacts, warnings)
     metadata = _build_metadata(
@@ -1093,11 +1121,76 @@ def _print_bench_report(result: dict[str, Any]) -> None:
     print()
 
 
+def _resolve_case_study(target: str, root: str):
+    """Resolve a case-study target to a loaded CaseStudy.
+
+    *target* may be a path to a directory containing case_study.yaml, or a bare
+    case-study name to look up by name under *root*.
+    """
+    from .case_study import discover_case_studies, load_case_study
+
+    candidate = Path(target)
+    if (candidate / "case_study.yaml").exists():
+        return load_case_study(candidate)
+
+    for case in discover_case_studies(root):
+        if case.name == target or case.case_dir.name == target:
+            return case
+
+    raise FileNotFoundError(
+        f"case study '{target}' not found (looked for a dir with case_study.yaml, "
+        f"then by name under {root})"
+    )
+
+
+def case_study_cmd(args: argparse.Namespace) -> int:
+    from .case_study import discover_case_studies, emit_case_study_artifacts, run_case_study, render_case_study_txt
+
+    if args.cs_action == "list":
+        cases = discover_case_studies(args.root)
+        if not cases:
+            print(f"No case studies found under {args.root}")
+            return 1
+        width = max(len(c.name) for c in cases)
+        for c in cases:
+            print(f"  {c.name:<{width}}  {c.title}  [{c.category}]")
+        return 0
+
+    if args.cs_action != "run":
+        print("usage: frx case-study {run,list} ...", file=sys.stderr)
+        return 1
+
+    case = _resolve_case_study(args.target, args.root)
+    result = run_case_study(case)
+
+    if args.output_json:
+        print(json.dumps(result, indent=2, default=str))
+    else:
+        print(render_case_study_txt(result))
+
+    if not args.no_artifacts:
+        out_dir = Path(args.out) if args.out else Path("artifacts/case_studies") / case.name
+        written = emit_case_study_artifacts(result, out_dir, emit_readme=args.emit_readme)
+        print(f"\nArtifacts written to {out_dir}/")
+        for name in sorted(written):
+            print(f"  - {name}")
+
+    return 0 if result["validation"]["passed"] else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     import sys
     _stem = Path(sys.argv[0]).stem.lower().replace(".exe", "")
     prog = "fournex" if "fournex" in _stem else "frx"
     parser = argparse.ArgumentParser(prog=prog)
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="enable verbose (INFO) logging to stderr",
+    )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="enable debug logging to stderr",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     collect_parser = subparsers.add_parser("collect", help="run a workload and package a run bundle")
@@ -1425,6 +1518,21 @@ def _build_parser() -> argparse.ArgumentParser:
     bench_parser.add_argument("--out", default=None, metavar="DIR", help="directory for compiled exes and NCU CSVs")
     bench_parser.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON")
 
+    cs_parser = subparsers.add_parser(
+        "case-study",
+        help="run a bad/good kernel case study and emit a validated proof bundle",
+    )
+    cs_sub = cs_parser.add_subparsers(dest="cs_action")
+    cs_run = cs_sub.add_parser("run", help="run one case study (name under --root, or a path to a case dir)")
+    cs_run.add_argument("target", help="case-study name or path to a directory containing case_study.yaml")
+    cs_run.add_argument("--root", default=DEFAULT_CASE_STUDY_ROOT, metavar="DIR", help="search root for case-study names")
+    cs_run.add_argument("--out", default=None, metavar="DIR", help="artifact output directory (default: artifacts/case_studies/<name>)")
+    cs_run.add_argument("--emit-readme", action="store_true", help="also write README.md to the artifact bundle")
+    cs_run.add_argument("--no-artifacts", action="store_true", help="print the transcript only; do not write files")
+    cs_run.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON result")
+    cs_list = cs_sub.add_parser("list", help="list discoverable case studies")
+    cs_list.add_argument("--root", default=DEFAULT_CASE_STUDY_ROOT, metavar="DIR", help="search root for case studies")
+
     return parser
 
 
@@ -1727,6 +1835,9 @@ def _sample_gpu_metrics(
             warnings.append("nvidia-smi was not found; gpu_metrics.csv contains headers only.")
             return
 
+        base_wait_s = max(interval_ms, 100) / 1000.0
+        consecutive_failures = 0
+        max_consecutive = 5
         while not stop.is_set():
             timestamp = datetime.now(timezone.utc).isoformat()
             try:
@@ -1745,10 +1856,20 @@ def _sample_gpu_metrics(
                     if line.strip():
                         writer.writerow([timestamp, *[part.strip() for part in line.split(",")]])
                 handle.flush()
+                consecutive_failures = 0
             except Exception as exc:
-                warnings.append(f"nvidia-smi sampling failed: {exc}")
-                return
-            stop.wait(max(interval_ms, 100) / 1000.0)
+                # A transient nvidia-smi failure (timeout, momentary busy/lock)
+                # must not kill sampling for the rest of the run. Keep going,
+                # cap the warning noise, and back off once failures persist.
+                consecutive_failures += 1
+                if consecutive_failures in (1, max_consecutive):
+                    warnings.append(
+                        f"nvidia-smi sampling failed ({consecutive_failures}x), continuing: {exc}"
+                    )
+            wait_s = base_wait_s
+            if consecutive_failures >= max_consecutive:
+                wait_s = max(base_wait_s, 5.0)  # degrade frequency while failing
+            stop.wait(wait_s)
 
 
 def _discover_artifacts(run_dir: Path) -> dict[str, str]:
@@ -1979,6 +2100,69 @@ def _read_simple_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"config file not found: {path}")
     return {"user_config": {"source_path": str(path), "raw": path.read_text(encoding="utf-8")}}
+
+
+def _read_run_config_environment(run_dir: Path) -> dict[str, Any] | None:
+    config_path = run_dir / "run_config.yaml"
+    if not config_path.exists():
+        return None
+    try:
+        config = _parse_generated_yaml(config_path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    environment = config.get("environment") if isinstance(config, dict) else None
+    return environment if isinstance(environment, dict) else None
+
+
+def _parse_generated_yaml(text: str) -> dict[str, Any]:
+    """Parse the small YAML subset emitted by _to_yaml for run_config.yaml."""
+    root: dict[str, Any] = {}
+    stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
+
+    for raw_line in text.splitlines():
+        if not raw_line.strip():
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        stripped = raw_line.strip()
+        if stripped.startswith("-"):
+            continue
+
+        key, sep, raw_value = stripped.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        current = stack[-1][1] if stack else root
+
+        if raw_value == "":
+            child: dict[str, Any] = {}
+            current[key] = child
+            stack.append((indent, child))
+        else:
+            current[key] = _parse_generated_yaml_scalar(raw_value.strip())
+
+    return root
+
+
+def _parse_generated_yaml_scalar(value: str) -> Any:
+    if value == "null":
+        return None
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        pass
+    try:
+        if any(ch in value for ch in ".eE"):
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -2545,6 +2729,7 @@ def _looks_like_run_dir(path: Path) -> bool:
 def _load_or_generate_summary(run_dir: Path) -> dict[str, Any] | None:
     derived_path = run_dir / "derived" / "summary.json"
     raw_trace_path = run_dir / "raw" / "trace.jsonl"
+    environment = _read_run_config_environment(run_dir)
 
     if derived_path.exists():
         try:
@@ -2553,20 +2738,24 @@ def _load_or_generate_summary(run_dir: Path) -> dict[str, Any] | None:
             print(f"[warn] could not read {derived_path}: {exc}; regenerating from raw trace", file=sys.stderr)
 
     if raw_trace_path.exists():
-        return _generate_summary_from_trace(raw_trace_path)
+        return _generate_summary_from_trace(raw_trace_path, environment=environment)
 
     events = _events_from_profiler_bundle(run_dir, [])
     if events:
         try:
             from .analysis import summarize_run_with_steady_state
-            return summarize_run_with_steady_state(events)
+            return summarize_run_with_steady_state(events, environment=environment)
         except (ImportError, ValueError) as exc:
             print(f"[warn] could not generate summary from profiler bundle: {exc}", file=sys.stderr)
 
     return None
 
 
-def _generate_summary_from_trace(trace_path: Path) -> dict[str, Any] | None:
+def _generate_summary_from_trace(
+    trace_path: Path,
+    *,
+    environment: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     try:
         from .analysis import summarize_run_with_steady_state
     except ImportError as exc:
@@ -2576,10 +2765,15 @@ def _generate_summary_from_trace(trace_path: Path) -> dict[str, Any] | None:
     events = _read_jsonl_events(trace_path)
     if not events:
         return None
-    return summarize_run_with_steady_state(events)
+    return summarize_run_with_steady_state(events, environment=environment)
 
 
-def _generate_derived_summary_from_trace(run_dir: Path, warnings: list[str]) -> None:
+def _generate_derived_summary_from_trace(
+    run_dir: Path,
+    warnings: list[str],
+    *,
+    environment: dict[str, Any] | None = None,
+) -> None:
     derived_path = run_dir / "derived" / "summary.json"
     raw_trace_path = run_dir / "raw" / "trace.jsonl"
 
@@ -2599,7 +2793,7 @@ def _generate_derived_summary_from_trace(run_dir: Path, warnings: list[str]) -> 
         warnings.append("Raw trace is empty; derived/summary.json was not generated.")
         return
 
-    summary = summarize_run_with_steady_state(events)
+    summary = summarize_run_with_steady_state(events, environment=environment)
     derived_path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(derived_path, summary)
 
@@ -2618,7 +2812,12 @@ def _read_jsonl_events(path: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _generate_derived_summary_from_profiler_bundle(run_dir: Path, warnings: list[str]) -> None:
+def _generate_derived_summary_from_profiler_bundle(
+    run_dir: Path,
+    warnings: list[str],
+    *,
+    environment: dict[str, Any] | None = None,
+) -> None:
     derived_path = run_dir / "derived" / "summary.json"
     if derived_path.exists():
         return
@@ -2633,7 +2832,7 @@ def _generate_derived_summary_from_profiler_bundle(run_dir: Path, warnings: list
         warnings.append(f"Could not generate derived summary from profiler: analysis module unavailable ({exc}).")
         return
 
-    summary = summarize_run_with_steady_state(events)
+    summary = summarize_run_with_steady_state(events, environment=environment)
     derived_path.parent.mkdir(parents=True, exist_ok=True)
     _write_json(derived_path, summary)
 

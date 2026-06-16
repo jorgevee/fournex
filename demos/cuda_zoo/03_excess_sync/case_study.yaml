@@ -1,0 +1,17 @@
+name: excess_synchronization
+title: Unnecessary __syncthreads() in a Reduction Loop
+category: synchronization
+description: >
+  bad.cu calls __syncthreads() inside a tight reduction loop, serialising the
+  block on every iteration. good.cu uses a warp-shuffle reduction that removes
+  the per-iteration barrier.
+bad_source: bad.cu
+good_source: good.cu
+# before_ncu: before.ncu.csv
+# after_ncu: after.ncu.csv
+expected:
+  detected_before:
+    - sync_inside_tight_loop
+  resolved_after:
+    - sync_inside_tight_loop
+  no_new_findings: true

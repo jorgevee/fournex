@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import threading
 import time
@@ -49,6 +50,20 @@ _local_events: list[dict[str, Any]] = []
 _auto_persist_registered = False
 _auto_persist_done = False
 
+# Guards _local_events and the streaming sink so emits from the GPU sampler /
+# dataloader / worker threads can't interleave or corrupt the JSONL stream.
+_lock = threading.RLock()
+
+# Optional crash-durable streaming sink. When open, every emitted event is also
+# appended to the raw trace file as it happens (flushed periodically), so a hard
+# crash/OOM/kill mid-run still leaves a readable partial trace instead of losing
+# everything that was buffered in memory. The canonical file is still rewritten
+# from _local_events at clean exit; this is purely a durability layer.
+_trace_stream = None  # file handle or None
+_trace_stream_path: str | None = None
+_trace_stream_since_flush = 0
+_TRACE_FLUSH_EVERY = 100
+
 
 def init(**kwargs: Any) -> dict[str, Any]:
     job_name = kwargs.get("job_name") or os.environ.get("FRX_JOB_NAME", "unknown-job")
@@ -93,7 +108,10 @@ def init(**kwargs: Any) -> dict[str, Any]:
                     sample_interval_ms=sample_interval_ms, run_id=run_id,
                     enable_cupti=enable_cupti, cupti_debug_mode=cupti_debug_mode)
     else:
-        _local_events.clear()
+        with _lock:
+            _local_events.clear()
+        if _streaming_enabled(kwargs):
+            _open_trace_stream(raw_trace_path)
 
     if os.environ.get("FRX_AUTO_PERSIST") == "1":
         _register_auto_persist()
@@ -101,9 +119,77 @@ def init(**kwargs: Any) -> dict[str, Any]:
     return dict(_runtime_config)
 
 
+def _streaming_enabled(kwargs: dict[str, Any]) -> bool:
+    """Stream the raw trace to disk during the run for crash durability.
+
+    On by default whenever artifacts will be persisted (auto-persist / explicit
+    stream_trace=True); off for bare library use so we don't create trace files
+    no one asked for. Override with FRX_STREAM_TRACE=0/1.
+    """
+    env = os.environ.get("FRX_STREAM_TRACE")
+    if env is not None:
+        return env not in ("0", "", "false", "False")
+    if "stream_trace" in kwargs:
+        return bool(kwargs["stream_trace"])
+    return os.environ.get("FRX_AUTO_PERSIST") == "1"
+
+
+def _open_trace_stream(path: str) -> None:
+    global _trace_stream, _trace_stream_path, _trace_stream_since_flush
+    _close_trace_stream()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with _lock:
+            _trace_stream = open(path, "w", encoding="utf-8")
+            _trace_stream_path = path
+            _trace_stream_since_flush = 0
+    except OSError:
+        # Streaming is best-effort durability; never block the workload on it.
+        _trace_stream = None
+        _trace_stream_path = None
+
+
+def _close_trace_stream() -> None:
+    global _trace_stream, _trace_stream_path, _trace_stream_since_flush
+    with _lock:
+        if _trace_stream is not None:
+            try:
+                _trace_stream.flush()
+                _trace_stream.close()
+            except OSError:
+                pass
+        _trace_stream = None
+        _trace_stream_path = None
+        _trace_stream_since_flush = 0
+
+
+def _record(event: dict[str, Any]) -> None:
+    """Append to the in-memory buffer and the streaming sink under one lock."""
+    global _trace_stream_since_flush
+    with _lock:
+        _local_events.append(event)
+        if _trace_stream is not None:
+            try:
+                _trace_stream.write(json.dumps(event, sort_keys=True))
+                _trace_stream.write("\n")
+                _trace_stream_since_flush += 1
+                if _trace_stream_since_flush >= _TRACE_FLUSH_EVERY:
+                    _trace_stream.flush()
+                    _trace_stream_since_flush = 0
+            except OSError:
+                pass
+
+
 def flush() -> None:
     if HAS_NATIVE:
         native.flush()
+    else:
+        with _lock:
+            if _trace_stream is not None:
+                try:
+                    _trace_stream.flush()
+                except OSError:
+                    pass
     return None
 
 
@@ -162,7 +248,7 @@ def emit_event(event: dict[str, Any]) -> dict[str, Any]:
     if HAS_NATIVE:
         native.emit_event(event)
     else:
-        _local_events.append(event)
+        _record(event)
     return event
 
 
@@ -170,7 +256,7 @@ def begin_span(event: dict[str, Any]) -> dict[str, Any]:
     if HAS_NATIVE:
         native.begin_span(event)
     else:
-        _local_events.append(event)
+        _record(event)
     return event
 
 
@@ -178,7 +264,7 @@ def end_span(event: dict[str, Any]) -> dict[str, Any]:
     if HAS_NATIVE:
         native.end_span(event)
     else:
-        _local_events.append(event)
+        _record(event)
     return event
 
 
@@ -213,11 +299,13 @@ def build_runtime_event(
 
 
 def get_local_events() -> list[dict[str, Any]]:
-    return list(_local_events)
+    with _lock:
+        return list(_local_events)
 
 
 def clear_local_events() -> None:
-    _local_events.clear()
+    with _lock:
+        _local_events.clear()
 
 
 def get_runtime_config() -> dict[str, Any]:
@@ -238,6 +326,18 @@ def _auto_persist_artifacts() -> None:
         return
     _auto_persist_done = True
     try:
+        if HAS_NATIVE:
+            # The native backend owns its own streamed artifacts; the Python
+            # event buffer is empty by design. Finalize native output and do
+            # NOT run the Python persist (which would write empty files).
+            native.flush()
+            native.shutdown()
+            return
+
+        # Release the streaming handle so persist can rewrite the canonical
+        # trace file from the in-memory buffer without a two-writer conflict.
+        _close_trace_stream()
+
         from .storage import persist_run_artifacts
 
         persist_run_artifacts()

@@ -15,7 +15,7 @@ from fournex.thresholds import (
     resolve_thresholds,
 )
 from fournex.ncu_analysis import classify_ncu_bottlenecks, analyze_ncu_csv_text
-from fournex.analysis import classify_bottlenecks, summarize_run
+from fournex.analysis import classify_bottlenecks, summarize_run, summarize_run_with_steady_state
 
 
 # ---------------------------------------------------------------------------
@@ -190,3 +190,65 @@ def test_diagnosis_has_thresholds_hash():
     assert "thresholds_hash" in diag
     assert "thresholds_source" in diag
     assert diag["classifier_version"] == "0.2.0"
+
+
+def _three_step_input_fraction_events(wait_ns: int = 150) -> list[dict]:
+    events: list[dict] = [
+        {
+            "event_type": "gpu_sample",
+            "payload": {
+                "utilization_gpu_pct": 80,
+                "utilization_mem_pct": 30,
+                "memory_used_bytes": 30,
+                "memory_total_bytes": 100,
+            },
+        }
+    ]
+    for step_id in range(1, 4):
+        events.extend([
+            {"event_type": "step_start", "step_id": step_id, "payload": {"step_kind": "train"}},
+            {
+                "event_type": "dataloader_span",
+                "step_id": step_id,
+                "duration_ns": wait_ns,
+                "payload": {"stage": "next"},
+            },
+            {
+                "event_type": "phase_span",
+                "step_id": step_id,
+                "duration_ns": 500,
+                "payload": {"phase_name": "forward"},
+            },
+            {
+                "event_type": "step_end",
+                "step_id": step_id,
+                "duration_ns": 1000,
+                "payload": {"step_kind": "train", "status": "ok"},
+            },
+        ])
+    return events
+
+
+def test_run_with_steady_state_passes_environment_to_both_scopes():
+    env = {
+        "gpu_model": "h100",
+        "arch_profile_overrides": {
+            "profiles": {
+                "sm_90": {"classifier_thresholds": {"input_bound_ratio": 0.1}}
+            }
+        },
+    }
+
+    default_summary = summarize_run_with_steady_state(_three_step_input_fraction_events())
+    overridden_summary = summarize_run_with_steady_state(
+        _three_step_input_fraction_events(),
+        environment=env,
+    )
+
+    assert default_summary["run"]["diagnosis"]["primary_bottleneck"] is None
+    assert default_summary["steady_state"]["diagnosis"]["primary_bottleneck"] is None
+    assert overridden_summary["run"]["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert overridden_summary["steady_state"]["diagnosis"]["primary_bottleneck"] == "input_bound"
+    assert overridden_summary["run"]["diagnosis"]["thresholds_source"] == "defaults+arch_overrides"
+    assert overridden_summary["steady_state"]["diagnosis"]["thresholds_source"] == "defaults+arch_overrides"
+    assert overridden_summary["run"]["diagnosis"]["thresholds_hash"] != resolve_thresholds(None).thresholds_hash

@@ -1,0 +1,19 @@
+name: naive_vs_tiled_matmul
+title: Naive vs. Shared-Memory Tiled GEMM
+category: memory
+description: >
+  bad.cu is a naive GEMM that re-reads operands from global memory for every
+  multiply-accumulate. good.cu uses TILE=16 shared-memory tiling to reuse
+  operands and cut global traffic.
+bad_source: bad.cu
+good_source: good.cu
+# before_ncu: before.ncu.csv
+# after_ncu: after.ncu.csv
+expected:
+  detected_before:
+    - no_shared_memory_tiling
+    - fp32_only_matmul
+  resolved_after:
+    - no_shared_memory_tiling
+    - fp32_only_matmul
+  no_new_findings: true

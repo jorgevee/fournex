@@ -1,0 +1,16 @@
+name: register_pressure
+title: Excessive Register Pressure
+category: occupancy
+description: >
+  bad.cu keeps 32 live local scalars, inflating per-thread register usage and
+  capping occupancy. good.cu splits the work into two lower-pressure passes.
+bad_source: bad.cu
+good_source: good.cu
+# before_ncu: before.ncu.csv
+# after_ncu: after.ncu.csv
+expected:
+  detected_before:
+    - high_register_pressure
+  resolved_after:
+    - high_register_pressure
+  no_new_findings: true

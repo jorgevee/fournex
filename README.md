@@ -182,6 +182,31 @@ for step, batch in enumerate(dataloader):
 
 Without SDK instrumentation, `frx collect` still wraps the process, samples `nvidia-smi`, and imports PyTorch profiler Chrome traces automatically.
 
+### How telemetry works
+
+Fournex provides **lightweight Python runtime telemetry by default**, with an
+**optional native CUPTI/NVML backend** for deeper GPU tracing. Both sit behind
+the same SDK API, so your instrumentation doesn't change when you switch backends:
+
+- **Python path (default).** `step_context` / `phase` record runtime events;
+  GPU utilization is sampled from `nvidia-smi` (~1 s); kernel regions are timed
+  with `torch.cuda.Event` when PyTorch is present. Events stream to disk during
+  the run so a crash still leaves a usable trace. Great for *runtime* questions
+  (idle GPU, dataloader starvation, launch overhead, low/unstable utilization).
+- **Native path (opt-in, `BUILD_NATIVE=1`).** A C++ engine using CUPTI/NVML for
+  precise kernel-level tracing.
+
+For exact hardware-counter claims (per-kernel memory throughput, warp stall
+reasons, coalescing, occupancy), feed Fournex an **Nsight Compute CSV** — the
+Python sampler is intentionally coarse and won't assert kernel-level facts on
+its own.
+
+The real value isn't the telemetry alone — it's the pipeline that turns
+telemetry, NCU, PTX, and CUDA source into **reconciled bottleneck explanations
+and ranked, validated recommendations**. Fournex is the layer *above* profilers
+that tells you what the evidence means and what to try next, not a replacement
+for Nsight Systems/Compute.
+
 ---
 
 ## REST API
