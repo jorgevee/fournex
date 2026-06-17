@@ -374,6 +374,27 @@ def analyze_ncu_csv_text(
     return _build_ncu_result(summaries, environment, source_text=text)
 
 
+def analyze_ncu_profile_dict(
+    profile: Any,
+    *,
+    kernel_name: str = "sakana_kernel",
+    environment: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Analyze a single pre-parsed NCU metric mapping (e.g. a Sakana ``NCU_Profile``).
+
+    Bridges the SakanaAI archive's section-style profiles into the standard NCU
+    pipeline without going through CSV parsing. Returns the same ``ncu_analysis_v1``
+    dict as :func:`analyze_ncu_csv_text`, or ``None`` when the profile carries no
+    usable metrics (caller should fall back to static-only analysis).
+    """
+    from .sakana_ncu_adapter import adapt_ncu_profile
+
+    summary = adapt_ncu_profile(profile, kernel_name=kernel_name)
+    if summary is None:
+        return None
+    return _build_ncu_result([summary], environment)
+
+
 def _build_ncu_result(
     summaries: list[KernelLaunchSummary],
     environment: dict[str, Any] | None,

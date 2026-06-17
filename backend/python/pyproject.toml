@@ -49,6 +49,7 @@ where = ["."]
 [tool.setuptools.package-data]
 "fournex.recommendations" = ["*.yaml"]
 "fournex.cuda_rules" = ["*.yaml", "*/*.yaml"]
+"fournex.data" = ["sakana/*.jsonl", "sakana/*.yaml"]
 
 [tool.setuptools]
 include-package-data = true

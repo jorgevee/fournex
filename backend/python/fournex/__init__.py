@@ -110,6 +110,7 @@ from .kernel_inspector import (
 from .ncu_analysis import (
     analyze_ncu_csv,
     analyze_ncu_csv_text,
+    analyze_ncu_profile_dict,
     classify_ncu_bottlenecks,
     derive_ncu_run_summary,
     validate_ncu_csv_text,
@@ -254,6 +255,7 @@ __all__ = [
     "map_nvml_sample_to_ir",
     "analyze_ncu_csv",
     "analyze_ncu_csv_text",
+    "analyze_ncu_profile_dict",
     "build_ncu_command",
     "classify_ncu_bottlenecks",
     "derive_ncu_run_summary",

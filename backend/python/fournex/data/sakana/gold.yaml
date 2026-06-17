@@ -1,0 +1,207 @@
+# Hand-labeled gold set for `frx eval sakana`.
+#
+# Purpose: catch bad heuristics, NOT to be an exhaustive benchmark. Labels are
+# assigned by independent reasoning about each kernel's metrics + outcome, then
+# checked against Fournex. Three assertions per row (any may be omitted/null):
+#
+#   expected_primary             - the bottleneck a careful analyst would name, or
+#                                  "inconclusive" when the Speed-of-Light reading
+#                                  is genuinely mid-range (we WANT Fournex to not
+#                                  over-pin in that case). Omit when ambiguous.
+#   confidence_ceiling           - this dataset's NCU profiles lack warp-stall
+#                                  data, so NO diagnosis may exceed "medium-high".
+#                                  This is a structural, non-circular over-claim
+#                                  guard and is asserted on every profiled row.
+#   expect_correctness_warning   - true for build/runtime failures (Error text);
+#                                  false for clean correct kernels. Omitted for
+#                                  silent numerical mismatches (the documented
+#                                  blind spot) and for correct-but-risky kernels.
+#
+# Coverage: fast-correct, slow-correct (memory-bound / register-bound /
+# inconclusive), compile-runtime failures, and silent numerical mismatches.
+
+# ── Level 1: matmul. Slow vs cuBLAS; Speed-of-Light is memory-bandwidth bound. ──
+- row_key: "L1/T1/block_size_optimized_base#1"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+  notes: "Max Bandwidth ~85%, SM ~43%; bandwidth-bound naive matmul, 0.22x torch."
+- row_key: "L1/T1/tiled_coalesced_unroll_base#3"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/aligned_vectorized_matmul_base_base#6"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/workload_balancing_optimization_base#10"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/tiled_opt_base#13"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/optimized_tiled_matmul_base#14"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/padded_shared_memory_base#23"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/warp_uniform_matmul_base#26"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/double_buffered_shared_memory_base#36"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/load_balanced_tile_allocation_base#38"
+  expected_primary: memory_bandwidth_saturation
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+
+# Level 1 matmul variants where static analysis confirms heavy register usage.
+- row_key: "L1/T1/stride_loop_matmul_base#2"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/matmul_optimized_vectorized_base#15"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L1/T1/warp_reduction_optimized_base#19"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+
+# Level 1 compile/runtime failures -> Fournex must raise a correctness warning.
+- row_key: "L1/T1/block_64_optimized_base_base#7"
+  expect_correctness_warning: true
+  notes: "Build/runtime Error reported; no profile."
+- row_key: "L1/T1/matmul_tiled_vectorized_base#16"
+  expect_correctness_warning: true
+- row_key: "L1/T1/double_buffer_async_base#27"
+  expect_correctness_warning: true
+
+# Level 1 silent numerical mismatches (Error null, large Max_Diff). Documented
+# blind spot: no profile/static signal can detect these. We only assert the row
+# is handled, not a warning verdict.
+- row_key: "L1/T1/warp_shfl_matmul_base#4"
+  notes: "Max_Diff 6415; silent mismatch, undetectable blind spot."
+- row_key: "L1/T1/vectorized_coalesced_base_base#5"
+  notes: "Max_Diff 219; silent mismatch."
+- row_key: "L1/T1/double_buffered_tile_matmul_base#11"
+  notes: "Max_Diff 22; silent mismatch."
+- row_key: "L1/T1/optimized_matmul_kernel_base#29"
+  notes: "Max_Diff 1082; silent mismatch."
+
+# ── Level 2: conv2d+relu+bias. Mid-range Speed-of-Light -> honestly inconclusive. ──
+- row_key: "L2/T1/modular_conv2d_relu_bias_base#1"
+  expected_primary: inconclusive
+  confidence_ceiling: medium-high
+  notes: "sp 1.14x; no single SoL signal dominates -> declining to over-pin is correct."
+- row_key: "L2/T1/warp_aligned_conv2d_relu_bias_base#20"
+  expected_primary: inconclusive
+  confidence_ceiling: medium-high
+- row_key: "L2/T1/grid3d_conv2d_relu_bias_base_base#33"
+  expected_primary: inconclusive
+  confidence_ceiling: medium-high
+- row_key: "L2/T1/shared_sync_conv2d_relu_bias_base#39"
+  expected_primary: inconclusive
+  confidence_ceiling: medium-high
+- row_key: "L2/T1/streamed_conv2d_base#3"
+  expected_primary: inconclusive
+  confidence_ceiling: medium-high
+
+# Level 2 compile/runtime failures.
+- row_key: "L2/T1/stream_pipelined_conv2d_base#3"
+  expect_correctness_warning: true
+- row_key: "L2/T1/constant_memory_conv2d_relu_bias_base#5"
+  expect_correctness_warning: true
+- row_key: "L2/T1/shared_mem_conv2d_relu_bias_base#6"
+  expect_correctness_warning: true
+- row_key: "L2/T1/optim_conv2d_relu_bias_base#13"
+  expect_correctness_warning: true
+
+# Level 2 silent numerical mismatches.
+- row_key: "L2/T1/1_Conv2D_ReLU_BiasAdd_shared_memory_base#2"
+  notes: "Max_Diff 113; silent mismatch."
+- row_key: "L2/T1/shared_mem_conv2d_relu_bias_base#7"
+  notes: "Max_Diff 69; silent mismatch."
+- row_key: "L2/T1/shared_memory_conv2d_relu_bias_base#8"
+  notes: "Max_Diff 2.9; silent mismatch."
+
+# ── Level 3: MLP. Slow fused-linear variants are register-bound; fast ReLU-only ──
+# variants are memory-bound by nature (elementwise) yet well-optimized (>1x).
+- row_key: "L3/T1/mlp_optimized_base#2"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/stream_pipeline_base#3"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/dense_nosync_fused_base#7"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/fused_linear_relu_balanced_base#21"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/fused_mlp_modular_base_base#24"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/fused_linear_relu_base#36"
+  expected_primary: register_pressure
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/1_MLP_minimized_divergence_base#4"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+  notes: "ReLU-only path; elementwise -> memory-bound by nature, 1.30x torch."
+- row_key: "L3/T1/1_MLP_optimized_block_size_base#5"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/optimized_relu_activation_base#29"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/efficient_relu_activation_base#30"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/aligned_ldg_relu_base_base#38"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+- row_key: "L3/T1/shared_mem_relu_fusion_base#39"
+  expected_primary: roofline_memory_bound
+  confidence_ceiling: medium-high
+  expect_correctness_warning: false
+
+# Level 3 compile/runtime failures.
+- row_key: "L3/T1/mlp_stream_overlap_base#8"
+  expect_correctness_warning: true
+- row_key: "L3/T1/1_MLP_optimized_reduction_base_base#9"
+  expect_correctness_warning: true
+- row_key: "L3/T1/1_MLP_constant_memory_base_base#10"
+  expect_correctness_warning: true
+- row_key: "L3/T1/optimized_mlp_forward_base#13"
+  expect_correctness_warning: true
+
+# Level 3 silent numerical mismatches.
+- row_key: "L3/T1/1_MLP_loop_unroll_base#1"
+  notes: "Max_Diff 1.8; silent mismatch."
+- row_key: "L3/T1/mlp_optimized_memory_access_base#6"
+  notes: "Max_Diff 0.46; silent mismatch."
+- row_key: "L3/T1/mlp_fused_sync_optimized_base_base#12"
+  notes: "Max_Diff 0.36; silent mismatch."
+- row_key: "L3/T1/optimized_mlp_fused_base#15"
+  notes: "Max_Diff 1.02; silent mismatch."

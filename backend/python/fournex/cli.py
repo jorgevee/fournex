@@ -114,6 +114,8 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         return bench_cmd(args)
     elif args.command == "case-study":
         return case_study_cmd(args)
+    elif args.command == "eval":
+        return eval_cmd(args)
     else:
         parser.print_help()
         return 1
@@ -1178,6 +1180,77 @@ def case_study_cmd(args: argparse.Namespace) -> int:
     return 0 if result["validation"]["passed"] else 1
 
 
+def _fmt_pct(metric: dict | None) -> str:
+    """Render a {value, n} leaderboard metric as 'NN% (n=K)' or 'n/a'."""
+    if not metric or metric.get("value") is None:
+        return "n/a"
+    n = metric.get("n")
+    suffix = f" (n={n})" if n is not None else ""
+    return f"{metric['value'] * 100:.1f}%{suffix}"
+
+
+def eval_cmd(args: argparse.Namespace) -> int:
+    if args.eval_action != "sakana":
+        print("usage: frx eval sakana [source] [--sample N] [--level {1,2,3}] [--out PATH]", file=sys.stderr)
+        return 1
+
+    from . import eval_sakana as ev
+
+    environment = {"gpu_model": args.gpu_model} if args.gpu_model else None
+    try:
+        result = ev.run_eval(
+            source=args.source,
+            sample=args.sample,
+            level=args.level,
+            seed=args.seed,
+            environment=environment,
+            use_gold=not args.no_gold,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    lb = result["leaderboard"]
+    cwr = lb["correctness_warning_recall"]
+    sp = lb["speedup_alignment"]
+
+    print(f"frx eval sakana - {lb['rows_evaluated']} kernels from {result['dataset']}")
+    print("(we test Fournex, not Sakana; no GPU needed)\n")
+    ceiling = lb["confidence_ceiling_respected"]
+    max_emitted = lb["max_confidence_emitted"]["value"] or "none"
+    print("OBJECTIVE")
+    print(f"  concrete diagnosis coverage   : {_fmt_pct(lb['coverage_concrete_diagnosis'])}")
+    print(f"  confidence ceiling respected  : {_fmt_pct(ceiling)}  (cap = {ceiling['ceiling']}; no warp-stall data to justify more)")
+    print(f"  max confidence emitted        : {max_emitted}")
+    print(f"  slow kernels explained        : {_fmt_pct(sp['slow_kernels_explained'])}")
+    print(f"  fast kernels not over-claimed : {_fmt_pct(sp['fast_kernels_not_overclaimed'])}")
+    print("CORRECTNESS (never inferred from the profile)")
+    print(f"  warned on build/runtime errors: {_fmt_pct(cwr['build_or_runtime_error'])}")
+    print(f"  silent numerical mismatches   : {_fmt_pct(cwr['silent_numerical_mismatch'])}  (documented blind spot)")
+    print(f"  warnings on correct kernels   : {_fmt_pct(cwr['warning_rate_on_correct_kernels'])}")
+    print(f"SELF-CONSISTENCY (heuristic, not truth)")
+    print(f"  agrees w/ NCU weak label      : {_fmt_pct(lb['self_consistency_vs_weak_label'])}")
+    if "gold" in lb:
+        g = lb["gold"]
+        print(f"GOLD ({g['gold_rows_in_subset']}/{g['gold_rows_total']} hand-labeled rows present)")
+        print(f"  primary bottleneck accuracy   : {_fmt_pct(g['primary_bottleneck_accuracy'])}")
+        print(f"  confidence ceiling respected  : {_fmt_pct(g['confidence_ceiling_respected'])}")
+        print(f"  correctness-warning accuracy  : {_fmt_pct(g['correctness_warning_accuracy'])}")
+        if g["failures"]:
+            print(f"  {len(g['failures'])} gold check failure(s):")
+            for f in g["failures"][:10]:
+                print(f"    - {f}")
+
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+        print(f"\nFull report written to {out_path}")
+
+    gold_failed = bool(lb.get("gold", {}).get("failures"))
+    return 1 if gold_failed else 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     import sys
     _stem = Path(sys.argv[0]).stem.lower().replace(".exe", "")
@@ -1532,6 +1605,24 @@ def _build_parser() -> argparse.ArgumentParser:
     cs_run.add_argument("--json", dest="output_json", action="store_true", help="output raw JSON result")
     cs_list = cs_sub.add_parser("list", help="list discoverable case studies")
     cs_list.add_argument("--root", default=DEFAULT_CASE_STUDY_ROOT, metavar="DIR", help="search root for case studies")
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="evaluate Fournex's analyzer against a labeled dataset",
+    )
+    eval_sub = eval_parser.add_subparsers(dest="eval_action")
+    sakana = eval_sub.add_parser(
+        "sakana",
+        help="evaluate against the SakanaAI/AI-CUDA-Engineer-Archive (offline cached subset by default)",
+    )
+    sakana.add_argument("source", nargs="?", default=None,
+                        help="path to a JSONL subset (default: packaged cached fixture)")
+    sakana.add_argument("--sample", type=int, default=None, metavar="N", help="evaluate a deterministic sample of N rows")
+    sakana.add_argument("--level", type=int, choices=(1, 2, 3), default=None, help="restrict to a KernelBench level")
+    sakana.add_argument("--seed", type=int, default=0, help="sampling seed (for reproducibility)")
+    sakana.add_argument("--gpu-model", default=None, metavar="NAME", help="GPU model for arch-aware analysis (e.g. h100)")
+    sakana.add_argument("--out", default=None, metavar="PATH", help="write the full sakana_eval_v1 JSON report here")
+    sakana.add_argument("--no-gold", action="store_true", help="skip scoring against the hand-labeled gold set")
 
     return parser
 
