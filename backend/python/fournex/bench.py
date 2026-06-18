@@ -67,10 +67,11 @@ def profile_with_ncu(
     exe_path: Path,
     *,
     preset: str = "full",
+    sm_version: str | int | None = None,
 ) -> str | None:
     """Run NCU on exe_path. Return filtered CSV text or None on NCU failure."""
     from .ncu_presets import build_ncu_command
-    cmd = build_ncu_command(preset, [str(exe_path)])
+    cmd = build_ncu_command(preset, [str(exe_path)], sm_version=sm_version)
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         return None
@@ -135,8 +136,10 @@ def bench_compare(
 
         ncu_diff = None
         if with_ncu:
-            before_csv = profile_with_ncu(before_exe, preset=preset)
-            after_csv  = profile_with_ncu(after_exe,  preset=preset)
+            # arch (e.g. "sm_120") doubles as the sm hint so PC-sampling metrics
+            # are dropped on Blackwell instead of failing the whole ncu pass.
+            before_csv = profile_with_ncu(before_exe, preset=preset, sm_version=arch)
+            after_csv  = profile_with_ncu(after_exe,  preset=preset, sm_version=arch)
             if before_csv and after_csv:
                 ncu_diff = diff_ncu_runs(
                     before_csv,

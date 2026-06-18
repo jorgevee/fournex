@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CUDA diagnostic evaluation harness** (`frx eval sakana`): independent,
+  reproducible measurement of Fournex's *diagnostic quality* on AI-generated
+  CUDA kernels — not merely "dataset support". For each kernel it adapts the
+  Nsight Compute profile, runs static CUDA source analysis, reconciles the two,
+  and scores what Fournex concluded against the kernel's real outcome. Runs
+  fully offline, no GPU.
+  - NCU-profile adapter for SakanaAI AI-CUDA-Engineer-Archive traces (parses the
+    profile's section metrics and maps them to Fournex's canonical signals;
+    deliberately refuses to treat the byte/second throughput metric as a
+    percentage).
+  - Reconciled pipeline combining Nsight Compute metrics with static source
+    findings via the existing `reconcile_evidence`/`build_explain_result` stack.
+  - Packaged offline benchmark assets: a 102-row evaluation subset and a 52-row
+    hand-labeled gold set (`fournex/data/sakana/`), plus a dependency-free
+    refresh script (`scripts/fetch_sakana.py`).
+  - JSON + console leaderboard (`sakana_eval_v1`) reporting bottleneck coverage,
+    confidence calibration, correctness-warning accuracy, and overclaim
+    detection — every metric tagged `objective` / `heuristic` / `vs-truth` so
+    nothing reads as ground truth that isn't.
+
+### Changed
+- The confidence model now explicitly separates the **maximum allowable
+  confidence** (the ceiling justified by available evidence) from the **maximum
+  confidence actually emitted**, and the eval report defines the full confidence
+  scale by how many independent analysis layers confirm a diagnosis.
+
+### Known limitations
+- Silent numerical correctness failures cannot be detected from a profile or
+  static source alone (a wrong kernel profiles fine); the harness reports this as
+  a documented blind spot rather than guessing.
+- SakanaAI NCU profiles omit warp-stall breakdowns, coalescing metrics, and
+  tensor-core utilization. Diagnoses that need those signals are surfaced as
+  *missing evidence* rather than confirmed findings — so confidence on this
+  dataset is capped accordingly.
+
 ## [0.2.9] - 2026-06-16
 
 ### Added

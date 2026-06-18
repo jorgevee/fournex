@@ -199,7 +199,9 @@ def collect(args: argparse.Namespace) -> int:
     if imported:
         warnings.append(f"Imported workload artifacts: {', '.join(imported)}")
     environment = config.get("environment") if isinstance(config.get("environment"), dict) else None
-    _generate_derived_summary_from_trace(run_dir, warnings, environment=environment)
+    # overwrite=True: the parent owns the derived summary because only it has the
+    # captured GPU metrics; the subprocess's GPU-less summary must not win.
+    _generate_derived_summary_from_trace(run_dir, warnings, environment=environment, overwrite=True)
     _generate_derived_summary_from_profiler_bundle(run_dir, warnings, environment=environment)
     artifacts = _discover_artifacts(run_dir)
     _append_limited_bundle_warnings(artifacts, warnings)
@@ -506,7 +508,8 @@ def _run_ncu_compare(
     def _run_ncu_on(exe_path: str) -> StepResult:
         try:
             from .ncu_presets import build_ncu_command
-            cmd = build_ncu_command("full", [exe_path])
+            from .arch_profiles import resolve_sm_version
+            cmd = build_ncu_command("full", [exe_path], sm_version=resolve_sm_version(args.gpu_model))
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if proc.returncode != 0:
                 reason = f"ncu exited {proc.returncode}: {proc.stderr.strip()[:200]}"
@@ -1810,6 +1813,10 @@ def profile(args: argparse.Namespace) -> int:
             print("    frx profile --ncu <output.csv>", file=sys.stderr)
             return 1
 
+        from .arch_profiles import resolve_sm_version
+        from .ncu_presets import get_ncu_preset, pc_sampling_supported
+        sm_version = resolve_sm_version(environment.get("gpu_model") if environment else None)
+
         try:
             command = build_ncu_command(
                 args.preset,
@@ -1818,10 +1825,20 @@ def profile(args: argparse.Namespace) -> int:
                 kernel_name=args.kernel_name,
                 launch_skip=args.launch_skip,
                 launch_count=args.launch_count,
+                sm_version=sm_version,
             )
         except ValueError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+
+        if not pc_sampling_supported(sm_version) and any(
+            m.startswith("smsp__pcsamplingdata_") for m in get_ncu_preset(args.preset).metrics
+        ):
+            print(
+                f"Note: PC-sampling stall metrics are unavailable on {sm_version} (Blackwell); "
+                "they were dropped so the rest of the preset can be collected.",
+                file=sys.stderr,
+            )
 
         print(f"\nProfiling: {format_shell_command(command)}\n")
         proc = subprocess.run(command, capture_output=True, text=True)
@@ -2864,11 +2881,17 @@ def _generate_derived_summary_from_trace(
     warnings: list[str],
     *,
     environment: dict[str, Any] | None = None,
+    overwrite: bool = False,
 ) -> None:
     derived_path = run_dir / "derived" / "summary.json"
     raw_trace_path = run_dir / "raw" / "trace.jsonl"
 
-    if derived_path.exists():
+    # `collect` passes overwrite=True so it can rebuild the summary WITH the
+    # nvidia-smi samples it captured. The workload subprocess's SDK auto-persist
+    # writes a derived summary first, but from its own events only — it has no GPU
+    # samples (sampling runs in the parent), so that summary reports 0% util. Only
+    # the parent has gpu_metrics.csv, so the parent must be authoritative.
+    if derived_path.exists() and not overwrite:
         return
     if not raw_trace_path.exists():
         return
@@ -2881,8 +2904,17 @@ def _generate_derived_summary_from_trace(
 
     events = _read_jsonl_events(raw_trace_path)
     if not events:
+        # Preserve any existing (e.g. subprocess-written) summary rather than
+        # clobbering it with nothing.
         warnings.append("Raw trace is empty; derived/summary.json was not generated.")
         return
+
+    # Fold in nvidia-smi samples captured during collection as gpu_sample events.
+    # Without this the SDK trace carries no GPU utilization, so the summary reports
+    # 0% util and the utilization-keyed rules (underutilized_gpu, launch_bound)
+    # can never fire. (_gpu_metrics_csv_to_sdk_events returns [] if the CSV is
+    # absent or header-only.)
+    events.extend(_gpu_metrics_csv_to_sdk_events(run_dir / "gpu_metrics.csv"))
 
     summary = summarize_run_with_steady_state(events, environment=environment)
     derived_path.parent.mkdir(parents=True, exist_ok=True)

@@ -522,3 +522,89 @@ def test_analyze_rejects_zip_slip_member(capsys) -> None:
     assert exit_code == 1
     assert "unsafe zip member path" in captured.err
     assert not (out_dir / "evil.txt").exists()
+
+
+# ── Regression: nvidia-smi GPU samples must reach the trace-derived summary ─────
+# Bug found dogfooding the live path on WSL+CUDA: `frx collect` writes GPU
+# utilization to gpu_metrics.csv, but _generate_derived_summary_from_trace built
+# its events only from raw/trace.jsonl, so average_gpu_utilization_pct was always
+# 0.0 (disabling underutilized_gpu / launch_bound). See lessons_learned2 2026-06-17.
+
+def _input_bound_events_without_gpu_sample() -> list[dict]:
+    # Strip the synthetic gpu_sample so the trace itself carries no GPU util; the
+    # only GPU signal must come from gpu_metrics.csv. wait_ns dominates the 1000ns
+    # step so the dataloader fraction clears the input_bound threshold.
+    events = [
+        e for e in _three_step_input_fraction_events(wait_ns=3000)
+        if e["event_type"] != "gpu_sample"
+    ]
+    assert all(e["event_type"] != "gpu_sample" for e in events)
+    return events
+
+
+def _gpu_metrics_csv_text(utils: list[float]) -> str:
+    header = ("timestamp,index,name,utilization.gpu,utilization.memory,"
+              "memory.used,memory.total,pcie.link.gen.current,pcie.link.width.current")
+    rows = [f"t{i},0,Test GPU,{u},12,2000,8000,4,8" for i, u in enumerate(utils)]
+    return "\n".join([header, *rows]) + "\n"
+
+
+def _scope(summary: dict) -> dict:
+    # summarize_run_with_steady_state may return a flat summary or a
+    # {run, steady_state, ...} wrapper depending on step count; normalize.
+    return summary["run"] if "run" in summary else summary
+
+
+def test_trace_summary_without_gpu_metrics_has_zero_util() -> None:
+    from fournex.cli import _generate_derived_summary_from_trace
+
+    run_dir = _test_out_dir("trace-no-gpu-csv")
+    _write_jsonl(run_dir / "raw" / "trace.jsonl", _input_bound_events_without_gpu_sample())
+
+    _generate_derived_summary_from_trace(run_dir, [])
+    scope = _scope(json.loads((run_dir / "derived" / "summary.json").read_text(encoding="utf-8")))
+
+    assert (scope["run_summary"]["average_gpu_utilization_pct"] or 0.0) == 0.0
+    # Trace-derived bottleneck detection still works without GPU samples.
+    assert scope["diagnosis"]["primary_bottleneck"] == "input_bound"
+
+
+def test_trace_summary_folds_in_gpu_metrics_csv() -> None:
+    from fournex.cli import _generate_derived_summary_from_trace
+
+    run_dir = _test_out_dir("trace-with-gpu-csv")
+    _write_jsonl(run_dir / "raw" / "trace.jsonl", _input_bound_events_without_gpu_sample())
+    (run_dir / "gpu_metrics.csv").write_text(_gpu_metrics_csv_text([90.0, 95.0, 99.0]), encoding="utf-8")
+
+    _generate_derived_summary_from_trace(run_dir, [])
+    scope = _scope(json.loads((run_dir / "derived" / "summary.json").read_text(encoding="utf-8")))
+
+    # The nvidia-smi samples now reach the summary (was always 0.0 before the fix)...
+    assert scope["run_summary"]["average_gpu_utilization_pct"] > 0.0
+    # ...without disturbing the trace-derived diagnosis.
+    assert scope["diagnosis"]["primary_bottleneck"] == "input_bound"
+
+
+def test_collect_overwrites_subprocess_gpu_less_summary() -> None:
+    # Reproduces the live bug: the workload subprocess auto-persists a derived
+    # summary with no GPU samples, then the parent must regenerate it WITH the
+    # captured gpu_metrics.csv. Without overwrite=True the GPU-less summary wins.
+    from fournex.cli import _generate_derived_summary_from_trace
+
+    run_dir = _test_out_dir("trace-stale-summary")
+    _write_jsonl(run_dir / "raw" / "trace.jsonl", _input_bound_events_without_gpu_sample())
+    (run_dir / "gpu_metrics.csv").write_text(_gpu_metrics_csv_text([88.0, 92.0, 97.0]), encoding="utf-8")
+    # Simulate the subprocess having already written a GPU-less summary.
+    stale = run_dir / "derived" / "summary.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text('{"stale": true}', encoding="utf-8")
+
+    # Default (no overwrite) leaves the stale summary untouched.
+    _generate_derived_summary_from_trace(run_dir, [])
+    assert json.loads(stale.read_text(encoding="utf-8")) == {"stale": True}
+
+    # overwrite=True rebuilds it with GPU utilization folded in.
+    _generate_derived_summary_from_trace(run_dir, [], overwrite=True)
+    scope = _scope(json.loads(stale.read_text(encoding="utf-8")))
+    assert scope["run_summary"]["average_gpu_utilization_pct"] > 0.0
+    assert scope["diagnosis"]["primary_bottleneck"] == "input_bound"

@@ -12,6 +12,41 @@ class NcuMetricPreset:
     required_canonical_metrics: tuple[str, ...]
 
 
+# PC-sampling warp-stall counters (smsp__pcsamplingdata_*) were removed on the
+# Blackwell generation (sm_100+). Requesting them makes ncu fail the ENTIRE pass
+# on those GPUs (observed: RTX 5060 / sm_120 -> "ncu exited with code 9"), which
+# silently kills even the valid memory/occupancy metrics in the same request.
+_PC_SAMPLING_PREFIX = "smsp__pcsamplingdata_"
+_PC_SAMPLING_MIN_UNSUPPORTED_SM = 100
+
+
+def _sm_int(sm_version: str | int | None) -> int | None:
+    """Coerce a sm version ("sm_120", 120, "120") to an int, or None."""
+    if sm_version is None:
+        return None
+    if isinstance(sm_version, int):
+        return sm_version
+    digits = "".join(ch for ch in str(sm_version) if ch.isdigit())
+    return int(digits) if digits else None
+
+
+def pc_sampling_supported(sm_version: str | int | None) -> bool:
+    """Whether PC-sampling stall metrics are collectable on this arch.
+
+    Unknown arch (None) is treated as supported so we don't silently drop metrics
+    when we cannot prove they're unavailable.
+    """
+    sm = _sm_int(sm_version)
+    return sm is None or sm < _PC_SAMPLING_MIN_UNSUPPORTED_SM
+
+
+def filter_metrics_for_sm(metrics: tuple[str, ...], sm_version: str | int | None) -> tuple[str, ...]:
+    """Drop metrics unsupported on the given arch (currently PC-sampling on Blackwell)."""
+    if pc_sampling_supported(sm_version):
+        return tuple(metrics)
+    return tuple(m for m in metrics if not m.startswith(_PC_SAMPLING_PREFIX))
+
+
 NCU_METRIC_PRESETS: dict[str, NcuMetricPreset] = {
     "memory": NcuMetricPreset(
         name="memory",
@@ -130,15 +165,17 @@ def build_ncu_command(
     target_processes: str = "all",
     launch_skip: int | None = None,
     launch_count: int | None = None,
+    sm_version: str | int | None = None,
 ) -> list[str]:
     preset = get_ncu_preset(preset_name)
+    metrics = filter_metrics_for_sm(preset.metrics, sm_version)
     command = [
         "ncu",
         "--csv",
         "--target-processes",
         target_processes,
         "--metrics",
-        ",".join(preset.metrics),
+        ",".join(metrics),
     ]
     if kernel_name:
         command.extend(["--kernel-name", kernel_name])
