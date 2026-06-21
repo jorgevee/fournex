@@ -107,6 +107,16 @@ def extract_source_signals(kernel: "CudaKernelSource") -> dict[str, Any]:
     bounds_check_count = len(re.findall(r"\bif\s*\([^)]*(<|<=)[^)]*\)", body))
     local_var_count = len(re.findall(
         r"\b(float|double|int|long|unsigned|uint|char|half)\s+\w+\s*(=|;)", body))
+    # A large per-thread local array is register pressure too — and it's the thing
+    # that spills to local memory. Count its elements toward local_var_count.
+    # Only statement-leading declarations match, so __shared__ arrays (whose decl
+    # is preceded by the __shared__ qualifier) are excluded — they live in shared
+    # memory, not registers.
+    for _arr in re.finditer(
+        r"(?:^|[;{}])\s*(?:float|double|int|long|unsigned|uint|char|half)\s+\w+\s*\[(\d+)\]",
+        body,
+    ):
+        local_var_count += int(_arr.group(1))
     max_shared_bytes = max((item["bytes"] or 0 for item in kernel.shared_memory), default=0)
 
     tc_unfriendly = [

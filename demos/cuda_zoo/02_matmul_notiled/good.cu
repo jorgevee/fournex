@@ -8,6 +8,7 @@
 // Compare with bad.cu: same result, 16× fewer DRAM bytes.
 
 #include <cuda_runtime.h>
+#include "frx_bench_harness.cuh"
 
 #define M    1024
 #define K    1024
@@ -52,8 +53,7 @@ int main() {
 
     dim3 threads(TILE, TILE);
     dim3 blocks((N + TILE - 1) / TILE, (M + TILE - 1) / TILE);
-    tiled_gemm<<<blocks, threads>>>(d_A, d_B, d_C, M, K, N);
-    cudaDeviceSynchronize();
+    frx_bench([&] { tiled_gemm<<<blocks, threads>>>(d_A, d_B, d_C, M, K, N); });
 
     cudaFree(d_A);
     cudaFree(d_B);

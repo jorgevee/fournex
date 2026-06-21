@@ -3,11 +3,15 @@
 // Adjacent threads in a warp access adjacent addresses. A single 128-byte
 // DRAM transaction covers all 32 threads → peak DRAM efficiency.
 //
-// Compare with bad.cu: same logical copy, 32× better DRAM utilization.
+// Copies the same N elements as bad.cu, differing ONLY in the access pattern:
+// row-major (coalesced) here vs column-major (strided) there.
 
 #include <cuda_runtime.h>
+#include "frx_bench_harness.cuh"
 
-#define N (1 << 20)
+#define WIDTH  1024
+#define HEIGHT 1024
+#define N (WIDTH * HEIGHT)
 
 __global__ void coalesced_copy(const float* __restrict__ src,
                                 float* __restrict__ dst,
@@ -25,8 +29,7 @@ int main() {
 
     int threads = 256;
     int blocks  = (N + threads - 1) / threads;
-    coalesced_copy<<<blocks, threads>>>(d_src, d_dst, N);
-    cudaDeviceSynchronize();
+    frx_bench([&] { coalesced_copy<<<blocks, threads>>>(d_src, d_dst, N); });
 
     cudaFree(d_src);
     cudaFree(d_dst);

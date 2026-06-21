@@ -305,6 +305,38 @@ __global__ void heavy(float* A) {
     assert "high_register_pressure" in _codes(src)
 
 
+def test_high_register_pressure_detected_for_large_local_array() -> None:
+    # A large per-thread local array is register pressure (it spills) even though
+    # it's a single declaration — its element count should be counted.
+    src = """
+__global__ void heavy(const float* in, float* out, int n) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n) return;
+    float acc[256];
+    for (int j = 0; j < 256; j++) acc[j] = in[tid] + j;
+    float s = 0.0f;
+    for (int j = 0; j < 256; j++) s += acc[j];
+    out[tid] = s;
+}
+"""
+    assert "high_register_pressure" in _codes(src)
+
+
+def test_high_register_pressure_not_triggered_by_shared_array() -> None:
+    # __shared__ arrays live in shared memory, not registers — a big shared tile
+    # must NOT be counted as register pressure.
+    src = """
+__global__ void tiled(const float* in, float* out, int n) {
+    __shared__ float tile[256];
+    int tid = threadIdx.x;
+    tile[tid] = in[tid];
+    __syncthreads();
+    out[tid] = tile[tid];
+}
+"""
+    assert "high_register_pressure" not in _codes(src)
+
+
 # Tensor cores: fp32_only_matmul
 def test_fp32_only_matmul_detected_for_naive_gemm() -> None:
     src = """

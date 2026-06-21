@@ -42,7 +42,8 @@ def diff_ncu_runs(
 
     bottleneck_diff = _diff_bottlenecks(baseline["bottlenecks"], optimized["bottlenecks"])
     metric_deltas   = _diff_metrics(baseline["ncu_run_summary"], optimized["ncu_run_summary"])
-    verdict         = _build_verdict(bottleneck_diff)
+    kernel_time     = _diff_kernel_time(baseline["ncu_run_summary"], optimized["ncu_run_summary"])
+    verdict         = _build_verdict(bottleneck_diff, kernel_time)
 
     return {
         "schema":           "ncu_comparison_v1",
@@ -52,6 +53,7 @@ def diff_ncu_runs(
         "optimized":        optimized,
         "bottleneck_diff":  bottleneck_diff,
         "metric_deltas":    metric_deltas,
+        "kernel_time":      kernel_time,
         "verdict":          verdict,
     }
 
@@ -123,27 +125,77 @@ def _diff_metrics(
     return deltas
 
 
+# ── Kernel GPU time ───────────────────────────────────────────────────────────
+
+# Measured kernel-time ratio needed to call an outcome. Below this band the change
+# is within profiling noise and we report "neutral" rather than over-reading it.
+_KERNEL_SPEEDUP_IMPROVED  = 1.05
+_KERNEL_SPEEDUP_REGRESSED = 0.95
+
+
+def _diff_kernel_time(
+    baseline_summary:  dict[str, Any],
+    optimized_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Compare summed NCU kernel GPU time. The ratio is the trustworthy basis for a
+    speedup verdict (unit-invariant; both runs pay the same profiling overhead)."""
+    a = baseline_summary.get("total_kernel_duration_us")
+    b = optimized_summary.get("total_kernel_duration_us")
+    available = a is not None and b is not None and a > 0 and b > 0
+    return {
+        "available":    available,
+        "baseline_us":  a,
+        "optimized_us": b,
+        # >1 means the optimized kernel is faster (spends less GPU time).
+        "speedup_x":    round(a / b, 4) if available else None,
+        "source":       "ncu_gpu__time_duration (profiler-measured, serialized)",
+    }
+
+
 # ── Verdict ───────────────────────────────────────────────────────────────────
 
-def _build_verdict(bottleneck_diff: dict[str, Any]) -> dict[str, Any]:
+def _build_verdict(
+    bottleneck_diff: dict[str, Any],
+    kernel_time: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     resolved  = bottleneck_diff["resolved"]
     new       = bottleneck_diff["new"]
     persistent = bottleneck_diff["persistent"]
     improved  = bottleneck_diff["improved"]
 
     if resolved and not new:
-        outcome = "improved"
+        bottleneck_outcome = "improved"
     elif new and not resolved:
-        outcome = "regressed"
+        bottleneck_outcome = "regressed"
     elif resolved and new:
-        outcome = "mixed"
+        bottleneck_outcome = "mixed"
     elif improved:
-        outcome = "improved"
+        bottleneck_outcome = "improved"
     else:
-        outcome = "neutral"
+        bottleneck_outcome = "neutral"
+
+    # Prefer measured kernel GPU time as the headline outcome when available: it is
+    # the question the user is actually asking ("did it get faster?"). The bottleneck
+    # diff is retained separately so a disagreement (e.g. bottleneck resolved but time
+    # unchanged) is visible rather than silently overridden.
+    kernel_speedup = kernel_time.get("speedup_x") if kernel_time else None
+    if kernel_speedup is not None:
+        if kernel_speedup >= _KERNEL_SPEEDUP_IMPROVED:
+            outcome = "improved"
+        elif kernel_speedup <= _KERNEL_SPEEDUP_REGRESSED:
+            outcome = "regressed"
+        else:
+            outcome = "neutral"
+        basis = "kernel_gpu_time"
+    else:
+        outcome = bottleneck_outcome
+        basis = "bottleneck_diff"
 
     return {
         "outcome":                  outcome,
+        "basis":                    basis,
+        "kernel_speedup_x":         kernel_speedup,
+        "bottleneck_outcome":       bottleneck_outcome,
         "bottlenecks_resolved":     len(resolved),
         "bottlenecks_new":          len(new),
         "bottlenecks_persistent":   len(persistent),

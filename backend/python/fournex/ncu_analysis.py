@@ -20,6 +20,8 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
         return {
             "kernel_count": 0,
             "kernels_with_ncu_data": 0,
+            "total_kernel_duration_us": None,
+            "kernels_with_duration_data": 0,
             "avg_dram_throughput_pct": None,
             "avg_tensor_core_utilization_pct": None,
             "avg_l1_cache_hit_rate_pct": None,
@@ -49,6 +51,14 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     def _avg(values: list[float]) -> float | None:
         present = [v for v in values if v is not None]
         return round(sum(present) / len(present), 2) if present else None
+
+    # Kernel GPU time (NCU gpu__time_duration.sum). Summed across kernels so the
+    # before/after total is a like-for-like basis for a bench speedup ratio. The
+    # ratio is unit-invariant; the absolute is profiler-measured (NCU serializes
+    # kernels), so it reads high vs unprofiled execution but the ratio holds.
+    durations = [s.kernel_duration_us for s in summaries if s.kernel_duration_us is not None]
+    total_kernel_duration_us = round(sum(durations), 4) if durations else None
+    kernels_with_duration_data = len(durations)
 
     drams = [s.dram_throughput_pct for s in summaries]
     tc_utils = [s.tensor_core_utilization_pct for s in summaries]
@@ -144,6 +154,8 @@ def derive_ncu_run_summary(summaries: list[KernelLaunchSummary]) -> dict[str, An
     return {
         "kernel_count": kernel_count,
         "kernels_with_ncu_data": kernels_with_ncu_data,
+        "total_kernel_duration_us": total_kernel_duration_us,
+        "kernels_with_duration_data": kernels_with_duration_data,
         "avg_dram_throughput_pct": _avg(drams),
         "avg_tensor_core_utilization_pct": _avg(tc_utils),
         "avg_l1_cache_hit_rate_pct": _avg(l1_hits),

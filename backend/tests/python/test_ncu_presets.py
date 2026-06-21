@@ -58,3 +58,15 @@ def test_build_ncu_command_gates_metrics_for_sm_120():
 def test_build_ncu_command_unknown_arch_keeps_all_metrics():
     cmd = build_ncu_command("full", ["./app"])  # sm_version=None
     assert _PC in ",".join(cmd)
+
+
+def test_memory_and_full_presets_contain_kernel_duration():
+    # gpu__time_duration.sum is the basis for a trustworthy bench speedup verdict.
+    assert "gpu__time_duration.sum" in get_ncu_preset("memory").metrics
+    assert "gpu__time_duration.sum" in get_ncu_preset("full").metrics
+
+
+def test_kernel_duration_survives_blackwell_gating():
+    # It is not a PC-sampling metric, so it must NOT be dropped on sm_120.
+    filtered = filter_metrics_for_sm(get_ncu_preset("full").metrics, "sm_120")
+    assert "gpu__time_duration.sum" in filtered

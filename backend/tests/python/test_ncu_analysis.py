@@ -120,6 +120,29 @@ def test_derive_ncu_run_summary_empty() -> None:
     assert result["dominant_warp_stall"] == "unknown"
 
 
+def test_derive_ncu_run_summary_aggregates_kernel_duration() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker_a,gpu__time_duration.sum,usecond,300.0",
+        "ker_b,gpu__time_duration.sum,usecond,200.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+    result = at.derive_ncu_run_summary(summaries)
+    assert result["total_kernel_duration_us"] == 500.0
+    assert result["kernels_with_duration_data"] == 2
+
+
+def test_derive_ncu_run_summary_duration_absent_is_none() -> None:
+    text = "\n".join([
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,80.0",
+    ])
+    summaries = at.parse_nsight_compute_csv_text(text)
+    result = at.derive_ncu_run_summary(summaries)
+    assert result["total_kernel_duration_us"] is None
+    assert result["kernels_with_duration_data"] == 0
+
+
 def test_derive_ncu_run_summary_averages() -> None:
     text = "\n".join([
         "Kernel Name,Metric Name,Metric Unit,Metric Value",

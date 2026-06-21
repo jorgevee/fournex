@@ -151,6 +151,10 @@ def collect(args: argparse.Namespace) -> int:
             "FRX_DERIVED_SUMMARY_PATH": str(derived_dir / "summary.json"),
             "FRX_AUTO_PERSIST": "1",
             "FRX_SAMPLE_INTERVAL_MS": str(args.sample_interval_ms),
+            # Enable the SDK sampled profiler so step_context captures real CUDA
+            # kernel counts (feeds launch_bound / framework_abstraction_tax).
+            # The workload can opt out with FRX_PROFILER=0.
+            "FRX_PROFILER_ENABLED": "1",
         }
     )
 
@@ -1016,7 +1020,19 @@ def compare_variants_cmd(args: argparse.Namespace) -> int:
 
 def bench_cmd(args: argparse.Namespace) -> int:
     from pathlib import Path
-    from .bench import bench_compare
+    from .bench import bench_compare, harness_header_path
+
+    if args.emit_harness is not None:
+        dest = Path(args.emit_harness)
+        dest.write_text(harness_header_path().read_text(encoding="utf-8"), encoding="utf-8")
+        print(f"Wrote cudaEvent bench harness to {dest}")
+        print('Include it in your kernel: #include "frx_bench_harness.cuh"')
+        print("Then wrap your launch: frx_bench([&]{ my_kernel<<<g,b>>>(args); });")
+        return 0
+
+    if not args.before or not args.after:
+        print("error: bench requires two .cu files: frx bench BEFORE AFTER", file=sys.stderr)
+        return 1
 
     before_src = Path(args.before)
     after_src  = Path(args.after)
@@ -1074,21 +1090,74 @@ def _print_bench_report(result: dict[str, Any]) -> None:
         return
 
     arch_str = f" ({result['arch']})" if result.get("arch") else ""
-    print(f"\nCompile:   OK{arch_str}")
+    cb = result["before"].get("compile_ms")
+    ca = result["after"].get("compile_ms")
+    if cb is not None and ca is not None:
+        print(f"\nCompile:   OK{arch_str}   (before {cb:.0f} ms / after {ca:.0f} ms)")
+    else:
+        print(f"\nCompile:   OK{arch_str}")
 
     bt = result["before"]["timing"]
     at = result["after"]["timing"]
     runs   = bt["runs"]
     warmup = bt["warmup"]
-    print(f"\nTiming ({runs} runs, {warmup} warmup, wall-clock):")
-    print(f"  Before:  {bt['median_ms']:.1f} ms  [min {bt['min_ms']:.1f}  max {bt['max_ms']:.1f}  sd {bt['stdev_ms']:.1f}]")
-    print(f"  After:   {at['median_ms']:.1f} ms  [min {at['min_ms']:.1f}  max {at['max_ms']:.1f}  sd {at['stdev_ms']:.1f}]")
-
-    sx = result.get("speedup_x")
-    if sx is not None:
-        print(f"  Speedup: {sx:.2f}x")
+    wall_sx = result.get("speedup_x")
+    basis = result.get("primary_speedup_basis")
 
     ncu_diff = result.get("ncu_diff")
+    ncu_kt = (ncu_diff or {}).get("kernel_time") if ncu_diff else None
+    ncu_sx = result.get("kernel_speedup_x")
+    event = result.get("kernel_event") or {}
+    event_sx = result.get("event_speedup_x")
+
+    print("\nTiming:")
+    wall_sx_str = f"   ({wall_sx:.2f}x)" if wall_sx is not None else ""
+    wall_marker = "   <- verdict basis" if basis == "wall_clock" else ""
+    print(
+        f"  Process wall ({runs} runs, {warmup} warmup):  "
+        f"{bt['median_ms']:.1f} ms -> {at['median_ms']:.1f} ms{wall_sx_str}{wall_marker}"
+    )
+    if event.get("available"):
+        eb = event["baseline_us"]
+        ea = event["optimized_us"]
+        esx_str = f"   ({event_sx:.2f}x)" if event_sx is not None else ""
+        marker = "   <- verdict basis" if basis == "cuda_event" else ""
+        print(
+            f"  Kernel GPU time (cudaEvent):        "
+            f"{eb:,.1f} us -> {ea:,.1f} us{esx_str}{marker}"
+        )
+        print("    (in-binary harness: profiler-free, init-free — production-representative)")
+    if ncu_kt and ncu_kt.get("available"):
+        kb = ncu_kt["baseline_us"]
+        ka = ncu_kt["optimized_us"]
+        ksx_str = f"   ({ncu_sx:.2f}x)" if ncu_sx is not None else ""
+        marker = "   <- verdict basis" if basis == "kernel_gpu_time" else ""
+        print(
+            f"  Kernel GPU time (NCU):              "
+            f"{kb:,.1f} us -> {ka:,.1f} us{ksx_str}{marker}"
+        )
+        print("    (NCU serializes kernels: the absolute is profiler-inflated, the ratio is valid)")
+
+    # The gap between kernel time and wall time is itself diagnostic: a fast kernel
+    # inside a slow binary means host overhead, not the kernel, is the limiter.
+    kernel_region_sx = event_sx if event_sx is not None else ncu_sx
+    if kernel_region_sx is not None and wall_sx is not None and kernel_region_sx >= 1.10 and 0.9 <= wall_sx <= 1.1:
+        print(
+            f"\n  Note: kernel GPU time improved {kernel_region_sx:.2f}x but process wall stayed "
+            f"{wall_sx:.2f}x —\n        host overhead/CUDA init dominates this binary, not the kernel."
+        )
+
+    psx = result.get("primary_speedup_x")
+    if psx is not None and basis:
+        basis_label = {
+            "cuda_event":      "kernel GPU time, cudaEvent",
+            "kernel_gpu_time": "kernel GPU time, NCU",
+            "wall_clock":      "wall-clock",
+        }.get(basis, basis)
+        print(f"\nSpeedup: {psx:.2f}x  (basis: {basis_label})")
+    elif wall_sx is not None:
+        print(f"\nSpeedup: {wall_sx:.2f}x  (basis: wall-clock)")
+
     if ncu_diff:
         bd = ncu_diff["bottleneck_diff"]
         baseline_bottlenecks  = ncu_diff["baseline"].get("bottlenecks", [])
@@ -1119,9 +1188,14 @@ def _print_bench_report(result: dict[str, Any]) -> None:
 
         verdict  = ncu_diff.get("verdict", {})
         outcome  = verdict.get("outcome", "")
+        basis    = verdict.get("basis", "")
         n_res    = verdict.get("bottlenecks_resolved", 0)
         n_new    = verdict.get("bottlenecks_new", 0)
-        print(f"\nVerdict: {outcome}  ({n_res} resolved, {n_new} new)")
+        basis_note = f", basis: {basis.replace('_', ' ')}" if basis else ""
+        print(f"\nVerdict: {outcome}  ({n_res} resolved, {n_new} new{basis_note})")
+        bottleneck_outcome = verdict.get("bottleneck_outcome")
+        if bottleneck_outcome and basis == "kernel_gpu_time" and bottleneck_outcome != outcome:
+            print(f"  (bottleneck diff alone would read: {bottleneck_outcome})")
 
     print()
 
@@ -1584,8 +1658,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "bench",
         help="compile and benchmark two .cu kernels side-by-side",
     )
-    bench_parser.add_argument("before", help="baseline .cu source file")
-    bench_parser.add_argument("after", help="optimized .cu source file")
+    bench_parser.add_argument("before", nargs="?", default=None, help="baseline .cu source file")
+    bench_parser.add_argument("after", nargs="?", default=None, help="optimized .cu source file")
+    bench_parser.add_argument(
+        "--emit-harness",
+        nargs="?",
+        const="frx_bench_harness.cuh",
+        default=None,
+        metavar="PATH",
+        help="write the cudaEvent timing harness header to PATH (default: ./frx_bench_harness.cuh) and exit",
+    )
     bench_parser.add_argument("--warmup", type=int, default=2, help="warmup runs to discard (default: 2)")
     bench_parser.add_argument("--runs", type=int, default=5, help="timed runs (default: 5)")
     bench_parser.add_argument("--with-ncu", action="store_true", help="also profile with NCU and report bottleneck changes")

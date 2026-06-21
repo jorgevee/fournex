@@ -8,6 +8,7 @@
 // Total barriers: 2 (vs 10 in bad.cu) → far fewer stall cycles.
 
 #include <cuda_runtime.h>
+#include "frx_bench_harness.cuh"
 
 #define BLOCK     1024
 #define WARP_SIZE 32
@@ -50,8 +51,7 @@ int main() {
     cudaMalloc(&d_out, blocks * sizeof(float));
     cudaMemset(d_in, 0, N * sizeof(float));
 
-    reduction_shuffle<<<blocks, BLOCK>>>(d_in, d_out, N);
-    cudaDeviceSynchronize();
+    frx_bench([&] { reduction_shuffle<<<blocks, BLOCK>>>(d_in, d_out, N); });
 
     cudaFree(d_in);
     cudaFree(d_out);

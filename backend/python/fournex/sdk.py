@@ -116,6 +116,22 @@ def init(**kwargs: Any) -> dict[str, Any]:
     if os.environ.get("FRX_AUTO_PERSIST") == "1":
         _register_auto_persist()
 
+    # When running under `frx collect`, auto-enable the sampled profiler so the
+    # SDK step loop captures real CUDA kernel counts (fed to launch_bound /
+    # framework_abstraction_tax). Opt out with FRX_PROFILER=0.
+    if os.environ.get("FRX_PROFILER_ENABLED") == "1" and os.environ.get("FRX_PROFILER") != "0":
+        try:
+            from .profiler import configure_sampled_profiler
+
+            configure_sampled_profiler(
+                wait=int(os.environ.get("FRX_PROFILER_WAIT", 10)),
+                warmup=int(os.environ.get("FRX_PROFILER_WARMUP", 2)),
+                record=int(os.environ.get("FRX_PROFILER_RECORD", 3)),
+                repeat=int(os.environ.get("FRX_PROFILER_REPEAT", 0)),
+            )
+        except Exception:  # pragma: no cover - never let profiler setup break init
+            pass
+
     return dict(_runtime_config)
 
 

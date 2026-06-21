@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
@@ -212,6 +214,91 @@ def test_verdict_mixed_outcome() -> None:
     verdict = result["verdict"]
     # memory bottlenecks resolved, sync introduced → mixed
     assert verdict["outcome"] == "mixed"
+
+
+# ── Kernel GPU time (the trustworthy speedup basis) ───────────────────────────
+
+BASELINE_WITH_DURATION = _csv(
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,gpu__time_duration.sum,usecond,1000.0",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,88.0",
+    "ker,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld,sector,8.0",
+)
+
+OPTIMIZED_WITH_DURATION = _csv(
+    "Kernel Name,Metric Name,Metric Unit,Metric Value",
+    "ker,gpu__time_duration.sum,usecond,250.0",
+    "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,40.0",
+    "ker,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld,sector,1.1",
+)
+
+
+def test_kernel_time_diff_present_and_available() -> None:
+    result = at.diff_ncu_runs(BASELINE_WITH_DURATION, OPTIMIZED_WITH_DURATION)
+    kt = result["kernel_time"]
+    assert kt["available"] is True
+    assert kt["baseline_us"] == 1000.0
+    assert kt["optimized_us"] == 250.0
+    assert kt["speedup_x"] == pytest.approx(4.0)
+
+
+def test_verdict_basis_is_kernel_time_when_duration_present() -> None:
+    result = at.diff_ncu_runs(BASELINE_WITH_DURATION, OPTIMIZED_WITH_DURATION)
+    v = result["verdict"]
+    assert v["basis"] == "kernel_gpu_time"
+    assert v["outcome"] == "improved"
+    assert v["kernel_speedup_x"] == pytest.approx(4.0)
+
+
+def test_verdict_regressed_from_kernel_time() -> None:
+    # Reverse direction: the "optimized" run is now slower on the GPU.
+    result = at.diff_ncu_runs(OPTIMIZED_WITH_DURATION, BASELINE_WITH_DURATION)
+    v = result["verdict"]
+    assert v["basis"] == "kernel_gpu_time"
+    assert v["outcome"] == "regressed"
+
+
+def test_verdict_neutral_when_kernel_time_within_noise_band() -> None:
+    base = _csv(
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,gpu__time_duration.sum,usecond,1000.0",
+        "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,40.0",
+    )
+    opt = _csv(
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,gpu__time_duration.sum,usecond,990.0",  # ~1% — inside the noise band
+        "ker,dram__throughput.avg.pct_of_peak_sustained_elapsed,%,40.0",
+    )
+    v = at.diff_ncu_runs(base, opt)["verdict"]
+    assert v["basis"] == "kernel_gpu_time"
+    assert v["outcome"] == "neutral"
+
+
+def test_kernel_time_unavailable_falls_back_to_bottleneck_basis() -> None:
+    # The legacy fixtures carry no duration metric → verdict basis is the bottleneck diff.
+    result = at.diff_ncu_runs(BASELINE_MEMORY_BOUND, OPTIMIZED_MEMORY_RESOLVED)
+    assert result["kernel_time"]["available"] is False
+    assert result["verdict"]["basis"] == "bottleneck_diff"
+    # And the legacy outcome is preserved.
+    assert result["verdict"]["outcome"] == "improved"
+
+
+def test_verdict_surfaces_disagreement_between_kernel_time_and_bottlenecks() -> None:
+    # Bottleneck resolves (uncoalesced gone) but kernel time barely moves: the headline
+    # outcome follows kernel time, while bottleneck_outcome records the discrepancy.
+    base = _csv(
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,gpu__time_duration.sum,usecond,1000.0",
+        "ker,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld,sector,8.0",
+    )
+    opt = _csv(
+        "Kernel Name,Metric Name,Metric Unit,Metric Value",
+        "ker,gpu__time_duration.sum,usecond,995.0",  # essentially unchanged
+        "ker,l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld,sector,1.0",
+    )
+    v = at.diff_ncu_runs(base, opt)["verdict"]
+    assert v["outcome"] == "neutral"            # from kernel time
+    assert v["bottleneck_outcome"] == "improved"  # uncoalesced_access resolved
 
 
 # ── Embedded full analyses ────────────────────────────────────────────────────

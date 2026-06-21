@@ -271,12 +271,197 @@ def test_bench_compare_with_ncu_calls_profile_twice():
     assert result["ncu_diff"]["schema"] == "ncu_comparison_v1"
 
 
+def _fake_diff_with_kernel_time(speedup_x: float) -> dict:
+    return {
+        "schema": "ncu_comparison_v1",
+        "bottleneck_diff": {"resolved": [], "new": [], "persistent": [], "improved": [], "score_deltas": {}},
+        "metric_deltas": {},
+        "kernel_time": {
+            "available": True,
+            "baseline_us": 1000.0,
+            "optimized_us": round(1000.0 / speedup_x, 4),
+            "speedup_x": speedup_x,
+        },
+        "verdict": {"outcome": "improved", "basis": "kernel_gpu_time", "kernel_speedup_x": speedup_x,
+                    "bottleneck_outcome": "neutral", "bottlenecks_resolved": 0, "bottlenecks_new": 0,
+                    "bottlenecks_persistent": 0, "bottlenecks_improved": 0},
+        "baseline":  {"bottlenecks": []},
+        "optimized": {"bottlenecks": []},
+    }
+
+
+def test_bench_compare_primary_speedup_from_kernel_time():
+    fake_csv = '"Kernel Name","Metric Name"\n"k","v"\n'
+    # Wall-clock is ~1.0x (micro-kernel, init-dominated) but kernel time is 4x.
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary", side_effect=[_timing(10.0), _timing(9.9)]), \
+         patch("fournex.bench.profile_with_ncu", return_value=fake_csv), \
+         patch("fournex.bench.diff_ncu_runs", return_value=_fake_diff_with_kernel_time(4.0)):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"), with_ncu=True, arch="sm_120")
+    assert result["kernel_speedup_x"] == pytest.approx(4.0)
+    assert result["primary_speedup_x"] == pytest.approx(4.0)
+    assert result["primary_speedup_basis"] == "kernel_gpu_time"
+
+
+def test_bench_compare_primary_speedup_falls_back_to_wall_without_ncu():
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary", side_effect=[_timing(20.0), _timing(10.0)]):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"), with_ncu=False)
+    assert result["kernel_speedup_x"] is None
+    assert result["primary_speedup_basis"] == "wall_clock"
+    assert result["primary_speedup_x"] == pytest.approx(2.0)
+
+
+def test_bench_compare_includes_compile_ms():
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary", side_effect=[_timing(10.0), _timing(8.0)]):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"))
+    assert isinstance(result["before"]["compile_ms"], float)
+    assert isinstance(result["after"]["compile_ms"], float)
+
+
+def test_bench_compare_compile_error_path_has_speedup_fields():
+    with patch("fournex.bench.compile_kernel", return_value=(False, "boom")):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"))
+    # Schema parity: the new headline-speedup fields exist even on the error path.
+    for field in ("kernel_speedup_x", "primary_speedup_x", "primary_speedup_basis"):
+        assert field in result
+        assert result[field] is None
+
+
 def test_bench_compare_ncu_diff_none_when_profile_fails():
     with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
          patch("fournex.bench.time_binary", side_effect=[_timing(10.0), _timing(8.0)]), \
          patch("fournex.bench.profile_with_ncu", return_value=None):
         result = bench_compare(Path("bad.cu"), Path("good.cu"), with_ncu=True)
     assert result["ncu_diff"] is None
+
+
+# ── cudaEvent harness (P0b: profiler-free kernel timing) ──────────────────────
+
+def _timing_ev(median: float, event_us, runs: int = 5, warmup: int = 2) -> dict:
+    d = _timing(median, runs, warmup)
+    d["kernel_event_us"] = event_us
+    return d
+
+
+def test_parse_kernel_event_us():
+    from fournex.bench import _parse_kernel_event_us
+    assert _parse_kernel_event_us("noise\nFRX_KERNEL_US: 42.5\ndone") == pytest.approx(42.5)
+    assert _parse_kernel_event_us("FRX_KERNEL_US:7\n") == pytest.approx(7.0)
+    assert _parse_kernel_event_us("nothing here") is None
+    assert _parse_kernel_event_us("") is None
+
+
+def test_time_binary_surfaces_kernel_event_us():
+    times = _perf_counter_sequence(10.0, 10.0, 10.0)
+    with patch("fournex.bench.subprocess.run") as mock_run, \
+         patch("fournex.bench.time.perf_counter", side_effect=times):
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="FRX_KERNEL_US: 7.25\n")
+        result = time_binary(Path("fake.exe"), warmup=0, runs=3)
+    assert result["kernel_event_us"] == pytest.approx(7.25)
+
+
+def test_time_binary_kernel_event_us_none_without_sentinel():
+    times = _perf_counter_sequence(10.0)
+    with patch("fournex.bench.subprocess.run") as mock_run, \
+         patch("fournex.bench.time.perf_counter", side_effect=times):
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="done\n")
+        result = time_binary(Path("fake.exe"), warmup=0, runs=1)
+    assert result["kernel_event_us"] is None
+
+
+def test_compile_kernel_adds_harness_include_path():
+    with patch("fournex.bench.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        compile_kernel(Path("k.cu"), Path("k.exe"))
+        cmd = mock_run.call_args[0][0]
+    assert "-I" in cmd
+    inc = cmd[cmd.index("-I") + 1]
+    assert inc.endswith("data")
+
+
+def test_harness_header_ships_with_package():
+    from fournex.bench import harness_header_path
+    p = harness_header_path()
+    assert p.exists()
+    text = p.read_text(encoding="utf-8")
+    assert "FRX_KERNEL_US" in text
+    assert "frx_bench" in text
+
+
+def test_bench_compare_primary_speedup_from_cuda_event():
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary",
+               side_effect=[_timing_ev(10.0, 1000.0), _timing_ev(9.9, 250.0)]):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"))
+    assert result["kernel_event"]["available"] is True
+    assert result["event_speedup_x"] == pytest.approx(4.0)
+    assert result["primary_speedup_basis"] == "cuda_event"
+    assert result["primary_speedup_x"] == pytest.approx(4.0)
+
+
+def test_bench_compare_cuda_event_takes_priority_over_ncu():
+    fake_csv = '"Kernel Name","Metric Name"\n"k","v"\n'
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary",
+               side_effect=[_timing_ev(10.0, 1000.0), _timing_ev(9.9, 500.0)]), \
+         patch("fournex.bench.profile_with_ncu", return_value=fake_csv), \
+         patch("fournex.bench.diff_ncu_runs", return_value=_fake_diff_with_kernel_time(8.0)):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"), with_ncu=True, arch="sm_120")
+    # Profiler-free cudaEvent (2.0x) is the basis even though NCU reports 8.0x.
+    assert result["primary_speedup_basis"] == "cuda_event"
+    assert result["primary_speedup_x"] == pytest.approx(2.0)
+    assert result["kernel_speedup_x"] == pytest.approx(8.0)  # NCU number still recorded
+
+
+def test_bench_compare_no_event_falls_back_to_ncu_then_wall():
+    # No sentinel from either binary, but NCU present → kernel_gpu_time basis.
+    fake_csv = '"Kernel Name","Metric Name"\n"k","v"\n'
+    with patch("fournex.bench.compile_kernel", return_value=(True, "")), \
+         patch("fournex.bench.time_binary", side_effect=[_timing(10.0), _timing(9.9)]), \
+         patch("fournex.bench.profile_with_ncu", return_value=fake_csv), \
+         patch("fournex.bench.diff_ncu_runs", return_value=_fake_diff_with_kernel_time(3.0)):
+        result = bench_compare(Path("bad.cu"), Path("good.cu"), with_ncu=True, arch="sm_120")
+    assert result["event_speedup_x"] is None
+    assert result["primary_speedup_basis"] == "kernel_gpu_time"
+
+
+def test_print_bench_report_shows_cuda_event_basis_and_gap(capsys):
+    from fournex.cli import _print_bench_report
+    result = {
+        "schema": "frx_bench_v0",
+        "arch": "sm_120",
+        "before": {"src": "bad.cu",  "compile_ms": 400.0, "timing": _timing(10.0)},
+        "after":  {"src": "good.cu", "compile_ms": 410.0, "timing": _timing(9.95)},
+        "speedup_x": 1.005,            # wall barely moves
+        "kernel_event": {"available": True, "baseline_us": 1000.0, "optimized_us": 250.0, "speedup_x": 4.0},
+        "event_speedup_x": 4.0,
+        "kernel_speedup_x": None,
+        "primary_speedup_x": 4.0,
+        "primary_speedup_basis": "cuda_event",
+        "ncu_diff": None,
+        "compile_errors": [],
+    }
+    _print_bench_report(result)
+    out = capsys.readouterr().out
+    assert "Kernel GPU time (cudaEvent)" in out
+    assert "basis: kernel GPU time, cudaEvent" in out
+    assert "profiler-free" in out
+    assert "host overhead/CUDA init dominates" in out
+
+
+def test_cli_bench_emit_harness_writes_file():
+    import io, tempfile, os
+    from fournex.cli import main
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = os.path.join(tmp, "myharness.cuh")
+        with patch("sys.stdout", new_callable=io.StringIO):
+            code = main(["bench", "--emit-harness", dest])
+        assert code == 0
+        assert os.path.exists(dest)
+        with open(dest, encoding="utf-8") as f:
+            assert "FRX_KERNEL_US" in f.read()
 
 
 # ── module exports ────────────────────────────────────────────────────────────
@@ -345,6 +530,36 @@ def test_cli_bench_json_schema():
     parsed = json.loads(output)
     assert parsed["schema"] == "frx_bench_v0"
     assert parsed["speedup_x"] == pytest.approx(1.25)
+
+
+def test_print_bench_report_shows_kernel_time_basis_and_gap(capsys):
+    from fournex.cli import _print_bench_report
+
+    result = {
+        "schema": "frx_bench_v0",
+        "arch": "sm_120",
+        "before": {"src": "bad.cu",  "compile_ms": 400.0, "timing": _timing(10.0)},
+        "after":  {"src": "good.cu", "compile_ms": 410.0, "timing": _timing(9.9)},
+        "speedup_x": 1.01,            # wall-clock barely moves
+        "kernel_speedup_x": 3.2,
+        "primary_speedup_x": 3.2,
+        "primary_speedup_basis": "kernel_gpu_time",
+        "ncu_diff": {
+            "bottleneck_diff": {"resolved": ["uncoalesced_access"], "new": [], "persistent": []},
+            "baseline":  {"bottlenecks": [{"label": "uncoalesced_access", "score": 1.0}]},
+            "optimized": {"bottlenecks": []},
+            "kernel_time": {"available": True, "baseline_us": 1000.0, "optimized_us": 312.5, "speedup_x": 3.2},
+            "verdict": {"outcome": "improved", "basis": "kernel_gpu_time", "kernel_speedup_x": 3.2,
+                        "bottleneck_outcome": "improved", "bottlenecks_resolved": 1, "bottlenecks_new": 0},
+        },
+        "compile_errors": [],
+    }
+    _print_bench_report(result)
+    out = capsys.readouterr().out
+    assert "Kernel GPU time (NCU)" in out
+    assert "basis: kernel GPU time" in out
+    assert "host overhead/CUDA init dominates" in out
+    assert "Verdict: improved" in out
 
 
 def test_cli_bench_missing_file_returns_error():

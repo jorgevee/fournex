@@ -12,6 +12,7 @@
 // (sync_in_loop_count >= 3: three __syncthreads() inside the for loop)
 
 #include <cuda_runtime.h>
+#include "frx_bench_harness.cuh"
 
 #define BLOCK 1024
 #define N     (1 << 20)
@@ -28,7 +29,9 @@ __global__ void reduction_oversync(const float* __restrict__ in,
 
     for (int stride = BLOCK / 2; stride > 0; stride >>= 1) {
         __syncthreads();               // (1) redundant pre-read barrier
-        float val = sdata[tid + stride];
+        // Guarded: only tid < stride reads, so tid + stride < 2*stride <= BLOCK
+        // (the unguarded read was out of bounds for tid + stride >= BLOCK).
+        float val = (tid < stride) ? sdata[tid + stride] : 0.0f;
         __syncthreads();               // (2) required: before write
         if (tid < stride)
             sdata[tid] += val;
@@ -46,8 +49,7 @@ int main() {
     cudaMalloc(&d_out, blocks * sizeof(float));
     cudaMemset(d_in, 0, N * sizeof(float));
 
-    reduction_oversync<<<blocks, BLOCK>>>(d_in, d_out, N);
-    cudaDeviceSynchronize();
+    frx_bench([&] { reduction_oversync<<<blocks, BLOCK>>>(d_in, d_out, N); });
 
     cudaFree(d_in);
     cudaFree(d_out);

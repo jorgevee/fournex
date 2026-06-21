@@ -8,6 +8,7 @@
 // Expected Fournex findings: fp32_only_matmul, no_shared_memory_tiling
 
 #include <cuda_runtime.h>
+#include "frx_bench_harness.cuh"
 
 #define M 1024
 #define K 1024
@@ -36,8 +37,7 @@ int main() {
 
     dim3 threads(16, 16);
     dim3 blocks((N + 15) / 16, (M + 15) / 16);
-    naive_gemm<<<blocks, threads>>>(d_A, d_B, d_C, M, K, N);
-    cudaDeviceSynchronize();
+    frx_bench([&] { naive_gemm<<<blocks, threads>>>(d_A, d_B, d_C, M, K, N); });
 
     cudaFree(d_A);
     cudaFree(d_B);

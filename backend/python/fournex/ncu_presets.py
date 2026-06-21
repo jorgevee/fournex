@@ -52,6 +52,9 @@ NCU_METRIC_PRESETS: dict[str, NcuMetricPreset] = {
         name="memory",
         description="DRAM bandwidth, cache hit rates, coalescing efficiency, and memory-related stalls.",
         metrics=(
+            # Kernel GPU execution time — the only trustworthy basis for a bench
+            # speedup verdict. Survives Blackwell gating (not a PC-sampling metric).
+            "gpu__time_duration.sum",
             "dram__throughput.avg.pct_of_peak_sustained_elapsed",
             "l1tex__t_sector_hit_rate.pct",
             "lts__t_sector_hit_rate.pct",
